@@ -1,0 +1,24 @@
+﻿<Properties StartupConfiguration="{103DDF2E-A959-42B4-91F6-0FBDD32A0523}|Default">
+  <MonoDevelop.Ide.DebuggingService.PinnedWatches />
+  <MonoDevelop.Ide.DebuggingService.Breakpoints>
+    <BreakpointStore />
+  </MonoDevelop.Ide.DebuggingService.Breakpoints>
+  <MonoDevelop.Ide.Workbench ActiveDocument="../../RealEstateEnterprisePlatform.slnx">
+    <Files>
+      <File FileName="../../combine-solution.sh" Line="20" Column="1" />
+      <File FileName="../../RealEstateEnterprisePlatform.slnx" Line="3" Column="1" />
+    </Files>
+    <Pads>
+      <Pad Id="ProjectPad">
+        <State name="__root__">
+          <Node name="BrochureGeneration.Worker" expanded="True">
+            <Node name="BrochureGeneration.Worker" expanded="True" selected="True" />
+          </Node>
+        </State>
+      </Pad>
+    </Pads>
+  </MonoDevelop.Ide.Workbench>
+  <MonoDevelop.Ide.ItemProperties.BrochureGeneration.Worker PreferredExecutionTarget="MonoDevelop.Default" />
+  <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug" />
+  <MultiItemStartupConfigurations />
+</Properties>

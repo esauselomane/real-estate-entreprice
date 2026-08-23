@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ⚙️ Essential Core Hosting & Dependency Injection Framework Bundles -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+
+    <!-- 📨 Apache Kafka Streaming Consumer Driver Connection -->
+    <PackageReference Include="Confluent.Kafka" Version="2.8.0" />
+
+    <!-- 🖼️ Cross-Platform Image Resizing Core Utility Core -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.5" />
+  </ItemGroup>
+
+</Project>

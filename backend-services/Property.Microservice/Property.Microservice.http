@@ -1,0 +1,6 @@
+@Property.Microservice_HostAddress = http://localhost:5091
+
+GET {{Property.Microservice_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
