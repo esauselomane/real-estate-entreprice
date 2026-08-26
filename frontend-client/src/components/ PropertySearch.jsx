@@ -175,7 +175,14 @@ export default function PropertySearch({ onSelectProperty }) {
                   <h4 className="text-white font-bold text-base mb-1 tracking-tight group-hover:text-blue-400 transition-colors">
                     {prop.completeAddress}
                   </h4>
-                  <p className="text-xs text-slate-500 font-medium mb-4">{prop.portfolioZoning} Portfolio Subclass</p>
+                  <div className="flex items-center gap-2 mb-4">
+                    <p className="text-xs text-slate-500 font-medium">{prop.portfolioZoning}</p>
+                    {prop.subUnits && prop.subUnits.length > 0 && (
+                      <span className="text-[10px] font-semibold text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-900">
+                        {prop.subUnits.length} {prop.subUnits.length === 1 ? 'Unit' : 'Units'}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">

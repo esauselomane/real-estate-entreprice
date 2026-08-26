@@ -10,7 +10,11 @@ using System.Linq;
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. REGISTER CORE SYSTEM ROUTINGS
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+    });
 
 // 2. CONFIGURE MICROSOFT SQL SERVER CONNECTION POOL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");

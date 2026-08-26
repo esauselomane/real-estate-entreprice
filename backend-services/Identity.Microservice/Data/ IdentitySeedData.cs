@@ -81,11 +81,14 @@ namespace Identity.Microservice.Data
 
             context.SaveChanges();
 
+            var existingClaimUserIds = context.UserAccessClaims.Select(c => c.UserId).ToHashSet();
+            var claimsToAdd = new List<UserAccessClaim>();
+
             foreach (var user in context.UserAccounts.ToList())
             {
-                if (!context.UserAccessClaims.Any(c => c.UserId == user.UserId))
+                if (!existingClaimUserIds.Contains(user.UserId))
                 {
-                    context.UserAccessClaims.Add(new UserAccessClaim
+                    claimsToAdd.Add(new UserAccessClaim
                     {
                         UserId = user.UserId,
                         CanDeleteProperties = user.SystemRole == "Manager" || user.SystemRole == "SuperAdmin",
@@ -95,7 +98,11 @@ namespace Identity.Microservice.Data
                 }
             }
 
-            context.SaveChanges();
+            if (claimsToAdd.Any())
+            {
+                context.UserAccessClaims.AddRange(claimsToAdd);
+                context.SaveChanges();
+            }
         }
     }
 }

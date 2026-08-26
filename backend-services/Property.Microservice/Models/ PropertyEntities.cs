@@ -122,6 +122,7 @@ namespace Property.Microservice.Models
 
         // --- 🔗 NAVIGATION ANCHOR BACK TO MASTER ASSET PROPERTY ---
         [ForeignKey("PropertyId")]
+        [System.Text.Json.Serialization.JsonIgnore]
         public PropertyAsset? MasterPropertyDetails { get; set; }
     }
     // 📊 4. BROCHURE & QUOTE PRESENTATION PAYLOAD DATA ENTITY
@@ -184,6 +185,7 @@ namespace Property.Microservice.Models
         public DateTime LastSynchronizedAt { get; set; } = DateTime.UtcNow;
 
         [ForeignKey("PropertyId")]
+        [System.Text.Json.Serialization.JsonIgnore]
         public PropertyAsset? PropertyDetails { get; set; }
 
         [ForeignKey("PlatformId")]

@@ -35,8 +35,8 @@ export default function OwnersTenantsWorkspace() {
   useEffect(() => { load(); }, []);
 
   const filtered = records.filter((row) => {
-    const haystack = `${row.fullName} ${row.companyName} ${row.emailAddress} ${row.primaryLocation}`.toLowerCase();
-    return haystack.includes(query.toLowerCase());
+    const haystack = `${row?.fullName || ''} ${row?.companyName || ''} ${row?.emailAddress || ''} ${row?.primaryLocation || ''}`.toLowerCase();
+    return haystack.includes((query || '').toLowerCase());
   });
 
   const handleSubmit = async (e) => {

@@ -29,6 +29,24 @@ namespace CRM.Microservice.Data
             modelBuilder.Entity<DealRecord>()
                 .Property(d => d.DealStage)
                 .HasConversion<string>();
+
+            modelBuilder.Entity<CRMContact>()
+                .HasOne(c => c.CompanyDetails)
+                .WithMany()
+                .HasForeignKey(c => c.AssociatedCompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<CRMContact>()
+                .HasOne(c => c.LegalEntityDetails)
+                .WithMany()
+                .HasForeignKey(c => c.AssociatedLegalEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<CRMLegalEntity>()
+                .HasOne(l => l.CompanyDetails)
+                .WithMany()
+                .HasForeignKey(l => l.AssociatedCompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
         }
     }
 }

@@ -19,6 +19,56 @@ export const propertyService = {
     }
   },
 
+  // --- 🔍 GET SINGLE PROPERTY WITH LINKED UNITS ---
+  getPropertyById: async (propertyId) => {
+    try {
+      const response = await apiClient.get(`/properties/${propertyId}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Failed to fetch property details.';
+    }
+  },
+
+  // --- 🏢 GET SUB-UNITS LINKED TO PROPERTY ---
+  getPropertyUnits: async (propertyId) => {
+    try {
+      const response = await apiClient.get(`/properties/${propertyId}/units`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Failed to fetch property units.';
+    }
+  },
+
+  // --- ➕ ADD NEW SUB-UNIT TO PROPERTY ---
+  addPropertyUnit: async (propertyId, unitData) => {
+    try {
+      const response = await apiClient.post(`/properties/${propertyId}/units`, unitData);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Failed to add unit to property.';
+    }
+  },
+
+  // --- ❌ DELETE SUB-UNIT FROM PROPERTY ---
+  deletePropertyUnit: async (propertyId, unitId) => {
+    try {
+      const response = await apiClient.delete(`/properties/${propertyId}/units/${unitId}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Failed to delete unit.';
+    }
+  },
+
+  // --- 📋 GET SYNDICATION PLATFORMS ---
+  getPlatforms: async () => {
+    try {
+      const response = await apiClient.get('/properties/platforms');
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Failed to fetch platforms.';
+    }
+  },
+
   // --- 🏠 REGISTER NEW PROPERTY INVENTORY RECORD ---
   createProperty: async (propertyData) => {
     try {

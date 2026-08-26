@@ -9,7 +9,7 @@ echo "🔄 RESTARTING FULL REAL ESTATE ECOSYSTEM"
 echo "===================================================="
 
 echo "Stopping any processes still bound to app ports..."
-for port in 5000 5001 5002 5003 5173 1433 9092 2181; do
+for port in 5000 5001 5002 5003 5173; do
   pids=$(lsof -ti tcp:"$port" 2>/dev/null || true)
   if [ -n "$pids" ]; then
     echo "  -> killing processes on port $port: $pids"
@@ -66,6 +66,11 @@ then
   exit 1
 fi
 
+echo "Starting background workers..."
+(cd backend-services/BrochureGeneration.Worker && nohup dotnet run >/tmp/brochure.log 2>&1 &)
+(cd backend-services/ImageProcessor.Worker && nohup dotnet run >/tmp/image_processor.log 2>&1 &)
+(cd backend-services/PlatformSyndication.Worker && nohup dotnet run >/tmp/syndication.log 2>&1 &)
+
 echo "Starting backend services..."
 (cd backend-services/Identity.Microservice && nohup dotnet run --configuration Development --urls http://localhost:5001 >/tmp/identity.log 2>&1 &)
 (cd backend-services/Property.Microservice && nohup dotnet run --configuration Development --urls http://localhost:5002 >/tmp/property.log 2>&1 &)
@@ -78,7 +83,7 @@ echo "Starting frontend..."
 echo "Waiting for gateway and frontend to respond..."
 started=false
 for _ in {1..80}; do
-  if curl -fsS http://localhost:5000 >/dev/null 2>&1 && curl -fsS http://localhost:5173 >/dev/null 2>&1; then
+  if curl -s http://localhost:5000 >/dev/null 2>&1 && curl -s http://localhost:5173 >/dev/null 2>&1; then
     started=true
     echo "✅ Gateway and frontend are live."
     break

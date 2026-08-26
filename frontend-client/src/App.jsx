@@ -67,8 +67,20 @@ export default function App() {
     setCurrentView('details');
   };
 
-  const handleNavigateToClient = (client) => {
-    setSelectedClientData(client);
+  const handleNavigateToClient = (clientOrId, type, name) => {
+    if (clientOrId && typeof clientOrId === 'object') {
+      setSelectedClientData({
+        id: clientOrId.id || '',
+        type: clientOrId.type || 'Client',
+        name: clientOrId.name || 'Client Profile'
+      });
+    } else {
+      setSelectedClientData({
+        id: clientOrId || '',
+        type: type || 'Client',
+        name: name || 'Client Profile'
+      });
+    }
     setCurrentView('client');
   };
 

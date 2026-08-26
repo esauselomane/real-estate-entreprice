@@ -1,14 +1,16 @@
 import React from 'react';
 import { ArrowLeft, User, Phone, Mail, DollarSign, Map, Landmark } from 'lucide-react';
 
-export default function ClientDetails({ clientId, clientType, clientName, onBack }) {
+export default function ClientDetails({ clientId, clientType = 'Client', clientName = 'Client Profile', onBack }) {
   // Mock profiling records matching spatial data filters criteria 
+  const safeName = clientName || 'Client Profile';
+  const emailPrefix = safeName.toLowerCase().replace(/\s+/g, '');
   const clientProfile = {
-    id: clientId,
-    name: clientName,
-    type: clientType, // 'Owner' or 'Tenant'
+    id: clientId || 'N/A',
+    name: safeName,
+    type: clientType || 'Client',
     phone: "+27 (0) 11 555 9832",
-    email: `${clientName.toLowerCase().replace(/\s+/g, '')}@example.com`,
+    email: `${emailPrefix}@example.com`,
     budgetCeiling: clientType === 'Owner' ? 12000000 : 80000,
     preferredAreas: ["Green Point", "Sea Point", "Sandton Hub"],
     financialHistory: ["Tax_Clearance_2026.pdf", "FICA_Verification.pdf"]

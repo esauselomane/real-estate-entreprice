@@ -1,4 +1,10 @@
-**/bin
-**/obj
+# Build outputs
 **/bin/
 **/obj/
+/[Bb]in/
+/[Oo]bj/
+
+# Dependencies & IDEs
+node_modules/
+.vs/
+.vscode/

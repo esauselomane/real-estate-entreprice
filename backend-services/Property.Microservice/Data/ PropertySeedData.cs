@@ -19,10 +19,10 @@ namespace Property.Microservice.Data
             if (!context.PropertyTypes.Any())
             {
                 context.PropertyTypes.AddRange(
-                    new Property.Microservice.Models.PropertyType { PropertyTypeId = 1, Name = "Industrial" },
-                    new Property.Microservice.Models.PropertyType { PropertyTypeId = 2, Name = "Retail" },
-                    new Property.Microservice.Models.PropertyType { PropertyTypeId = 3, Name = "Commercial" },
-                    new Property.Microservice.Models.PropertyType { PropertyTypeId = 4, Name = "Residential" }
+                    new Property.Microservice.Models.PropertyType { Name = "Industrial" },
+                    new Property.Microservice.Models.PropertyType { Name = "Retail" },
+                    new Property.Microservice.Models.PropertyType { Name = "Commercial" },
+                    new Property.Microservice.Models.PropertyType { Name = "Residential" }
                 );
             }
 
@@ -31,9 +31,9 @@ namespace Property.Microservice.Data
             if (!context.ExternalPlatforms.Any())
             {
                 context.ExternalPlatforms.AddRange(
-                    new Property.Microservice.Models.ExternalPlatform { PlatformId = 1, PlatformName = "Property24", BaseUrlAddress = "https://property24.com" },
-                    new Property.Microservice.Models.ExternalPlatform { PlatformId = 2, PlatformName = "PrivateProperty", BaseUrlAddress = "https://privateproperty.co.za" },
-                    new Property.Microservice.Models.ExternalPlatform { PlatformId = 3, PlatformName = "Gumtree", BaseUrlAddress = "https://gumtree.co.za" }
+                    new Property.Microservice.Models.ExternalPlatform { PlatformName = "Property24", BaseUrlAddress = "https://property24.com" },
+                    new Property.Microservice.Models.ExternalPlatform { PlatformName = "PrivateProperty", BaseUrlAddress = "https://privateproperty.co.za" },
+                    new Property.Microservice.Models.ExternalPlatform { PlatformName = "Gumtree", BaseUrlAddress = "https://gumtree.co.za" }
                 );
             }
 
@@ -79,7 +79,6 @@ namespace Property.Microservice.Data
             {
                 var units = new List<Property.Microservice.Models.PropertyUnit>();
                 var propertyIds = context.PropertyAssets.Select(p => p.PropertyId).ToList();
-                var unitIndex = context.PropertyUnits.Count() + 1;
 
                 foreach (var propertyId in propertyIds)
                 {
@@ -88,7 +87,6 @@ namespace Property.Microservice.Data
                     {
                         units.Add(new Property.Microservice.Models.PropertyUnit
                         {
-                            PropertyUnitId = unitIndex++,
                             PropertyId = propertyId,
                             UnitNumber = $"Unit {offset}",
                             UnitDescription = $"Suite {offset} in property {propertyId}",
