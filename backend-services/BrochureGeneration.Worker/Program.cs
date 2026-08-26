@@ -5,3 +5,5 @@ builder.Services.AddHostedService<BrochureKafkaConsumerWorker>();
 
 var host = builder.Build();
 host.Run();
+
+
