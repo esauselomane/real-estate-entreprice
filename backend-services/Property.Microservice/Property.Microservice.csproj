@@ -18,6 +18,10 @@
 
     <!-- 📨 Confluent Apache Kafka Event Streaming Driver -->
     <PackageReference Include="Confluent.Kafka" Version="2.8.0" />
+
+    <!-- 🛡️ JWT Bearer Authentication (mirrors Identity.Microservice token signing parameters) -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.22.0" />
   </ItemGroup>
 
 </Project>

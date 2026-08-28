@@ -9,11 +9,15 @@ import OwnersTenantsWorkspace from './components/OwnersTenantsWorkspace.jsx';
 import ReportsWorkspace from './components/ReportsWorkspace.jsx';
 import SystemAdminWorkspace from './components/SystemAdminWorkspace.jsx';
 import BrochureBuilderWorkspace from './components/ BrochureBuilderWorkspace.jsx';
+import OperationsWorkspace from './components/OperationsWorkspace.jsx';
+import RoleDashboard from './components/RoleDashboard.jsx';
 
 // 🔌 Import our clean encapsulated API microservices client wrappers
 import { authService } from './services/authService.js';
+import { crmService } from './services/ crmService.js';
 
 export default function App() {
+  const normalizeRole = (role) => ({ SuperAdmin: 'PlatformAdmin', Manager: 'AgencyAdmin', Agent: 'Broker', Admin: 'AgencyAdmin' }[role] || role || 'Broker');
   // Authentication session parameters
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState('Agent'); 
@@ -26,12 +30,12 @@ export default function App() {
   const [registerName, setRegisterName] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
-  const [registerRole, setRegisterRole] = useState('Agent');
+  const [registerRole, setRegisterRole] = useState('Broker');
   const [errorMessage, setErrorMessage] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
 
   // 🧭 System central sub-view workspace routing state parameters
-  const [currentView, setCurrentView] = useState('search'); 
+  const [currentView, setCurrentView] = useState('dashboard');
   const [selectedPropertyId, setSelectedPropertyId] = useState(null);
   const [selectedClientData, setSelectedClientData] = useState({ id: null, type: '', name: '' });
   const [selectedWorkspace, setSelectedWorkspace] = useState('properties');
@@ -53,14 +57,22 @@ export default function App() {
     if (rawSavedProfile && storedToken) {
       const parsedProfile = JSON.parse(rawSavedProfile);
       setActiveProfile(parsedProfile);
-      setUserRole(parsedProfile.role);
-      setCurrentAgency({
-        name: parsedProfile.tenantId === 'TEN-001' ? 'Apex Luxury Realty' : 'Coastal Living Properties',
-        logoInitials: parsedProfile.tenantId === 'TEN-001' ? 'ALR' : 'CLP'
-      });
+      setUserRole(normalizeRole(parsedProfile.role));
+      setActiveProfile({ ...parsedProfile, role: normalizeRole(parsedProfile.role) });
       setIsLoggedIn(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (!activeProfile?.tenantId) return;
+    crmService.getAgencies().then((agencies) => {
+      const agency = (agencies || []).find((item) => item.agencyId === activeProfile.tenantId) || agencies?.[0];
+      if (agency) setCurrentAgency({
+        name: agency.name,
+        logoInitials: agency.name.split(/\s+/).map((word) => word[0]).join('').slice(0, 3).toUpperCase()
+      });
+    }).catch(() => setCurrentAgency({ name: activeProfile.tenantId, logoInitials: activeProfile.tenantId.slice(-3) }));
+  }, [activeProfile]);
 
   const handleSelectProperty = (propertyId) => {
     setSelectedPropertyId(propertyId);
@@ -86,6 +98,11 @@ export default function App() {
 
   const userRoleProfile = userRole;
 
+  const navigateTo = (view) => {
+    setActiveBrochureDealTarget(null);
+    setCurrentView(view);
+  };
+
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage('');
@@ -93,13 +110,9 @@ export default function App() {
 
     try {
       const loginPayload = await authService.login(email, password);
-      setActiveProfile(loginPayload.profile);
-      setUserRole(loginPayload.profile.role);
-      
-      setCurrentAgency({
-        name: loginPayload.profile.tenantId === 'TEN-001' ? 'Apex Luxury Realty' : 'Coastal Living Properties',
-        logoInitials: loginPayload.profile.tenantId === 'TEN-001' ? 'ALR' : 'CLP'
-      });
+      const normalizedProfile = { ...loginPayload.profile, role: normalizeRole(loginPayload.profile.role) };
+      setActiveProfile(normalizedProfile);
+      setUserRole(normalizedProfile.role);
       
       setIsLoggedIn(true);
     } catch (err) {
@@ -130,7 +143,7 @@ export default function App() {
       setRegisterName('');
       setRegisterEmail('');
       setRegisterPassword('');
-      setRegisterRole('Agent');
+      setRegisterRole('Broker');
     } catch (err) {
       setErrorMessage(err || 'Registration failed. Please try again.');
     } finally {
@@ -203,9 +216,9 @@ export default function App() {
               <div>
                 <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">Role</label>
                 <select value={registerRole} onChange={(e) => setRegisterRole(e.target.value)} className="w-full px-4 py-3 bg-slate-950/50 border border-slate-700/60 rounded-xl text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all duration-200">
-                  <option value="Agent">Agent</option>
-                  <option value="Manager">Manager</option>
-                  <option value="SuperAdmin">SuperAdmin</option>
+                  <option value="Broker">Broker</option>
+                  <option value="Owner">Owner</option>
+                  <option value="Tenant">Tenant</option>
                 </select>
               </div>
 
@@ -236,7 +249,7 @@ export default function App() {
                 />
               </div>
 
-              <button 
+              <button
                 type="submit" disabled={isConnecting}
                 className="w-full py-3 mt-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:bg-blue-800 disabled:text-slate-400 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/20 hover:shadow-blue-500/30 transition-all duration-200 cursor-pointer"
               >
@@ -259,7 +272,7 @@ export default function App() {
     <div className="flex bg-slate-950 min-h-screen text-slate-100">
       
       {/* 🧭 Collapsible Side Navigation Drawer Shell */}
-      <LeftSidebar userRole={userRole} currentAgency={currentAgency} />
+      <LeftSidebar userRole={userRole} currentAgency={currentAgency} activeProfile={activeProfile} onLogout={authService.logout} currentView={currentView} onNavigate={navigateTo} />
 
       {/* 📊 Main Dynamic Workspace Content Window Canvas */}
       <div className="flex-1 p-8 overflow-y-auto max-h-screen">
@@ -267,12 +280,14 @@ export default function App() {
           <div>
             <h2 className="text-2xl font-bold text-white tracking-tight">
               {currentView === 'search' && "Property Asset Registry"}
+              {currentView === 'dashboard' && "Role Dashboard"}
               {currentView === 'details' && "Asset Portfolio Insights"}
               {currentView === 'client' && "Legal Entity Dossier"}
               {currentView === 'crm' && "Corporate CRM Pipeline"}
               {currentView === 'owners-tenants' && "Owner & Tenant Directory"}
               {currentView === 'reports' && "Performance Reports"}
               {currentView === 'map' && "Property Map"}
+              {currentView === 'operations' && "Property Operations"}
               {currentView === 'admin' && "SuperAdmin Control Board"}
             </h2>
             <p className="text-slate-400 text-sm">Multi-tenant spatial intelligence portal for {currentAgency.name}</p>
@@ -281,44 +296,51 @@ export default function App() {
           {/* Quick Action Navigation Testing Hub & Active Module Selector Bar */}
           <div className="flex items-center gap-3">
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-1.5 flex gap-1 shadow-md flex-wrap">
-              <button 
-                onClick={() => setCurrentView('search')}
+              <button
+                onClick={() => navigateTo('search')}
                 type="button"
                 className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'search' || currentView === 'details' || currentView === 'client' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 Properties
               </button>
               <button 
-                onClick={() => setCurrentView('map')}
+                onClick={() => navigateTo('map')}
                 type="button"
                 className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'map' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 Property Map
               </button>
               <button 
-                onClick={() => setCurrentView('crm')}
+                onClick={() => navigateTo('crm')}
                 type="button"
                 className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'crm' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 Leads & CRM
               </button>
               <button 
-                onClick={() => setCurrentView('owners-tenants')}
+                onClick={() => navigateTo('owners-tenants')}
                 type="button"
                 className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'owners-tenants' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 Owners/Tenants
               </button>
               <button 
-                onClick={() => setCurrentView('reports')}
+                onClick={() => navigateTo('reports')}
                 type="button"
                 className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'reports' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 Reports
               </button>
-              {userRole === 'SuperAdmin' && (
+              <button
+                onClick={() => navigateTo('operations')}
+                type="button"
+                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'operations' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                Operations
+              </button>
+              {(userRole === 'PlatformAdmin' || userRole === 'AgencyAdmin') && (
                 <button 
-                  onClick={() => setCurrentView('admin')}
+                  onClick={() => navigateTo('admin')}
                   type="button"
                   className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'admin' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
                 >
@@ -345,6 +367,7 @@ export default function App() {
         </header>
 
         {/* ⚙️ Dynamic UI view routing execution conditional dispatcher matrices */}
+        {currentView === 'dashboard' && <RoleDashboard profile={activeProfile} onNavigate={navigateTo} />}
         {currentView === 'search' && (
           <PropertySearch onSelectProperty={handleSelectProperty} />
         )}
@@ -373,6 +396,10 @@ export default function App() {
           <PropertyMapWorkspace />
         )}
 
+        {currentView === 'operations' && (
+          <OperationsWorkspace />
+        )}
+
         {currentView === 'details' && (
           <PropertyDetails 
             propertyId={selectedPropertyId} 
@@ -390,7 +417,7 @@ export default function App() {
           />
         )}
 
-        {currentView === 'admin' && userRole === 'SuperAdmin' && (
+        {currentView === 'admin' && (userRole === 'PlatformAdmin' || userRole === 'AgencyAdmin') && (
           <SystemAdminWorkspace />
         )}
       </div>

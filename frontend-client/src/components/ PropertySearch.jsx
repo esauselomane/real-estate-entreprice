@@ -4,7 +4,7 @@ import { propertyService } from '../services/ propertyService.js';
 
 export default function PropertySearch({ onSelectProperty }) {
   // Search parameters states
-  const [selectedLocations, setSelectedLocations] = useState(['Green Point', 'Sandton']);
+  const [selectedLocations, setSelectedLocations] = useState([]);
   const [locationInput, setLocationInput] = useState('');
   const [propertyType, setPropertyType] = useState('All');
   const [minSize, setMinSize] = useState('');

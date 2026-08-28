@@ -81,7 +81,7 @@ namespace BrochureGeneration.Worker
                 var root = jsonDoc.RootElement;
 
                 int dealId = root.GetProperty("DealId").GetInt32();
-                string brokerName = root.GetProperty("BrokerName").GetString() ?? "Sarah Jenkins";
+                string brokerName = root.GetProperty("BrokerName").GetString() ?? "Unassigned broker";
                 string brokerEmail = root.GetProperty("BrokerEmail").GetString() ?? "s.jenkins@apexluxury.co.za";
                 string brokerPhone = root.GetProperty("BrokerPhone").GetString() ?? "+27118845000";
                 string companyRef = root.GetProperty("CompanyReferenceNumber").GetString() ?? "PROP-REF-991";

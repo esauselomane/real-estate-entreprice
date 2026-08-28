@@ -138,7 +138,7 @@ export default function CRMWorkspace({ currentUserRole }) {
 
   const formatEnumTitle = (enumString) => {
     if (!enumString) return '';
-    return enumString.replace(/([A-Z])/g, " $1").replace(/^./, str => str.toUpperCase());
+    return String(enumString || '').replace(/([A-Z])/g, " $1").replace(/^./, str => str.toUpperCase());
   };
   return (
     <div className="space-y-6 animate-fade-in">

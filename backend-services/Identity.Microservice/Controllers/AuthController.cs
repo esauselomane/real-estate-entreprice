@@ -82,6 +82,9 @@ namespace Identity.Microservice.Controllers
         [HttpPost("register-user")]
         public async Task<IActionResult> RegisterUser([FromBody] UserAccount newUser)
         {
+            var allowedRoles = new[] { "PlatformAdmin", "AgencyAdmin", "Broker", "Owner", "Tenant" };
+            if (!allowedRoles.Contains(newUser.SystemRole))
+                return BadRequest(new { message = "Unsupported account role." });
             // 1. Verify that email structures do not collide inside the relational database engine
             var exists = await _context.UserAccounts.AnyAsync(u => u.Email == newUser.Email);
             if (exists)

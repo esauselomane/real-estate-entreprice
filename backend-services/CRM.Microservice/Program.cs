@@ -17,8 +17,20 @@ var app = builder.Build();
 using (var serviceScope = app.Services.CreateScope())
 {
     var databaseContext = serviceScope.ServiceProvider.GetRequiredService<CRMDbContext>();
-    databaseContext.Database.EnsureDeleted();
     databaseContext.Database.EnsureCreated();
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[OperationalRecords]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [OperationalRecords] (
+                [OperationalRecordId] int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [TenantId] nvarchar(128) NOT NULL, [Module] nvarchar(80) NOT NULL,
+                [Title] nvarchar(256) NOT NULL, [PropertyReference] nvarchar(128) NOT NULL,
+                [ContactName] nvarchar(256) NOT NULL, [Status] nvarchar(80) NOT NULL,
+                [DueDate] datetime2 NULL, [Amount] decimal(18,2) NOT NULL,
+                [Details] nvarchar(max) NOT NULL, [CreatedAt] datetime2 NOT NULL, [UpdatedAt] datetime2 NOT NULL
+            );
+            CREATE INDEX [IX_OperationalRecords_Tenant_Module] ON [OperationalRecords] ([TenantId], [Module]);
+        END");
     CRMSeedData.EnsureSeeded(databaseContext);
 }
 

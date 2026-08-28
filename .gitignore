@@ -8,3 +8,8 @@
 node_modules/
 .vs/
 .vscode/
+.aider*
+aider-env
+*aider-env
+*aider-env/
+.qodo*

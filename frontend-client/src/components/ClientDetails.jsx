@@ -1,106 +1,66 @@
-import React from 'react';
-import { ArrowLeft, User, Phone, Mail, DollarSign, Map, Landmark } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowLeft, User, Phone, Mail, DollarSign, MapPin, Pencil, Save, Loader2, AlertCircle } from 'lucide-react';
+import { crmService } from '../services/ crmService.js';
 
-export default function ClientDetails({ clientId, clientType = 'Client', clientName = 'Client Profile', onBack }) {
-  // Mock profiling records matching spatial data filters criteria 
-  const safeName = clientName || 'Client Profile';
-  const emailPrefix = safeName.toLowerCase().replace(/\s+/g, '');
-  const clientProfile = {
-    id: clientId || 'N/A',
-    name: safeName,
-    type: clientType || 'Client',
-    phone: "+27 (0) 11 555 9832",
-    email: `${emailPrefix}@example.com`,
-    budgetCeiling: clientType === 'Owner' ? 12000000 : 80000,
-    preferredAreas: ["Green Point", "Sea Point", "Sandton Hub"],
-    financialHistory: ["Tax_Clearance_2026.pdf", "FICA_Verification.pdf"]
+const emptyRecord = { recordType: 'Owner', fullName: '', companyName: '', emailAddress: '', phoneNumber: '', primaryLocation: '', budgetLimit: 0, notes: '' };
+
+export default function ClientDetails({ clientId, onBack }) {
+  const [record, setRecord] = useState(null);
+  const [form, setForm] = useState(emptyRecord);
+  const [editing, setEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true); setError('');
+      try {
+        const id = Number(String(clientId || '').replace(/\D/g, ''));
+        if (!id) throw new Error('This link does not reference an owner or tenant record.');
+        const data = await crmService.getOwnerTenantRecord(id);
+        setRecord(data); setForm(data);
+      } catch (err) { setError(err || 'Client record could not be loaded.'); }
+      finally { setLoading(false); }
+    };
+    load();
+  }, [clientId]);
+
+  const save = async (event) => {
+    event.preventDefault(); setSaving(true); setError('');
+    try {
+      const saved = await crmService.updateOwnerTenantRecord({ ...record, ...form, budgetLimit: Number(form.budgetLimit || 0) });
+      setRecord(saved); setForm(saved); setEditing(false);
+    } catch (err) { setError(err || 'Client changes could not be saved.'); }
+    finally { setSaving(false); }
   };
 
-  return (
-    <div className="space-y-6 animate-fade-in">
-      
-      {/* 🧭 Navigation Header */}
-      <div className="flex items-center justify-between">
-        <button 
-          onClick={onBack}
-          className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl transition-colors cursor-pointer"
-        >
-          <ArrowLeft size={14} /> Back to Asset Details
-        </button>
-        <span className="text-xs font-mono text-slate-500">Profile Database Index: {clientId}</span>
-      </div>
+  if (loading) return <div className="py-20 text-center text-slate-400"><Loader2 className="inline animate-spin mr-2" size={16} />Loading client record…</div>;
 
-      {/* Profile Overview Card Layout */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-        <div className="flex items-center gap-4 mb-6">
-          <div className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-white shadow-md ${
-            clientType === 'Owner' ? 'bg-gradient-to-tr from-amber-600 to-orange-600' : 'bg-gradient-to-tr from-blue-600 to-indigo-600'
-          }`}>
-            <User size={24} />
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-white tracking-tight">{clientProfile.name}</h3>
-            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
-              clientType === 'Owner' ? 'bg-amber-950 text-amber-400 border border-amber-900' : 'bg-blue-950 text-blue-400 border border-blue-900'
-            }`}>
-              System Entity Class: {clientProfile.type}
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-800/60">
-          
-          {/* Contact Information Form Parameters */}
-          <div className="space-y-4">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Contact Records Information</h4>
-            <div className="space-y-2">
-              <div className="flex items-center gap-3 text-sm text-slate-300">
-                <Phone size={14} className="text-slate-500" /> {clientProfile.phone}
-              </div>
-              <div className="flex items-center gap-3 text-sm text-slate-300">
-                <Mail size={14} className="text-slate-500" /> {clientProfile.email}
-              </div>
-            </div>
-          </div>
-
-          {/* Budgeting Matrices & Filtering Criteria Parameters */}
-          <div className="space-y-4">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Agent Allocation Matching Limits</h4>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm text-slate-300">
-                <DollarSign size={14} className="text-emerald-500" /> 
-                <span className="font-semibold text-white">
-                  Budget Threshold Limit: R {clientProfile.budgetCeiling.toLocaleString()} {clientType === 'Tenant' ? '/month' : ''}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-slate-300">
-                <Map size={14} className="text-blue-500" />
-                <span className="font-semibold text-slate-400">Preferred Target Areas: </span>
-                <span className="text-white font-medium text-xs bg-slate-950 px-2 py-1 rounded-md border border-slate-800">
-                  {clientProfile.preferredAreas.join(', ')}
-                </span>
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      {/* Legal & KYC Attestations Section */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-        <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-          <Landmark size={16} className="text-blue-500" /> Regulatory Compliance Documents (FICA/KYC)
-        </h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {clientProfile.financialHistory.map((historyFile, idx) => (
-            <div key={idx} className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>{historyFile} Verified</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
+  return <div className="space-y-6 animate-fade-in">
+    <div className="flex justify-between items-center gap-3">
+      <button onClick={onBack} className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white bg-slate-900 border border-slate-800 px-4 py-2 rounded-xl"><ArrowLeft size={14} /> Back to Asset Details</button>
+      {record && !editing && <button onClick={() => setEditing(true)} className="inline-flex items-center gap-2 text-xs font-bold bg-blue-600 text-white px-4 py-2 rounded-xl"><Pencil size={14} /> Edit client</button>}
     </div>
-  );
+    {error && <div className="p-3 rounded-xl bg-red-950/40 border border-red-900 text-red-300 text-xs flex gap-2"><AlertCircle size={15} />{error}</div>}
+    {!record ? <div className="p-8 bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-sm">No saved owner or tenant profile is linked to this property.</div> : editing ? (
+      <form onSubmit={save} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+        <h3 className="text-white font-bold">Edit {record.recordType} profile</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input required value={form.fullName || ''} onChange={e => setForm({ ...form, fullName: e.target.value })} placeholder="Full name" className="field" />
+          <input value={form.companyName || ''} onChange={e => setForm({ ...form, companyName: e.target.value })} placeholder="Company name" className="field" />
+          <input type="email" value={form.emailAddress || ''} onChange={e => setForm({ ...form, emailAddress: e.target.value })} placeholder="Email" className="field" />
+          <input value={form.phoneNumber || ''} onChange={e => setForm({ ...form, phoneNumber: e.target.value })} placeholder="Phone" className="field" />
+          <input value={form.primaryLocation || ''} onChange={e => setForm({ ...form, primaryLocation: e.target.value })} placeholder="Location" className="field" />
+          <input type="number" value={form.budgetLimit ?? 0} onChange={e => setForm({ ...form, budgetLimit: e.target.value })} placeholder="Budget" className="field" />
+          <textarea value={form.notes || ''} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Notes" className="field md:col-span-2" rows={3} />
+        </div>
+        <div className="flex gap-3"><button type="button" onClick={() => { setForm(record); setEditing(false); }} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Cancel</button><button disabled={saving} className="flex-1 py-2 bg-blue-600 rounded-xl text-xs font-bold text-white">{saving ? 'Saving…' : <><Save size={13} className="inline mr-1" />Save changes</>}</button></div>
+      </form>
+    ) : <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+      <div className="flex items-center gap-4"><div className="w-14 h-14 rounded-full bg-blue-600 flex items-center justify-center"><User /></div><div><h3 className="text-xl font-bold text-white">{record.fullName}</h3><span className="text-[10px] uppercase text-blue-300">{record.recordType}</span></div></div>
+      <div className="grid md:grid-cols-2 gap-5 text-sm text-slate-300 border-t border-slate-800 pt-5"><p><Mail size={14} className="inline mr-2 text-slate-500" />{record.emailAddress || 'No email saved'}</p><p><Phone size={14} className="inline mr-2 text-slate-500" />{record.phoneNumber || 'No phone saved'}</p><p><MapPin size={14} className="inline mr-2 text-slate-500" />{record.primaryLocation || 'No location saved'}</p><p><DollarSign size={14} className="inline mr-2 text-emerald-500" />R {Number(record.budgetLimit || 0).toLocaleString()}</p></div>
+      {record.notes && <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-xl">{record.notes}</p>}
+    </div>}
+  </div>;
 }

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Property.Microservice.Data;
@@ -6,6 +7,7 @@ using Property.Microservice.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace Property.Microservice.Controllers
@@ -74,6 +76,10 @@ namespace Property.Microservice.Controllers
             public string LinkedOwnerId { get; set; } = "OT-0001";
             public List<CreatePropertyUnitPayload> SubUnits { get; set; } = new List<CreatePropertyUnitPayload>();
         }
+
+        // The property editor uses the same fields as creation.  Keeping this as an
+        // explicit DTO prevents clients from changing tenant and audit fields.
+        public class UpdatePropertyPayload : CreatePropertyPayload { }
 
         // --- 📋 ENDPOINT: GET ALL SYNDICATION PLATFORMS ---
         [HttpGet("platforms")]
@@ -211,6 +217,70 @@ namespace Property.Microservice.Controllers
 
             return CreatedAtAction(nameof(GetPropertyById), new { propertyId = newProp.PropertyId }, newProp);
         }
+
+        [Authorize]
+        [HttpPut("{propertyId}")]
+        public async Task<IActionResult> UpdateProperty(int propertyId, [FromBody] UpdatePropertyPayload payload)
+        {
+            if (payload == null || string.IsNullOrWhiteSpace(payload.CompleteAddress))
+                return BadRequest(new { message = "Property address is required." });
+
+            // 🛡️ Resolve the caller's multi-tenant scope from the JWT claims.
+            // The "TenantId" claim is injected by Identity.Microservice on every issued token.
+            var userTenantId = User.FindFirst("TenantId")?.Value;
+            if (string.IsNullOrWhiteSpace(userTenantId))
+                return Forbid();
+
+            // Platform administrators operate across every tenant sandbox, so they
+            // bypass the tenant filter. Both role aliases are honored because the
+            // Identity microservice seeds the root admin as "SuperAdmin" while the
+            // model/register contract advertises the registered role as "PlatformAdmin".
+            var isPlatformAdmin = User.IsInRole("PlatformAdmin") || User.IsInRole("SuperAdmin");
+
+            // 🧭 Tenant scoping guard: scope the lookup to the caller's tenant so an
+            // authenticated user from tenant A can never read or mutate a property
+            // that belongs to tenant B. A non-owner request resolves to "not found"
+            // rather than revealing cross-tenant record existence.
+            IQueryable<PropertyAsset> propertyQuery = _context.PropertyAssets
+                .Include(p => p.PropertyTypeDetails)
+                .Include(p => p.SubUnits);
+
+            propertyQuery = isPlatformAdmin
+                ? propertyQuery.Where(p => p.PropertyId == propertyId)
+                : propertyQuery.Where(p => p.PropertyId == propertyId && p.TenantId == userTenantId);
+
+            var property = await propertyQuery.FirstOrDefaultAsync();
+            if (property == null)
+                return NotFound(new { message = "Target property record not found." });
+
+            property.CompleteAddress = payload.CompleteAddress;
+            property.ErfSpatialSize = payload.ErfSpatialSize ?? string.Empty;
+            property.TitleDeedType = payload.TitleDeedType ?? "Freehold";
+            property.PortfolioZoning = payload.PortfolioZoning ?? string.Empty;
+            property.MarketClass = payload.MarketClass ?? "Sale";
+            property.PropertyTypeId = payload.PropertyTypeId > 0 ? payload.PropertyTypeId : property.PropertyTypeId;
+            property.ValuationPrice = payload.ValuationPrice;
+            property.SalePrice = payload.SalePrice;
+            property.BaseRentalRate = payload.BaseRentalRate;
+            property.RentEscalationPercentage = payload.RentEscalationPercentage;
+            property.LeaseTermMonths = payload.LeaseTermMonths;
+            property.TenantInstallationAllowance = payload.TenantInstallationAllowance;
+            property.Latitude = payload.Latitude;
+            property.Longitude = payload.Longitude;
+            property.LinkedOwnerId = payload.LinkedOwnerId ?? string.Empty;
+
+            // Re-assert the tenant scope on the entity so a malicious payload cannot
+            // override or clear the TenantId isolation key during a cross-tenant attempt.
+            property.TenantId = isPlatformAdmin
+                ? property.TenantId
+                : userTenantId;
+
+            await _context.SaveChangesAsync();
+            return Ok(await _context.PropertyAssets
+                .Include(p => p.PropertyTypeDetails)
+                .Include(p => p.SubUnits)
+                .FirstAsync(p => p.PropertyId == propertyId));
+        }
         // --- 🔍 ENDPOINT A: MULTI-CRITERIA REAL ESTATE SEARCH PIPELINE ---
         [HttpPost("search")]
         public async Task<IActionResult> SearchProperties([FromBody] PropertySearchCriteria criteria)
@@ -231,8 +301,15 @@ namespace Property.Microservice.Controllers
             if (!string.Equals(criteria.PropertyType, "All", StringComparison.OrdinalIgnoreCase))
             {
                 query = query.Where(p => p.PropertyTypeDetails != null && 
-                                         p.PropertyTypeDetails.Name.Equals(criteria.PropertyType, StringComparison.OrdinalIgnoreCase));
+                                         p.PropertyTypeDetails.Name == criteria.PropertyType);
             }
+
+            // The UI submits area bounds in square metres.  Use linked unit area
+            // where available, falling back to the text field only for display.
+            if (criteria.MinSize.HasValue)
+                query = query.Where(p => p.SubUnits.Any(u => u.NetRentableAreaSqM >= criteria.MinSize.Value));
+            if (criteria.MaxSize.HasValue)
+                query = query.Where(p => p.SubUnits.Any(u => u.NetRentableAreaSqM <= criteria.MaxSize.Value));
 
             var results = await query.ToListAsync();
             return Ok(results);
@@ -313,6 +390,22 @@ namespace Property.Microservice.Controllers
                 // Maps directly back to the property used in legacy integrations to satisfy compilation requirements
                 directPropertyUrl = syndicationRecord.LivePortalListingUrl 
             });
+        }
+
+        [HttpPost("brochure/generate")]
+        public async Task<IActionResult> GenerateBrochure([FromBody] GeneratedBrochurePayload payload)
+        {
+            if (payload == null || payload.PropertyId <= 0 || payload.DealId <= 0)
+                return BadRequest(new { message = "A deal and property are required to generate a brochure." });
+
+            var propertyExists = await _context.PropertyAssets.AnyAsync(p => p.PropertyId == payload.PropertyId);
+            if (!propertyExists) return NotFound(new { message = "Target property record not found." });
+
+            await _kafkaPublisher.PublishMessageAsync(
+                "brochure-generation-requests",
+                payload.DealId.ToString(),
+                System.Text.Json.JsonSerializer.Serialize(payload));
+            return Accepted(new { message = "Brochure generation request queued." });
         }
     }
 }

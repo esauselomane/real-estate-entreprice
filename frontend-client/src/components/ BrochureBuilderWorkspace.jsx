@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Printer, Image, CheckCircle2, User, Phone, Mail, Building2, MapPin, Layers, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
 import { propertyService } from '../services/ propertyService.js';
-import { crmService } from '../services/ crmService.js';
 
 export default function BrochureBuilderWorkspace({ dealData, onBack }) {
   // Master asset tracking state grids
@@ -13,23 +12,21 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
   const [isLoadingAsset, setIsLoadingAsset] = useState(true);
   const [feedbackMessage, setFeedbackMessage] = useState('');
 
-  // Fixed Structural Broker Profile Data (Cover Page fields)
+  const activeProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
   const brokerProfile = {
-    fullName: "Sarah Jenkins",
-    emailAddress: "s.jenkins@apexluxury.co.za",
-    phoneNumber: "+27 (0) 11 884 5000",
+    fullName: activeProfile.name || 'Unassigned broker',
+    emailAddress: activeProfile.email || 'No email on file',
+    phoneNumber: activeProfile.phone || 'No phone on file',
     companyReferenceNumber: `PROP-REF-${dealData?.dealId || '991'}`,
-    companyName: "Apex Luxury Realty"
+    companyName: activeProfile.tenantId || 'Agency workspace'
   };
 
   useEffect(() => {
     const fetchTargetAssetDetails = async () => {
       setIsLoadingAsset(true);
       try {
-        const targetId = dealData?.linkedPropertyId || 1;
-        const inventory = await propertyService.searchProperties([], 'All', null, null);
-        const match = inventory.find(p => p.propertyId === parseInt(targetId, 10));
-        setPropertyDetails(match || inventory[0]);
+        if (!dealData?.linkedPropertyId) throw new Error('The deal has no linked property. Link a property before creating a brochure.');
+        setPropertyDetails(await propertyService.getPropertyById(dealData.linkedPropertyId));
       } catch (err) {
         setFeedbackMessage('Failed to pull asset metrics for proposal compiling.');
       } finally {
@@ -74,7 +71,7 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
         SubUnits: propertyDetails?.subUnits || []
       };
 
-      await crmService.dispatchBrochureGenerationTask(payloadEnvelope);
+      await propertyService.dispatchBrochureGenerationTask(payloadEnvelope);
       setFeedbackMessage('Brochure generation request dispatched onto Kafka clusters! Worker processing has initiated.');
     } catch (err) {
       setFeedbackMessage(err || 'Failed to dispatch background event to event-driven processing pipelines.');
@@ -138,7 +135,7 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
             <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-blue-600 font-black text-white flex items-center justify-center text-sm shadow-md">
-                  ALR
+                  {brokerProfile.companyName.split(/\s+/).map((part) => part[0]).join('').slice(0, 3).toUpperCase()}
                 </div>
                 <div>
                   <h4 className="text-white font-bold text-sm tracking-tight">{brokerProfile.companyName}</h4>
@@ -242,16 +239,8 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
               </span>
             </div>
 
-            {/* Simulated premium luxury photo assets picking map canvas */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {[
-                "primary_facade_hero.jpg",
-                "interior_boardroom_hub.jpg",
-                "warehouse_clear_span.jpg",
-                "dock_dispatch_bays.jpg",
-                "aerial_transit_siting.jpg",
-                "reception_entrance_lobby.jpg"
-              ].map((imgName, index) => {
+              {JSON.parse(propertyDetails?.verificationDocumentsJson || '[]').map((imgName, index) => {
                 const isSelected = selectedImageFiles.includes(imgName);
                 return (
                   <div
@@ -277,6 +266,7 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
                   </div>
                 );
               })}
+              {!JSON.parse(propertyDetails?.verificationDocumentsJson || '[]').length && <p className="col-span-full text-xs text-slate-500">No saved property media is available for this brochure.</p>}
             </div>
           </div>
 

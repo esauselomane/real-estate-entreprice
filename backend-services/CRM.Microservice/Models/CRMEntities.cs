@@ -257,4 +257,23 @@ namespace CRM.Microservice.Models
         public decimal TotalRevenue { get; set; }
         public List<ReportDrilldownRow> MonthlyBreakdown { get; set; } = new();
     }
+
+    // Shared operational ledger for maintenance, leases, financial operations,
+    // compliance and transaction workflows. Module-specific fields live in Details.
+    public class OperationalRecord
+    {
+        [Key]
+        public int OperationalRecordId { get; set; }
+        [Required] public string TenantId { get; set; } = string.Empty;
+        [Required] public string Module { get; set; } = string.Empty;
+        [Required] public string Title { get; set; } = string.Empty;
+        public string PropertyReference { get; set; } = string.Empty;
+        public string ContactName { get; set; } = string.Empty;
+        public string Status { get; set; } = "Open";
+        public DateTime? DueDate { get; set; }
+        [Column(TypeName = "decimal(18,2)")] public decimal Amount { get; set; }
+        public string Details { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    }
 }

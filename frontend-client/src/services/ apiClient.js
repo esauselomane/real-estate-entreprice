@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // 🔀 Establish central pipeline connections mapping to your Ocelot API Gateway
 const apiClient = axios.create({
-  baseURL: 'http://localhost:5000/gateway',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/gateway',
   headers: {
     'Content-Type': 'application/json',
   },

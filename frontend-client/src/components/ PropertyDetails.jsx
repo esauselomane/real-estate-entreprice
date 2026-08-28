@@ -15,6 +15,8 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const [imagePreview, setImagePreview] = useState(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState('');
+  const [isEditingProperty, setIsEditingProperty] = useState(false);
+  const [propertyForm, setPropertyForm] = useState(null);
 
   // New Sub-Unit form state
   const [showAddUnitForm, setShowAddUnitForm] = useState(false);
@@ -41,12 +43,9 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       try {
         const platList = await propertyService.getPlatforms();
         setPlatforms(platList || []);
-      } catch {
-        setPlatforms([
-          { platformId: 1, platformName: 'Property24', baseUrlAddress: 'https://property24.com' },
-          { platformId: 2, platformName: 'PrivateProperty', baseUrlAddress: 'https://privateproperty.co.za' },
-          { platformId: 3, platformName: 'Gumtree', baseUrlAddress: 'https://gumtree.co.za' }
-        ]);
+      } catch (platformError) {
+        setPlatforms([]);
+        setErrorMessage(platformError || 'Failed to load syndication platforms.');
       }
     } catch (err) {
       setErrorMessage(typeof err === 'string' ? err : 'Failed to load property details from database.');
@@ -145,6 +144,25 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     }
   };
 
+  const handleSaveProperty = async (event) => {
+    event.preventDefault();
+    try {
+      const saved = await propertyService.updateProperty(propertyId, {
+        ...propertyForm,
+        propertyTypeId: Number(propertyForm.propertyTypeId || property.propertyTypeId),
+        valuationPrice: Number(propertyForm.valuationPrice || 0),
+        salePrice: propertyForm.salePrice === '' ? null : Number(propertyForm.salePrice),
+        baseRentalRate: propertyForm.baseRentalRate === '' ? null : Number(propertyForm.baseRentalRate),
+        rentEscalationPercentage: propertyForm.rentEscalationPercentage === '' ? null : Number(propertyForm.rentEscalationPercentage),
+        leaseTermMonths: propertyForm.leaseTermMonths === '' ? null : Number(propertyForm.leaseTermMonths),
+        tenantInstallationAllowance: Number(propertyForm.tenantInstallationAllowance || 0),
+        latitude: Number(propertyForm.latitude || 0), longitude: Number(propertyForm.longitude || 0)
+      });
+      setProperty(saved); setSubUnits(saved.subUnits || subUnits); setIsEditingProperty(false);
+      setActionSuccessMessage('Property details saved to the backend.');
+    } catch (err) { setErrorMessage(err || 'Could not save property details.'); }
+  };
+
   if (isLoading) {
     return (
       <div className="py-24 flex flex-col items-center justify-center text-slate-500 gap-3">
@@ -232,6 +250,8 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                 For {property.marketClass}
               </span>
             </div>
+
+            <button type="button" onClick={() => { setPropertyForm({ ...property }); setIsEditingProperty(true); }} className="mb-4 text-xs font-bold text-blue-300 border border-blue-900 rounded-lg px-3 py-1.5 hover:bg-blue-950">Edit property details</button>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-slate-950/60 rounded-xl border border-slate-800/80 my-4">
               <div>
@@ -500,13 +520,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
 
               <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
                 <span className="text-[9px] text-blue-400 font-bold uppercase tracking-wider block">Operating Tenant Agency</span>
-                <button 
-                  type="button"
-                  onClick={() => onNavigateToClient(property.tenantId, 'Tenant', `Tenant Agency ${property.tenantId}`)}
-                  className="text-sm font-bold text-white hover:text-blue-400 text-left mt-0.5 cursor-pointer underline decoration-dotted transition-colors block w-full"
-                >
-                  {property.tenantId}
-                </button>
+                <span className="text-sm font-bold text-white mt-0.5 block">{property.tenantId}</span>
               </div>
 
             </div>
@@ -518,12 +532,13 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               <FileText size={16} className="text-blue-500" /> Deeds & Verification Vault
             </h4>
             <div className="space-y-2">
-              {['Title_Deed_Verification.pdf', 'Municipal_Zoning_Certificate.pdf'].map((doc, idx) => (
+              {(JSON.parse(property.verificationDocumentsJson || '[]')).map((doc, idx) => (
                 <div key={idx} className="flex items-center gap-3 p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 group hover:border-slate-700 transition-colors">
                   <FileText size={14} className="text-slate-500 group-hover:text-blue-400" />
                   <span className="truncate flex-1 font-medium">{doc}</span>
                 </div>
               ))}
+              {!JSON.parse(property.verificationDocumentsJson || '[]').length && <p className="text-xs text-slate-500">No verification documents are stored for this property.</p>}
             </div>
           </div>
 
@@ -577,6 +592,20 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
 
         </div>
       </div>
+      {isEditingProperty && propertyForm && (
+        <div className="fixed inset-0 z-50 p-4 bg-black/70 overflow-y-auto">
+          <form onSubmit={handleSaveProperty} className="max-w-3xl mx-auto my-8 bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4">
+            <h3 className="text-white font-bold">Edit property details</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {[
+                ['completeAddress', 'Address'], ['erfSpatialSize', 'Erf size'], ['titleDeedType', 'Title deed type'], ['portfolioZoning', 'Zoning'], ['linkedOwnerId', 'Owner record ID'], ['valuationPrice', 'Valuation'], ['salePrice', 'Sale price'], ['baseRentalRate', 'Monthly rent'], ['rentEscalationPercentage', 'Escalation %'], ['leaseTermMonths', 'Lease months'], ['tenantInstallationAllowance', 'TI allowance'], ['latitude', 'Latitude'], ['longitude', 'Longitude']
+              ].map(([key, label]) => <label key={key} className="text-[10px] text-slate-400 uppercase">{label}<input value={propertyForm[key] ?? ''} onChange={e => setPropertyForm({ ...propertyForm, [key]: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case" /></label>)}
+              <label className="text-[10px] text-slate-400 uppercase">Market class<select value={propertyForm.marketClass || 'Sale'} onChange={e => setPropertyForm({ ...propertyForm, marketClass: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case"><option>Sale</option><option>Rental</option></select></label>
+            </div>
+            <div className="flex gap-3"><button type="button" onClick={() => setIsEditingProperty(false)} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Cancel</button><button className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">Save property</button></div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

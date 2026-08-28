@@ -29,6 +29,15 @@ export const propertyService = {
     }
   },
 
+  updateProperty: async (propertyId, propertyData) => {
+    try {
+      const response = await apiClient.put(`/properties/${propertyId}`, propertyData);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Failed to save property details.';
+    }
+  },
+
   // --- 🏢 GET SUB-UNITS LINKED TO PROPERTY ---
   getPropertyUnits: async (propertyId) => {
     try {
@@ -129,6 +138,15 @@ export const propertyService = {
       return response.data; // Returns external reference numbers and live portal links
     } catch (error) {
       throw error.response?.data?.message || 'Portal syndication tracker check out of sync.';
+    }
+  }
+  ,
+  dispatchBrochureGenerationTask: async (payload) => {
+    try {
+      const response = await apiClient.post('/properties/brochure/generate', payload);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Brochure generation request failed.';
     }
   }
 };

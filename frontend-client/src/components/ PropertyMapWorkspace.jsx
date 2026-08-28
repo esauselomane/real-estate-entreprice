@@ -17,7 +17,7 @@ export default function PropertyMapWorkspace() {
       setErrorMessage('');
       try {
         // Query the Ocelot Gateway using default broad criteria to gather map indicators
-        const assets = await propertyService.searchProperties(['Green Point', 'Sandton'], 'All', null, null);
+        const assets = await propertyService.searchProperties([], 'All', null, null);
         setProperties(assets || []);
       } catch (err) {
         setErrorMessage(err || 'Failed to populate spatial markers onto map canvases.');

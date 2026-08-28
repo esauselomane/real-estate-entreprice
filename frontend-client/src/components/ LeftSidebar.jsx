@@ -1,27 +1,18 @@
 import React, { useState } from 'react';
-import { 
-  Home, Search, Users, Briefcase, BarChart3, 
-  Settings, ChevronLeft, ChevronRight, LogOut, Shield 
-} from 'lucide-react';
+import { Home, Search, Users, Briefcase, BarChart3, Wrench, ChevronLeft, ChevronRight, LogOut, Shield } from 'lucide-react';
 
-export default function LeftSidebar({ userRole, currentAgency }) {
+export default function LeftSidebar({ userRole, currentAgency, activeProfile, onLogout, currentView, onNavigate }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
-
-  // Mock profile details to replicate a professional live system look
-  const userProfile = {
-    name: "Sarah Jenkins",
-    email: "sarah@eliteproperties.com",
-    avatar: "https://unsplash.com"
-  };
 
   // Base structural links mapped directly to permissions
   const navItems = [
-    { name: 'Dashboard', icon: Home, roles: ['Agent', 'Manager', 'SuperAdmin'] },
-    { name: 'Property Search', icon: Search, roles: ['Agent', 'Manager', 'SuperAdmin'] },
-    { name: 'Leads & CRM', icon: Briefcase, roles: ['Agent', 'Manager', 'SuperAdmin'] },
-    { name: 'Clients (Tenants/Owners)', icon: Users, roles: ['Agent', 'Manager', 'SuperAdmin'] },
-    { name: 'Performance Reports', icon: BarChart3, roles: ['Agent', 'Manager', 'SuperAdmin'] },
-    { name: 'System Admin', icon: Shield, roles: ['Manager', 'SuperAdmin'] },
+    { name: 'Dashboard', view: 'dashboard', icon: Home, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] },
+    { name: 'Property Search', view: 'search', icon: Search, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
+    { name: 'Leads & CRM', view: 'crm', icon: Briefcase, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker'] },
+    { name: 'Clients (Tenants/Owners)', view: 'owners-tenants', icon: Users, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
+    { name: 'Performance Reports', view: 'reports', icon: BarChart3, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
+    { name: 'Property Operations', view: 'operations', icon: Wrench, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] },
+    { name: 'System Admin', view: 'admin', icon: Shield, roles: ['PlatformAdmin', 'AgencyAdmin'] },
   ];
 
   // Filters visible screens depending on the user's role criteria
@@ -62,9 +53,12 @@ export default function LeftSidebar({ userRole, currentAgency }) {
             return (
               <button
                 key={index}
-                className="w-full flex items-center gap-4 px-3 py-3 rounded-xl hover:bg-slate-800/60 hover:text-white transition-all duration-200 group cursor-pointer text-left"
+                type="button"
+                onClick={() => onNavigate(item.view)}
+                aria-current={currentView === item.view ? 'page' : undefined}
+                className={`w-full flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 group cursor-pointer text-left ${currentView === item.view ? 'bg-blue-600/20 text-white border border-blue-900/70' : 'hover:bg-slate-800/60 hover:text-white border border-transparent'}`}
               >
-                <IconComponent size={20} className="text-slate-400 group-hover:text-blue-400 transition-colors" />
+                <IconComponent size={20} className={`transition-colors ${currentView === item.view ? 'text-blue-400' : 'text-slate-400 group-hover:text-blue-400'}`} />
                 {!isCollapsed && (
                   <span className="text-sm font-medium tracking-wide whitespace-nowrap">{item.name}</span>
                 )}
@@ -78,21 +72,19 @@ export default function LeftSidebar({ userRole, currentAgency }) {
       <div className="p-3 border-t border-slate-800 bg-slate-950/40">
         <div className="flex items-center gap-3 p-1 overflow-hidden">
           {/* Professional Round Profile Image Layout Container */}
-          <img 
-            src={userProfile.avatar} 
-            alt="Profile Avatar Target" 
-            className="w-10 h-10 rounded-full border-2 border-slate-700 object-cover shadow-sm bg-slate-800 min-w-10"
-          />
+          <div className="w-10 h-10 rounded-full border-2 border-slate-700 bg-blue-600 flex items-center justify-center text-sm font-bold text-white min-w-10">
+            {(activeProfile?.name || 'U').split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()}
+          </div>
           {!isCollapsed && (
             <div className="flex flex-col min-w-0 flex-1">
-              <span className="text-sm font-semibold text-white truncate">{userProfile.name}</span>
+              <span className="text-sm font-semibold text-white truncate">{activeProfile?.name || 'User session'}</span>
               <span className="text-xs text-slate-500 truncate">{userRole} Privilege</span>
             </div>
           )}
         </div>
 
         {/* Minimal logout row button container */}
-        <button className="w-full mt-3 flex items-center gap-4 px-3 py-2 rounded-lg hover:bg-red-950/20 hover:text-red-400 text-slate-400 transition-colors cursor-pointer text-left text-xs font-medium">
+        <button onClick={onLogout} className="w-full mt-3 flex items-center gap-4 px-3 py-2 rounded-lg hover:bg-red-950/20 hover:text-red-400 text-slate-400 transition-colors cursor-pointer text-left text-xs font-medium">
           <LogOut size={16} />
           {!isCollapsed && <span>Sign Out</span>}
         </button>

@@ -24,6 +24,43 @@ namespace CRM.Microservice.Controllers
         public class DealUpdatePayload { public int DealId { get; set; } public string NextStage { get; set; } = string.Empty; public string NotesUpdate { get; set; } = string.Empty; }
         public class ReallocatePayload { public int TargetId { get; set; } public bool IsDeal { get; set; } public string TargetAgentName { get; set; } = string.Empty; }
 
+        [HttpGet("operations")]
+        public async Task<IActionResult> GetOperationalRecords([FromQuery] string tenantId, [FromQuery] string module)
+        {
+            var query = _context.OperationalRecords.Where(r => r.TenantId == tenantId);
+            if (!string.IsNullOrWhiteSpace(module)) query = query.Where(r => r.Module == module);
+            return Ok(await query.OrderByDescending(r => r.UpdatedAt).ToListAsync());
+        }
+
+        [HttpPost("operations")]
+        public async Task<IActionResult> CreateOperationalRecord([FromBody] OperationalRecord record)
+        {
+            if (record == null || string.IsNullOrWhiteSpace(record.Module) || string.IsNullOrWhiteSpace(record.Title))
+                return BadRequest(new { message = "Module and title are required." });
+            record.CreatedAt = DateTime.UtcNow;
+            record.UpdatedAt = DateTime.UtcNow;
+            _context.OperationalRecords.Add(record);
+            await _context.SaveChangesAsync();
+            return Ok(record);
+        }
+
+        [HttpPut("operations/{recordId:int}")]
+        public async Task<IActionResult> UpdateOperationalRecord(int recordId, [FromBody] OperationalRecord updatedRecord)
+        {
+            var record = await _context.OperationalRecords.FindAsync(recordId);
+            if (record == null) return NotFound(new { message = "Operational record not found." });
+            record.Title = updatedRecord.Title;
+            record.PropertyReference = updatedRecord.PropertyReference;
+            record.ContactName = updatedRecord.ContactName;
+            record.Status = updatedRecord.Status;
+            record.DueDate = updatedRecord.DueDate;
+            record.Amount = updatedRecord.Amount;
+            record.Details = updatedRecord.Details;
+            record.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return Ok(record);
+        }
+
         [HttpGet("companies")]
         public async Task<IActionResult> GetCompanies([FromQuery] string tenantId)
         {
@@ -39,6 +76,15 @@ namespace CRM.Microservice.Controllers
                 .OrderByDescending(r => r.CreatedAt)
                 .ToListAsync();
             return Ok(rows);
+        }
+
+        [HttpGet("owners-tenants/{ownerTenantId:int}")]
+        public async Task<IActionResult> GetOwnerTenantRecord(int ownerTenantId)
+        {
+            var record = await _context.OwnerTenantRecords.FindAsync(ownerTenantId);
+            return record == null
+                ? NotFound(new { message = "Owner or tenant record not found." })
+                : Ok(record);
         }
 
         [HttpPost("owners-tenants")]
@@ -96,6 +142,19 @@ namespace CRM.Microservice.Controllers
             return Ok(agency);
         }
 
+        [HttpPut("agencies/{agencyId}")]
+        public async Task<IActionResult> UpdateAgency(string agencyId, [FromBody] AgencyRecord updatedAgency)
+        {
+            var agency = await _context.AgencyRecords.FindAsync(agencyId);
+            if (agency == null) return NotFound(new { message = "Agency record not found." });
+            agency.Name = updatedAgency.Name;
+            agency.ContactEmail = updatedAgency.ContactEmail;
+            agency.HeadquartersAddress = updatedAgency.HeadquartersAddress;
+            agency.OperationalStatus = updatedAgency.OperationalStatus;
+            await _context.SaveChangesAsync();
+            return Ok(agency);
+        }
+
         [HttpGet("brokers")]
         public async Task<IActionResult> GetBrokers([FromQuery] string tenantId)
         {
@@ -116,6 +175,21 @@ namespace CRM.Microservice.Controllers
 
             broker.CreatedAt = DateTime.UtcNow;
             _context.BrokerRecords.Add(broker);
+            await _context.SaveChangesAsync();
+            return Ok(broker);
+        }
+
+        [HttpPut("brokers/{brokerId}")]
+        public async Task<IActionResult> UpdateBroker(string brokerId, [FromBody] BrokerRecord updatedBroker)
+        {
+            var broker = await _context.BrokerRecords.FindAsync(brokerId);
+            if (broker == null) return NotFound(new { message = "Broker record not found." });
+            broker.AgencyId = updatedBroker.AgencyId;
+            broker.FullName = updatedBroker.FullName;
+            broker.Email = updatedBroker.Email;
+            broker.Phone = updatedBroker.Phone;
+            broker.Role = updatedBroker.Role;
+            broker.Status = updatedBroker.Status;
             await _context.SaveChangesAsync();
             return Ok(broker);
         }

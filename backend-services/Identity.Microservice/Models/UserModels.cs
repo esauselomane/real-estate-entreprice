@@ -45,7 +45,7 @@ namespace Identity.Microservice.Models
         public string PasswordHash { get; set; } = string.Empty;
 
         [Required]
-        public string SystemRole { get; set; } = "Agent"; // SuperAdmin, Manager, Agent
+        public string SystemRole { get; set; } = "Broker"; // PlatformAdmin, AgencyAdmin, Broker, Owner, Tenant
 
         public string AvatarUrl { get; set; } = string.Empty; // Round profile picture location path
         

@@ -17,6 +17,7 @@ namespace CRM.Microservice.Data
         public DbSet<CRMContact> CRMContacts { get; set; }
         public DbSet<LeadRecord> LeadRecords { get; set; }
         public DbSet<DealRecord> DealRecords { get; set; }
+        public DbSet<OperationalRecord> OperationalRecords { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

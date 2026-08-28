@@ -1,6 +1,22 @@
 import apiClient from './ apiClient.js';
 
 export const crmService = {
+  getOperationalRecords: async (module) => {
+    const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
+    const response = await apiClient.get('/crm/operations', { params: { tenantId: userProfile.tenantId || '', module } });
+    return response.data;
+  },
+
+  createOperationalRecord: async (payload) => {
+    const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
+    const response = await apiClient.post('/crm/operations', { ...payload, tenantId: userProfile.tenantId || payload.tenantId });
+    return response.data;
+  },
+
+  updateOperationalRecord: async (recordId, payload) => {
+    const response = await apiClient.put(`/crm/operations/${recordId}`, payload);
+    return response.data;
+  },
   getCRMBoards: async () => {
     try {
       const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
@@ -23,6 +39,15 @@ export const crmService = {
       return response.data;
     } catch (error) {
       throw error.response?.data?.message || 'Owner/tenant registry sync failed.';
+    }
+  },
+
+  getOwnerTenantRecord: async (ownerTenantId) => {
+    try {
+      const response = await apiClient.get(`/crm/owners-tenants/${ownerTenantId}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Owner/tenant record could not be loaded.';
     }
   },
 
@@ -81,6 +106,11 @@ export const crmService = {
     }
   },
 
+  updateAgency: async (agencyId, payload) => {
+    const response = await apiClient.put(`/crm/agencies/${agencyId}`, payload);
+    return response.data;
+  },
+
   getBrokers: async () => {
     try {
       const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
@@ -102,6 +132,11 @@ export const crmService = {
     } catch (error) {
       throw error.response?.data?.message || 'Broker onboarding failed.';
     }
+  },
+
+  updateBroker: async (brokerId, payload) => {
+    const response = await apiClient.put(`/crm/brokers/${brokerId}`, payload);
+    return response.data;
   },
 
   createLead: async (leadDetails) => {
