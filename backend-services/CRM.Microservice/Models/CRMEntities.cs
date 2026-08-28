@@ -275,5 +275,12 @@ namespace CRM.Microservice.Models
         public string Details { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+        // 🔗 Unit-level linkage: binds this operational record to a specific property
+        // and its sub-unit so it can be surfaced on the property page without the
+        // user re-entering property / unit / address. Cross-service reference by ID
+        // (mirrors DealRecord.LinkedPropertyId) since Property & CRM use separate DBs.
+        public int? PropertyId { get; set; }
+        public int? PropertyUnitId { get; set; }
     }
 }

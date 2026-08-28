@@ -1,9 +1,18 @@
 import apiClient from './ apiClient.js';
 
 export const crmService = {
-  getOperationalRecords: async (module) => {
+   getOperationalRecords: async (module) => {
     const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
     const response = await apiClient.get('/crm/operations', { params: { tenantId: userProfile.tenantId || '', module } });
+    return response.data;
+  },
+
+   // --- 🔗 UNIT-SCOPED OPERATIONAL RECORDS (leases / maintenance / document vault) ---
+   getOperationalRecordsForUnit: async (module, propertyId, propertyUnitId) => {
+    const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
+    const response = await apiClient.get('/crm/operations', {
+      params: { tenantId: userProfile.tenantId || '', module, propertyId, propertyUnitId }
+    });
     return response.data;
   },
 

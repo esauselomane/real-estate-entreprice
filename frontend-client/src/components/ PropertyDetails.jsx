@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ArrowLeft, MapPin, FileText, User, Home, CheckCircle2, 
-  ExternalLink, Image, Plus, Trash2, Layers, DollarSign, 
-  Building, Check, Loader2, AlertCircle 
-} from 'lucide-react';
+   ArrowLeft, MapPin, FileText, User, Home, CheckCircle2, 
+   ExternalLink, Image, Plus, Trash2, Layers, DollarSign, 
+   Building, Check, Loader2, AlertCircle, FileSignature, Wrench, FolderLock, Pencil
+ } from 'lucide-react';
 import { propertyService } from '../services/ propertyService.js';
+import { crmService } from '../services/ crmService.js';
 
 export default function PropertyDetails({ propertyId, onBack, onNavigateToClient }) {
   const [property, setProperty] = useState(null);
@@ -17,6 +18,22 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const [actionSuccessMessage, setActionSuccessMessage] = useState('');
   const [isEditingProperty, setIsEditingProperty] = useState(false);
   const [propertyForm, setPropertyForm] = useState(null);
+
+  // 🔗 UNIT-LEVEL OPERATIONS: leases / maintenance / document vault bound to a unit
+  const OPS_TABS = [
+    { id: 'leases', label: 'Leases', Icon: FileSignature, amount: 'Monthly rent', detailsPlaceholder: 'Term, escalation, deposit and notice details' },
+    { id: 'maintenance', label: 'Maintenance', Icon: Wrench, amount: 'Estimated cost', detailsPlaceholder: 'Issue, access instructions, photos or resolution notes' },
+    { id: 'documents', label: 'Document Vault', Icon: FolderLock, amount: 'Fee', detailsPlaceholder: 'Document type, storage reference, expiry and compliance notes' }
+  ];
+  const [unitOpsUnit, setUnitOpsUnit] = useState(null);
+  const [unitOpsTab, setUnitOpsTab] = useState('leases');
+  const [unitOpsRecords, setUnitOpsRecords] = useState([]);
+  const [unitOpsLoading, setUnitOpsLoading] = useState(false);
+  const [unitOpsError, setUnitOpsError] = useState('');
+  const [unitOpsSuccess, setUnitOpsSuccess] = useState('');
+  const [unitOpsForm, setUnitOpsForm] = useState({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' });
+  const [unitOpsEditing, setUnitOpsEditing] = useState(null);
+  const activeOpsTab = OPS_TABS.find(t => t.id === unitOpsTab) || OPS_TABS[0];
 
   // New Sub-Unit form state
   const [showAddUnitForm, setShowAddUnitForm] = useState(false);
@@ -59,6 +76,103 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       loadPropertyData();
     }
   }, [propertyId]);
+
+  // --- 🔗 UNIT-LEVEL OPERATIONS: fetch records bound to the selected unit + active tab ---
+  useEffect(() => {
+    const loadUnitOps = async () => {
+      if (!unitOpsUnit) { setUnitOpsRecords([]); return; }
+      setUnitOpsLoading(true);
+      setUnitOpsError('');
+      try {
+        const recs = await crmService.getOperationalRecordsForUnit(
+          unitOpsTab,
+          property.propertyId,
+          unitOpsUnit.propertyUnitId
+        );
+        setUnitOpsRecords(recs || []);
+      } catch (err) {
+        setUnitOpsError(err || 'Could not load unit records.');
+      } finally {
+        setUnitOpsLoading(false);
+      }
+    };
+    loadUnitOps();
+  }, [unitOpsUnit, unitOpsTab]);
+
+  const handleSelectUnitOps = (unit) => {
+    setUnitOpsUnit(unit);
+    setUnitOpsTab('leases');
+    setUnitOpsRecords([]);
+    setUnitOpsForm({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' });
+    setUnitOpsEditing(null);
+    setUnitOpsError('');
+    setUnitOpsSuccess('');
+  };
+
+  const resetUnitOpForm = () => {
+    setUnitOpsForm({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' });
+    setUnitOpsEditing(null);
+  };
+
+  const saveUnitOp = async (event) => {
+    event.preventDefault();
+    if (!unitOpsUnit || !unitOpsForm.title.trim()) {
+      setUnitOpsError('A title is required.');
+      return;
+    }
+    setUnitOpsError('');
+    setUnitOpsSuccess('');
+
+    // Property / unit / module are auto-bound from context — the user never
+    // has to enter them, which is what prevents cross-unit mis-linking.
+    const payload = {
+      tenantId: property.tenantId,
+      module: unitOpsTab,
+      title: unitOpsForm.title,
+      propertyReference: `${property.completeAddress} · Unit ${unitOpsUnit.unitNumber}`,
+      contactName: unitOpsForm.contactName,
+      status: unitOpsForm.status,
+      dueDate: unitOpsForm.dueDate || null,
+      amount: Number(unitOpsForm.amount || 0),
+      details: unitOpsForm.details,
+      propertyId: property.propertyId,
+      propertyUnitId: unitOpsUnit.propertyUnitId
+    };
+
+    try {
+      if (unitOpsEditing) {
+        await crmService.updateOperationalRecord(unitOpsEditing.operationalRecordId, { ...unitOpsEditing, ...payload });
+      } else {
+        await crmService.createOperationalRecord(payload);
+      }
+      setUnitOpsSuccess('Record saved.');
+      setTimeout(() => setUnitOpsSuccess(''), 2000);
+      resetUnitOpForm();
+      // Refresh the list for the current tab
+      const recs = await crmService.getOperationalRecordsForUnit(
+        unitOpsTab,
+        property.propertyId,
+        unitOpsUnit.propertyUnitId
+      );
+      setUnitOpsRecords(recs || []);
+    } catch (err) {
+      setUnitOpsError(err || 'Could not save this record.');
+    }
+  };
+
+  const editUnitOp = (record) => {
+    setUnitOpsEditing(record);
+    setUnitOpsForm({
+      title: record.title || '',
+      contactName: record.contactName || '',
+      status: record.status || 'Open',
+      dueDate: record.dueDate ? new Date(record.dueDate).toISOString().slice(0, 10) : '',
+      amount: record.amount || '',
+      details: record.details || ''
+    });
+    setUnitOpsError('');
+    setUnitOpsSuccess('');
+  };
 
   // Handle Image Upload
   const handleImageUpload = async (e) => {
@@ -443,20 +557,117 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                           </span>
                         </div>
                       )}
-                      <button 
-                        type="button"
-                        onClick={() => handleDeleteSubUnit(unit.propertyUnitId, unit.unitNumber)}
-                        title="Remove Sub-unit"
-                        className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                       <button 
+                         type="button"
+                         onClick={() => handleSelectUnitOps(unit)}
+                         title="Lease / maintenance / document vault for this unit"
+                         className="text-slate-500 hover:text-blue-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                       >
+                         <Wrench size={14} />
+                       </button>
+                       <button 
+                         type="button"
+                         onClick={() => handleDeleteSubUnit(unit.propertyUnitId, unit.unitNumber)}
+                         title="Remove Sub-unit"
+                         className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                       >
+                         <Trash2 size={14} />
+                       </button>
                     </div>
                   </div>
                 ))
               )}
             </div>
           </div>
+
+          {/* 🧩 UNIT-LEVEL OPERATIONS: Leases / Maintenance / Document Vault bound to a unit */}
+          {unitOpsUnit && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Building size={16} className="text-blue-500" />
+                  <h4 className="text-sm font-bold text-white uppercase tracking-wider">Unit Operations</h4>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                    Property #{property.propertyId} · {unitOpsUnit.unitNumber}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setUnitOpsUnit(null)}
+                    className="text-xs text-slate-500 hover:text-slate-200 underline"
+                  >
+                    Change unit
+                  </button>
+                </div>
+              </div>
+
+              {unitOpsError && <div className="p-3 rounded-xl text-xs bg-red-950/40 border border-red-900 text-red-300">{unitOpsError}</div>}
+              {unitOpsSuccess && <div className="p-3 rounded-xl text-xs bg-emerald-950/40 border border-emerald-900 text-emerald-300">{unitOpsSuccess}</div>}
+
+              <div className="flex gap-1 border-b border-slate-800">
+                {OPS_TABS.map((tab) => { const Icon = tab.Icon; return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => { setUnitOpsTab(tab.id); setUnitOpsForm({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' }); setUnitOpsEditing(null); }}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-b-2 transition ${
+                      unitOpsTab === tab.id
+                        ? 'border-blue-500 text-blue-300'
+                        : 'border-transparent text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Icon size={13} />{tab.label}
+                  </button>
+                ); })}
+              </div>
+
+              <div className="grid xl:grid-cols-[340px_1fr] gap-6">
+                <form onSubmit={saveUnitOp} className="space-y-3">
+                  <h5 className="text-xs font-bold text-blue-400 uppercase">
+                    {unitOpsEditing ? `Edit ${activeOpsTab.label}` : `Add ${activeOpsTab.label}`}
+                  </h5>
+                  <label className="label">Title<input required value={unitOpsForm.title} onChange={e => setUnitOpsForm({ ...unitOpsForm, title: e.target.value })} className="field" placeholder={`${activeOpsTab.label.slice(0, -1)} title`} /></label>
+                  <label className="label">Contact<input value={unitOpsForm.contactName} onChange={e => setUnitOpsForm({ ...unitOpsForm, contactName: e.target.value })} className="field" placeholder="Contractor, tenant, vendor..." /></label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="label">Status<select value={unitOpsForm.status} onChange={e => setUnitOpsForm({ ...unitOpsForm, status: e.target.value })} className="field"><option>Open</option><option>In Progress</option><option>Awaiting Information</option><option>Completed</option><option>Cancelled</option></select></label>
+                    <label className="label">Due date<input type="date" value={unitOpsForm.dueDate || ''} onChange={e => setUnitOpsForm({ ...unitOpsForm, dueDate: e.target.value })} className="field" /></label>
+                  </div>
+                  <label className="label">{activeOpsTab.amount}<input type="number" min="0" value={unitOpsForm.amount ?? ''} onChange={e => setUnitOpsForm({ ...unitOpsForm, amount: e.target.value })} className="field" /></label>
+                  <label className="label">Details<textarea rows={4} value={unitOpsForm.details} onChange={e => setUnitOpsForm({ ...unitOpsForm, details: e.target.value })} className="field" placeholder={activeOpsTab.detailsPlaceholder} /></label>
+                  <div className="flex gap-3">
+                    <button type="button" onClick={resetUnitOpForm} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Clear</button>
+                    <button className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">{unitOpsEditing ? 'Save changes' : 'Save record'}</button>
+                  </div>
+                  <p className="text-[10px] text-slate-500">Auto-linked to Property #{property.propertyId} · {unitOpsUnit.unitNumber}. Property / unit are not editable here.</p>
+                </form>
+
+                <div>
+                  {unitOpsLoading ? (
+                    <div className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="animate-spin" size={14} />Loading {activeOpsTab.label.toLowerCase()}…</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {unitOpsRecords.map((r) => (
+                        <div key={r.operationalRecordId} className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl flex justify-between gap-4">
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-bold text-white">{r.title}</p>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">{r.status}</span>
+                            </div>
+                            <p className="text-[10px] text-slate-400">{r.contactName || 'No contact'}{r.dueDate ? ` · Due ${new Date(r.dueDate).toLocaleDateString()}` : ''}</p>
+                            {r.details && <p className="text-[10px] text-slate-500 whitespace-pre-wrap">{r.details}</p>}
+                            {Number(r.amount || 0) !== 0 && <p className="text-[10px] text-emerald-400">R {Number(r.amount).toLocaleString()}</p>}
+                          </div>
+                          <button type="button" onClick={() => editUnitOp(r)} className="h-fit p-1.5 text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                        </div>
+                      ))}
+                      {!unitOpsRecords.length && <p className="text-[10px] text-slate-500">No {activeOpsTab.label.toLowerCase()} records for this unit yet.</p>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 🖼️ Media Vault & Image Uploader */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">

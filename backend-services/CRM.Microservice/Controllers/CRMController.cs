@@ -25,10 +25,16 @@ namespace CRM.Microservice.Controllers
         public class ReallocatePayload { public int TargetId { get; set; } public bool IsDeal { get; set; } public string TargetAgentName { get; set; } = string.Empty; }
 
         [HttpGet("operations")]
-        public async Task<IActionResult> GetOperationalRecords([FromQuery] string tenantId, [FromQuery] string module)
+        public async Task<IActionResult> GetOperationalRecords([FromQuery] string tenantId, [FromQuery] string module, [FromQuery] int? propertyId, [FromQuery] int? propertyUnitId)
         {
             var query = _context.OperationalRecords.Where(r => r.TenantId == tenantId);
             if (!string.IsNullOrWhiteSpace(module)) query = query.Where(r => r.Module == module);
+
+            // 🔗 Optional property / unit scoping so records can be surfaced on the
+            // property page bound to a specific sub-unit without re-typing anything.
+            if (propertyId.HasValue) query = query.Where(r => r.PropertyId == propertyId.Value);
+            if (propertyUnitId.HasValue) query = query.Where(r => r.PropertyUnitId == propertyUnitId.Value);
+
             return Ok(await query.OrderByDescending(r => r.UpdatedAt).ToListAsync());
         }
 
@@ -56,6 +62,8 @@ namespace CRM.Microservice.Controllers
             record.DueDate = updatedRecord.DueDate;
             record.Amount = updatedRecord.Amount;
             record.Details = updatedRecord.Details;
+            record.PropertyId = updatedRecord.PropertyId;
+            record.PropertyUnitId = updatedRecord.PropertyUnitId;
             record.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
             return Ok(record);

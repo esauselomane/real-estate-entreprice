@@ -1,13 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Wrench, FileSignature, ReceiptText, ClipboardCheck, FolderLock, MessageSquare, Gavel, Scale, Pencil, Plus, Loader2 } from 'lucide-react';
+import { ReceiptText, ClipboardCheck, MessageSquare, Gavel, Scale, Pencil, Plus, Loader2 } from 'lucide-react';
 import { crmService } from '../services/ crmService.js';
 
 const modules = [
-  { id: 'maintenance', label: 'Maintenance', icon: Wrench, title: 'Work order', contact: 'Contractor / tenant', amount: 'Estimated cost', details: 'Issue, access instructions, photos or resolution notes' },
-  { id: 'leases', label: 'Leases', icon: FileSignature, title: 'Lease / renewal', contact: 'Tenant', amount: 'Monthly rent', details: 'Term, escalation, deposit and notice details' },
   { id: 'financials', label: 'Financials', icon: ReceiptText, title: 'Invoice / arrears item', contact: 'Owner / tenant', amount: 'Amount', details: 'Invoice, payment reference or arrears notes' },
   { id: 'inspections', label: 'Inspections', icon: ClipboardCheck, title: 'Inspection', contact: 'Inspector / tenant', amount: 'Cost', details: 'Condition, findings, follow-up and evidence location' },
-  { id: 'documents', label: 'Document Vault', icon: FolderLock, title: 'Document record', contact: 'Document owner', amount: 'Fee', details: 'Document type, storage reference, expiry and compliance notes' },
   { id: 'portal', label: 'Tenant Portal', icon: MessageSquare, title: 'Tenant request', contact: 'Tenant', amount: 'Charge', details: 'Request, communication and response details' },
   { id: 'auctions', label: 'Auctions', icon: Gavel, title: 'Auction listing / bid', contact: 'Bidder', amount: 'Bid / reserve value', details: 'Reserve, bidder KYC, deposit and bid history' },
   { id: 'conveyancing', label: 'Conveyancing', icon: Scale, title: 'Conveyancing milestone', contact: 'Attorney / buyer', amount: 'Legal cost', details: 'OTP, bond, deeds office milestone and outstanding documents' }
