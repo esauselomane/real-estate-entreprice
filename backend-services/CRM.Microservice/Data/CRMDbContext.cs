@@ -18,6 +18,8 @@ namespace CRM.Microservice.Data
         public DbSet<LeadRecord> LeadRecords { get; set; }
         public DbSet<DealRecord> DealRecords { get; set; }
         public DbSet<OperationalRecord> OperationalRecords { get; set; }
+        public DbSet<GeographyRecord> GeographyRecords { get; set; }
+        public DbSet<ContactPerson> ContactPersons { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -47,6 +49,12 @@ namespace CRM.Microservice.Data
                 .HasOne(l => l.CompanyDetails)
                 .WithMany()
                 .HasForeignKey(l => l.AssociatedCompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ContactPerson>()
+                .HasOne(c => c.Agency)
+                .WithMany(a => a.ContactPersons)
+                .HasForeignKey(c => c.AgencyId)
                 .OnDelete(DeleteBehavior.Restrict);
         }
     }

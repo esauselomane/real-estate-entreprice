@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { 
    ArrowLeft, MapPin, FileText, User, Home, CheckCircle2, 
    ExternalLink, Image, Plus, Trash2, Layers, DollarSign, 
-   Building, Check, Loader2, AlertCircle, FileSignature, Wrench, FolderLock, Pencil
+   Building, Check, Loader2, AlertCircle, FileSignature, Wrench, FolderLock, Pencil,
+   X, Save, Upload, Download
  } from 'lucide-react';
-import { propertyService } from '../services/ propertyService.js';
-import { crmService } from '../services/ crmService.js';
+import { propertyService } from '../services/propertyService.js';
+import { crmService } from '../services/crmService.js';
+import { canManageUnits } from '../services/authService.js';
 
 export default function PropertyDetails({ propertyId, onBack, onNavigateToClient }) {
   const [property, setProperty] = useState(null);
@@ -18,26 +20,45 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const [actionSuccessMessage, setActionSuccessMessage] = useState('');
   const [isEditingProperty, setIsEditingProperty] = useState(false);
   const [propertyForm, setPropertyForm] = useState(null);
+  // 🧩 PROPERTY-LEVEL OPERATIONS — operational records bound to this property (consolidated
+  // from the standalone OperationsWorkspace so all property operations live on the property page).
+  const [propertyOps, setPropertyOps] = useState([]);
+  const [propertyOpsLoading, setPropertyOpsLoading] = useState(false);
+  const [propertyOpsError, setPropertyOpsError] = useState('');
 
-  // 🔗 UNIT-LEVEL OPERATIONS: leases / maintenance / document vault bound to a unit
+  // 🔗 UNIT WORKSPACE MODAL: editable details + leases/maintenance + unit document vault
   const OPS_TABS = [
     { id: 'leases', label: 'Leases', Icon: FileSignature, amount: 'Monthly rent', detailsPlaceholder: 'Term, escalation, deposit and notice details' },
-    { id: 'maintenance', label: 'Maintenance', Icon: Wrench, amount: 'Estimated cost', detailsPlaceholder: 'Issue, access instructions, photos or resolution notes' },
-    { id: 'documents', label: 'Document Vault', Icon: FolderLock, amount: 'Fee', detailsPlaceholder: 'Document type, storage reference, expiry and compliance notes' }
+    { id: 'maintenance', label: 'Maintenance', Icon: Wrench, amount: 'Estimated cost', detailsPlaceholder: 'Issue, access instructions, photos or resolution notes' }
   ];
-  const [unitOpsUnit, setUnitOpsUnit] = useState(null);
-  const [unitOpsTab, setUnitOpsTab] = useState('leases');
+  const [unitModalUnit, setUnitModalUnit] = useState(null);
+  const [modalTab, setModalTab] = useState('details');
   const [unitOpsRecords, setUnitOpsRecords] = useState([]);
   const [unitOpsLoading, setUnitOpsLoading] = useState(false);
   const [unitOpsError, setUnitOpsError] = useState('');
   const [unitOpsSuccess, setUnitOpsSuccess] = useState('');
   const [unitOpsForm, setUnitOpsForm] = useState({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' });
   const [unitOpsEditing, setUnitOpsEditing] = useState(null);
-  const activeOpsTab = OPS_TABS.find(t => t.id === unitOpsTab) || OPS_TABS[0];
+  const activeOpsTab = OPS_TABS.find(t => t.id === (unitModalUnit ? modalTab : 'leases')) || OPS_TABS[0];
 
-  // New Sub-Unit form state
-  const [showAddUnitForm, setShowAddUnitForm] = useState(false);
-  const [isSubmittingUnit, setIsSubmittingUnit] = useState(false);
+  // Editable unit details form (pre-filled when the modal opens on a unit)
+  const [unitEditForm, setUnitEditForm] = useState({ unitNumber: '', unitDescription: '', netRentableAreaSqM: '', specificUnitRentalPrice: '', specificUnitSalePrice: '', isCurrentlyVacant: true });
+  const [unitEditError, setUnitEditError] = useState('');
+  const [unitEditSuccess, setUnitEditSuccess] = useState('');
+
+  // Unit-level document vault (name + description + actual file saved to server disk)
+  const [unitDocForm, setUnitDocForm] = useState({ name: '', description: '', file: null });
+  const [unitDocUploading, setUnitDocUploading] = useState(false);
+  const [unitDocError, setUnitDocError] = useState('');
+  const [unitDocSuccess, setUnitDocSuccess] = useState('');
+
+   // New Sub-Unit form state
+   const [showAddUnitForm, setShowAddUnitForm] = useState(false);
+   const [isSubmittingUnit, setIsSubmittingUnit] = useState(false);
+   // 🛡️ Role-derived capability flags (mirror the backend Tenant/Owner read-only rule).
+   // Tenants and Owners can view + edit their scoped units/docs but may never add or
+   // delete units, documents, or maintenance calls — so those controls are hidden.
+   const canManage = canManageUnits();
   const [newUnit, setNewUnit] = useState({
     unitNumber: '',
     unitDescription: '',
@@ -52,10 +73,22 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     setIsLoading(true);
     setErrorMessage('');
     try {
-      const data = await propertyService.getPropertyById(propertyId);
+       const data = await propertyService.getPropertyById(propertyId);
       setProperty(data);
       setSubUnits(data.subUnits || []);
-      
+
+      // Load the property-level operations ledger (all modules bound to this property)
+      try {
+        setPropertyOpsLoading(true);
+        const ops = await crmService.getOperationalRecordsForUnit('', propertyId, null);
+        setPropertyOps(ops || []);
+      } catch (err) {
+        setPropertyOpsError(err || 'Could not load property operations.');
+        setPropertyOps([]);
+      } finally {
+        setPropertyOpsLoading(false);
+      }
+
       // Load platforms lookup
       try {
         const platList = await propertyService.getPlatforms();
@@ -77,17 +110,40 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     }
   }, [propertyId]);
 
-  // --- 🔗 UNIT-LEVEL OPERATIONS: fetch records bound to the selected unit + active tab ---
+  // --- 🔗 UNIT WORKSPACE MODAL ---
+  const openUnitModal = (unit) => {
+    setUnitModalUnit(unit);
+    setModalTab('details');
+    setUnitOpsRecords([]);
+    setUnitOpsForm({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' });
+    setUnitOpsEditing(null);
+    setUnitOpsError(''); setUnitOpsSuccess('');
+    setUnitEditForm({
+      unitNumber: unit.unitNumber || '',
+      unitDescription: unit.unitDescription || '',
+      netRentableAreaSqM: unit.netRentableAreaSqM || '',
+      specificUnitRentalPrice: unit.specificUnitRentalPrice ?? '',
+      specificUnitSalePrice: unit.specificUnitSalePrice ?? '',
+      isCurrentlyVacant: !!unit.isCurrentlyVacant
+    });
+    setUnitEditError(''); setUnitEditSuccess('');
+    setUnitDocForm({ name: '', description: '', file: null });
+    setUnitDocError(''); setUnitDocSuccess('');
+  };
+
+  const closeUnitModal = () => setUnitModalUnit(null);
+
+  // Load leases/maintenance operational records when the modal is open on those tabs
   useEffect(() => {
-    const loadUnitOps = async () => {
-      if (!unitOpsUnit) { setUnitOpsRecords([]); return; }
+    const loadModalOps = async () => {
+      if (!unitModalUnit || !OPS_TABS.some(t => t.id === modalTab)) return;
       setUnitOpsLoading(true);
       setUnitOpsError('');
       try {
         const recs = await crmService.getOperationalRecordsForUnit(
-          unitOpsTab,
+          modalTab,
           property.propertyId,
-          unitOpsUnit.propertyUnitId
+          unitModalUnit.propertyUnitId
         );
         setUnitOpsRecords(recs || []);
       } catch (err) {
@@ -96,18 +152,8 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         setUnitOpsLoading(false);
       }
     };
-    loadUnitOps();
-  }, [unitOpsUnit, unitOpsTab]);
-
-  const handleSelectUnitOps = (unit) => {
-    setUnitOpsUnit(unit);
-    setUnitOpsTab('leases');
-    setUnitOpsRecords([]);
-    setUnitOpsForm({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' });
-    setUnitOpsEditing(null);
-    setUnitOpsError('');
-    setUnitOpsSuccess('');
-  };
+    loadModalOps();
+  }, [unitModalUnit, modalTab]);
 
   const resetUnitOpForm = () => {
     setUnitOpsForm({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' });
@@ -116,29 +162,24 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
 
   const saveUnitOp = async (event) => {
     event.preventDefault();
-    if (!unitOpsUnit || !unitOpsForm.title.trim()) {
+    if (!unitModalUnit || !unitOpsForm.title.trim()) {
       setUnitOpsError('A title is required.');
       return;
     }
-    setUnitOpsError('');
-    setUnitOpsSuccess('');
-
-    // Property / unit / module are auto-bound from context — the user never
-    // has to enter them, which is what prevents cross-unit mis-linking.
+    setUnitOpsError(''); setUnitOpsSuccess('');
     const payload = {
       tenantId: property.tenantId,
-      module: unitOpsTab,
+      module: modalTab,
       title: unitOpsForm.title,
-      propertyReference: `${property.completeAddress} · Unit ${unitOpsUnit.unitNumber}`,
+      propertyReference: `${property.completeAddress} · Unit ${unitModalUnit.unitNumber}`,
       contactName: unitOpsForm.contactName,
       status: unitOpsForm.status,
       dueDate: unitOpsForm.dueDate || null,
       amount: Number(unitOpsForm.amount || 0),
       details: unitOpsForm.details,
       propertyId: property.propertyId,
-      propertyUnitId: unitOpsUnit.propertyUnitId
+      propertyUnitId: unitModalUnit.propertyUnitId
     };
-
     try {
       if (unitOpsEditing) {
         await crmService.updateOperationalRecord(unitOpsEditing.operationalRecordId, { ...unitOpsEditing, ...payload });
@@ -148,11 +189,8 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       setUnitOpsSuccess('Record saved.');
       setTimeout(() => setUnitOpsSuccess(''), 2000);
       resetUnitOpForm();
-      // Refresh the list for the current tab
       const recs = await crmService.getOperationalRecordsForUnit(
-        unitOpsTab,
-        property.propertyId,
-        unitOpsUnit.propertyUnitId
+        modalTab, property.propertyId, unitModalUnit.propertyUnitId
       );
       setUnitOpsRecords(recs || []);
     } catch (err) {
@@ -170,8 +208,112 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       amount: record.amount || '',
       details: record.details || ''
     });
-    setUnitOpsError('');
-    setUnitOpsSuccess('');
+    setUnitOpsError(''); setUnitOpsSuccess('');
+  };
+
+  // --- EDITABLE UNIT DETAILS ---
+  const saveUnitEdit = async (event) => {
+    event.preventDefault();
+    if (!unitModalUnit || !unitEditForm.unitNumber.trim()) {
+      setUnitEditError('Unit number is required.');
+      return;
+    }
+    setUnitEditError(''); setUnitEditSuccess('');
+    try {
+      const saved = await propertyService.updatePropertyUnit(property.propertyId, unitModalUnit.propertyUnitId, {
+        unitNumber: unitEditForm.unitNumber.trim(),
+        unitDescription: unitEditForm.unitDescription,
+        netRentableAreaSqM: Number(unitEditForm.netRentableAreaSqM || 0),
+        specificUnitRentalPrice: unitEditForm.specificUnitRentalPrice === '' ? null : Number(unitEditForm.specificUnitRentalPrice),
+        specificUnitSalePrice: unitEditForm.specificUnitSalePrice === '' ? null : Number(unitEditForm.specificUnitSalePrice),
+        isCurrentlyVacant: unitEditForm.isCurrentlyVacant
+      });
+      // Reflect edits into the open modal + the master property list
+      setUnitModalUnit(saved);
+      setSubUnits(prev => prev.map(u => u.propertyUnitId === saved.propertyUnitId ? saved : u));
+      setUnitEditSuccess('Unit details updated.');
+      setTimeout(() => setUnitEditSuccess(''), 2000);
+    } catch (err) {
+      setUnitEditError(err || 'Could not update unit details.');
+    }
+  };
+
+  // --- UNIT DOCUMENT VAULT (name + description + actual file saved to server disk) ---
+  const parseUnitDocs = (unit = unitModalUnit) => {
+    if (!unit || !unit.unitDocumentsJson) return [];
+    try { return JSON.parse(unit.unitDocumentsJson) || []; }
+    catch { return []; }
+  };
+  const [unitDocs, setUnitDocs] = useState([]);
+
+  // Refresh the unit document list from the role-scoped list endpoint whenever the
+  // unit modal is (re)opened. Falls back to the embedded field if the list call is blocked.
+  const loadUnitDocs = async () => {
+    if (!unitModalUnit) { setUnitDocs([]); return; }
+    try {
+      const docs = await propertyService.getUnitDocuments(property.propertyId, unitModalUnit.propertyUnitId);
+      setUnitDocs(docs && docs.length ? docs : parseUnitDocs(unitModalUnit));
+    } catch {
+      setUnitDocs(parseUnitDocs(unitModalUnit));
+    }
+  };
+
+  useEffect(() => { loadUnitDocs(); }, [unitModalUnit]);
+
+  const resetDocForm = () => setUnitDocForm({ name: '', description: '', file: null });
+
+  const uploadUnitDocument = async (event) => {
+    event.preventDefault();
+    if (!unitModalUnit || !unitDocForm.file || !unitDocForm.name.trim()) {
+      setUnitDocError('A document name and file are required.');
+      return;
+    }
+    setUnitDocUploading(true); setUnitDocError(''); setUnitDocSuccess('');
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(unitDocForm.file);
+    });
+      try {
+        await propertyService.uploadPropertyUnitDocument(property.propertyId, unitModalUnit.propertyUnitId, unitDocForm.file, {
+          name: unitDocForm.name.trim(),
+          description: unitDocForm.description.trim()
+        });
+        // Refresh the unit document list (server persists UnitDocumentsJson)
+        await loadUnitDocs();
+        setUnitDocSuccess('Document uploaded to server vault.');
+        setTimeout(() => setUnitDocSuccess(''), 2000);
+        resetDocForm();
+      } catch (err) {
+      setUnitDocError(err || 'Could not upload this document.');
+    } finally {
+      setUnitDocUploading(false);
+    }
+  };
+
+  const deleteUnitDocument = async (doc) => {
+    if (!window.confirm(`Are you sure you want to delete "${doc.name}" from this unit's document vault?`)) return;
+    try {
+      await propertyService.deletePropertyUnitDocument(property.propertyId, unitModalUnit.propertyUnitId, doc.storedName);
+      await loadUnitDocs();
+      setUnitDocSuccess('Document removed.');
+      setTimeout(() => setUnitDocSuccess(''), 1500);
+    } catch (err) {
+      setUnitDocError(err || 'Could not remove this document.');
+    }
+  };
+
+  const downloadUnitDocument = async (doc) => {
+    try {
+      const blob = await propertyService.downloadPropertyUnitDocument(property.propertyId, unitModalUnit.propertyUnitId, doc.storedName, doc.fileName);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = doc.fileName;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Could not download document: ${err}`);
+    }
   };
 
   // Handle Image Upload
@@ -422,6 +564,39 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
             </div>
           </div>
 
+          {/* 🧩 PROPERTY-LEVEL OPERATIONS LEDGER (consolidated from the property operations workspace) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex items-center gap-2">
+              <Wrench size={18} className="text-violet-500" />
+              <h4 className="text-sm font-bold text-white uppercase tracking-wider">Property Operations ({propertyOps.length})</h4>
+            </div>
+            {propertyOpsLoading ? (
+              <div className="text-xs text-slate-500">Loading property operations ledger...</div>
+            ) : propertyOpsError ? (
+              <div className="text-xs text-red-400">{propertyOpsError}</div>
+            ) : propertyOps.length === 0 ? (
+              <p className="text-xs text-slate-500">No operational records are currently bound to this property.</p>
+            ) : (
+              <div className="space-y-3">
+                {propertyOps.map((r) => (
+                  <div key={r.operationalRecordId} className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl flex justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2"><span className="text-xs font-bold text-white">{r.title}</span><span className="text-[10px] px-2 py-0.5 rounded bg-blue-950 text-blue-300">{r.module}</span></div>
+                      <p className="text-xs text-slate-400">{r.propertyReference || 'No property reference'} · {r.contactName || 'No contact'}</p>
+                      <p className="text-xs text-slate-500 whitespace-pre-wrap">{r.details}</p>
+                    </div>
+                    <div className="text-right text-xs text-slate-400">
+                      <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">{r.status}</span>
+                      {r.amount > 0 && <span className="text-emerald-400 block mt-1">R {Number(r.amount).toLocaleString()}</span>}
+                      {r.dueDate && <span className="text-slate-500 block mt-1">Due {new Date(r.dueDate).toLocaleDateString()}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[10px] text-slate-500">Records are managed from the unit workspace (maintenance / lease tabs). All entries are tenant-scoped to this property.</p>
+          </div>
+
           {/* 🏢 MULTI-TENANT SUB-UNITS LEDGER (LINKED UNITS SECTION) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -435,16 +610,18 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                 <span className="text-xs text-slate-400 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
                   Total NRA: <strong className="text-white">{totalNRA.toFixed(1)} m²</strong>
                 </span>
-                <span className="text-xs text-slate-400 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
-                  Vacant: <strong className="text-emerald-400">{vacantUnitsCount}</strong> / {subUnits.length}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowAddUnitForm(!showAddUnitForm)}
-                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-sm"
-                >
-                  <Plus size={14} /> {showAddUnitForm ? 'Cancel' : 'Link New Unit'}
-                </button>
+                 <span className="text-xs text-slate-400 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                   Vacant: <strong className="text-emerald-400">{vacantUnitsCount}</strong> / {subUnits.length}
+                 </span>
+                 {canManage && (
+                   <button
+                     type="button"
+                     onClick={() => setShowAddUnitForm(!showAddUnitForm)}
+                     className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-sm"
+                   >
+                     <Plus size={14} /> {showAddUnitForm ? 'Cancel' : 'Link New Unit'}
+                   </button>
+                 )}
               </div>
             </div>
 
@@ -558,21 +735,23 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                         </div>
                       )}
                        <button 
-                         type="button"
-                         onClick={() => handleSelectUnitOps(unit)}
-                         title="Lease / maintenance / document vault for this unit"
-                         className="text-slate-500 hover:text-blue-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                       >
-                         <Wrench size={14} />
-                       </button>
-                       <button 
-                         type="button"
-                         onClick={() => handleDeleteSubUnit(unit.propertyUnitId, unit.unitNumber)}
-                         title="Remove Sub-unit"
-                         className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                       >
-                         <Trash2 size={14} />
-                       </button>
+                          type="button"
+                          onClick={() => openUnitModal(unit)}
+                          title="Open unit workspace (details / leases / maintenance / documents)"
+                          className="text-slate-500 hover:text-blue-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                          <Wrench size={14} />
+                        </button>
+                        {canManage && (
+                           <button 
+                            type="button"
+                            onClick={() => handleDeleteSubUnit(unit.propertyUnitId, unit.unitNumber)}
+                            title="Remove Sub-unit"
+                            className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                          >
+                            <Trash2 size={14} />
+                           </button>
+                        )}
                     </div>
                   </div>
                 ))
@@ -580,88 +759,129 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
             </div>
           </div>
 
-          {/* 🧩 UNIT-LEVEL OPERATIONS: Leases / Maintenance / Document Vault bound to a unit */}
-          {unitOpsUnit && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <Building size={16} className="text-blue-500" />
-                  <h4 className="text-sm font-bold text-white uppercase tracking-wider">Unit Operations</h4>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
-                    Property #{property.propertyId} · {unitOpsUnit.unitNumber}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setUnitOpsUnit(null)}
-                    className="text-xs text-slate-500 hover:text-slate-200 underline"
-                  >
-                    Change unit
+          {/* 🧩 UNIT WORKSPACE MODAL: editable details + leases/maintenance + document vault */}
+          {unitModalUnit && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-xl">
+                <header className="flex items-center justify-between p-4 border-b border-slate-800">
+                  <h3 className="text-sm font-bold text-white uppercase">Unit {unitModalUnit.unitNumber} — Property #{property.propertyId}</h3>
+                  <button type="button" onClick={closeUnitModal} className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"><X size={16} /></button>
+                </header>
+
+                <nav className="flex items-end gap-1 px-4 border-b border-slate-800 bg-slate-950/40">
+                  <button type="button" onClick={() => setModalTab('details')} className={`px-3 py-2 text-xs font-bold ${modalTab === 'details' ? 'text-blue-300 border-b-2 border-blue-500' : 'text-slate-400'}`}>Details</button>
+                  {OPS_TABS.map((tab) => { const Icon = tab.Icon; return (
+                    <button key={tab.id} type="button" onClick={() => setModalTab(tab.id)} className={`flex items-center gap-1 px-3 py-2 text-xs font-bold ${modalTab === tab.id ? 'text-blue-300 border-b-2 border-blue-500' : 'text-slate-400'}`}>
+                      <Icon size={13} />{tab.label}
+                    </button>
+                  ); })}
+                  <button type="button" onClick={() => setModalTab('documents')} className={`flex items-center gap-1 px-3 py-2 text-xs font-bold ${modalTab === 'documents' ? 'text-blue-300 border-b-2 border-blue-500' : 'text-slate-400'}`}>
+                    <FolderLock size={13} />Document Vault
                   </button>
-                </div>
-              </div>
+                </nav>
 
-              {unitOpsError && <div className="p-3 rounded-xl text-xs bg-red-950/40 border border-red-900 text-red-300">{unitOpsError}</div>}
-              {unitOpsSuccess && <div className="p-3 rounded-xl text-xs bg-emerald-950/40 border border-emerald-900 text-emerald-300">{unitOpsSuccess}</div>}
+                <div className="overflow-y-auto p-4 space-y-4">
+                  {/* ✏️ UNIT DETAILS (editable) */}
+                  {modalTab === 'details' && (
+                    <form onSubmit={saveUnitEdit} className="grid sm:grid-cols-2 gap-4">
+                      {unitEditError && <div className="p-3 rounded-xl text-xs bg-red-950/40 border border-red-900 text-red-300 sm:col-span-2">{unitEditError}</div>}
+                      {unitEditSuccess && <div className="p-3 rounded-xl text-xs bg-emerald-950/40 border border-emerald-900 text-emerald-300 sm:col-span-2">{unitEditSuccess}</div>}
+                      <label className="label">Unit number<input required value={unitEditForm.unitNumber} onChange={e => setUnitEditForm({ ...unitEditForm, unitNumber: e.target.value })} className="field" /></label>
+                      <label className="label">NRA (m²)<input type="number" min="0" value={unitEditForm.netRentableAreaSqM} onChange={e => setUnitEditForm({ ...unitEditForm, netRentableAreaSqM: e.target.value })} className="field" /></label>
+                      <label className="label sm:col-span-2">Unit description<textarea rows={2} value={unitEditForm.unitDescription} onChange={e => setUnitEditForm({ ...unitEditForm, unitDescription: e.target.value })} className="field" placeholder="e.g. Ground floor retail shell" /></label>
+                      <label className="label">Rental price<input type="number" min="0" value={unitEditForm.specificUnitRentalPrice ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, specificUnitRentalPrice: e.target.value || '' })} className="field" /></label>
+                      <label className="label">Sale price<input type="number" min="0" value={unitEditForm.specificUnitSalePrice ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, specificUnitSalePrice: e.target.value || '' })} className="field" /></label>
+                      <label className="flex items-center gap-2 text-xs mt-1"><input type="checkbox" checked={unitEditForm.isCurrentlyVacant} onChange={e => setUnitEditForm({ ...unitEditForm, isCurrentlyVacant: e.target.checked })} /><span className="text-slate-300">Currently vacant</span></label>
+                      <div className="sm:col-span-2">
+                        <button type="submit" className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold"><Save size={13} />Save unit details</button>
+                      </div>
+                    </form>
+                  )}
 
-              <div className="flex gap-1 border-b border-slate-800">
-                {OPS_TABS.map((tab) => { const Icon = tab.Icon; return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => { setUnitOpsTab(tab.id); setUnitOpsForm({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' }); setUnitOpsEditing(null); }}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-bold border-b-2 transition ${
-                      unitOpsTab === tab.id
-                        ? 'border-blue-500 text-blue-300'
-                        : 'border-transparent text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <Icon size={13} />{tab.label}
-                  </button>
-                ); })}
-              </div>
-
-              <div className="grid xl:grid-cols-[340px_1fr] gap-6">
-                <form onSubmit={saveUnitOp} className="space-y-3">
-                  <h5 className="text-xs font-bold text-blue-400 uppercase">
-                    {unitOpsEditing ? `Edit ${activeOpsTab.label}` : `Add ${activeOpsTab.label}`}
-                  </h5>
-                  <label className="label">Title<input required value={unitOpsForm.title} onChange={e => setUnitOpsForm({ ...unitOpsForm, title: e.target.value })} className="field" placeholder={`${activeOpsTab.label.slice(0, -1)} title`} /></label>
-                  <label className="label">Contact<input value={unitOpsForm.contactName} onChange={e => setUnitOpsForm({ ...unitOpsForm, contactName: e.target.value })} className="field" placeholder="Contractor, tenant, vendor..." /></label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="label">Status<select value={unitOpsForm.status} onChange={e => setUnitOpsForm({ ...unitOpsForm, status: e.target.value })} className="field"><option>Open</option><option>In Progress</option><option>Awaiting Information</option><option>Completed</option><option>Cancelled</option></select></label>
-                    <label className="label">Due date<input type="date" value={unitOpsForm.dueDate || ''} onChange={e => setUnitOpsForm({ ...unitOpsForm, dueDate: e.target.value })} className="field" /></label>
-                  </div>
-                  <label className="label">{activeOpsTab.amount}<input type="number" min="0" value={unitOpsForm.amount ?? ''} onChange={e => setUnitOpsForm({ ...unitOpsForm, amount: e.target.value })} className="field" /></label>
-                  <label className="label">Details<textarea rows={4} value={unitOpsForm.details} onChange={e => setUnitOpsForm({ ...unitOpsForm, details: e.target.value })} className="field" placeholder={activeOpsTab.detailsPlaceholder} /></label>
-                  <div className="flex gap-3">
-                    <button type="button" onClick={resetUnitOpForm} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Clear</button>
-                    <button className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">{unitOpsEditing ? 'Save changes' : 'Save record'}</button>
-                  </div>
-                  <p className="text-[10px] text-slate-500">Auto-linked to Property #{property.propertyId} · {unitOpsUnit.unitNumber}. Property / unit are not editable here.</p>
-                </form>
-
-                <div>
-                  {unitOpsLoading ? (
-                    <div className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="animate-spin" size={14} />Loading {activeOpsTab.label.toLowerCase()}…</div>
-                  ) : (
-                    <div className="space-y-3">
-                      {unitOpsRecords.map((r) => (
-                        <div key={r.operationalRecordId} className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl flex justify-between gap-4">
-                          <div className="space-y-0.5">
-                            <div className="flex items-center gap-2">
-                              <p className="text-xs font-bold text-white">{r.title}</p>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">{r.status}</span>
-                            </div>
-                            <p className="text-[10px] text-slate-400">{r.contactName || 'No contact'}{r.dueDate ? ` · Due ${new Date(r.dueDate).toLocaleDateString()}` : ''}</p>
-                            {r.details && <p className="text-[10px] text-slate-500 whitespace-pre-wrap">{r.details}</p>}
-                            {Number(r.amount || 0) !== 0 && <p className="text-[10px] text-emerald-400">R {Number(r.amount).toLocaleString()}</p>}
+                  {/* 📋 LEASES / MAINTENANCE (CRM records scoped to this unit; property/unit auto-bound) */}
+                  {(modalTab === 'leases' || modalTab === 'maintenance') && (
+                    <div className="space-y-4">
+                      {unitOpsError && <div className="p-3 rounded-xl text-xs bg-red-950/40 border border-red-900 text-red-300">{unitOpsError}</div>}
+                      {unitOpsSuccess && <div className="p-3 rounded-xl text-xs bg-emerald-950/40 border border-emerald-900 text-emerald-300">{unitOpsSuccess}</div>}
+                      <div className="grid xl:grid-cols-[320px_1fr] gap-6">
+                        <form onSubmit={saveUnitOp} className="space-y-3">
+                          <h5 className="text-xs font-bold text-blue-400 uppercase">
+                            {unitOpsEditing ? `Edit ${activeOpsTab.label}` : `Add ${activeOpsTab.label}`}
+                          </h5>
+                          <label className="label">Title<input required value={unitOpsForm.title} onChange={e => setUnitOpsForm({ ...unitOpsForm, title: e.target.value })} className="field" placeholder={`${activeOpsTab.label.slice(0, -1)} title`} /></label>
+                          <label className="label">Contact<input value={unitOpsForm.contactName} onChange={e => setUnitOpsForm({ ...unitOpsForm, contactName: e.target.value })} className="field" placeholder="Contractor, tenant, vendor..." /></label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <label className="label">Status<select value={unitOpsForm.status} onChange={e => setUnitOpsForm({ ...unitOpsForm, status: e.target.value })} className="field"><option>Open</option><option>In Progress</option><option>Awaiting Information</option><option>Completed</option><option>Cancelled</option></select></label>
+                            <label className="label">Due date<input type="date" value={unitOpsForm.dueDate || ''} onChange={e => setUnitOpsForm({ ...unitOpsForm, dueDate: e.target.value })} className="field" /></label>
                           </div>
-                          <button type="button" onClick={() => editUnitOp(r)} className="h-fit p-1.5 text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                          <label className="label">{activeOpsTab.amount}<input type="number" min="0" value={unitOpsForm.amount ?? ''} onChange={e => setUnitOpsForm({ ...unitOpsForm, amount: e.target.value })} className="field" /></label>
+                          <label className="label">Details<textarea rows={4} value={unitOpsForm.details} onChange={e => setUnitOpsForm({ ...unitOpsForm, details: e.target.value })} className="field" placeholder={activeOpsTab.detailsPlaceholder} /></label>
+                          <div className="flex gap-3">
+                            <button type="button" onClick={resetUnitOpForm} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Clear</button>
+                            <button className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">{unitOpsEditing ? 'Save changes' : 'Save record'}</button>
+                          </div>
+                        </form>
+
+                        <div>
+                          {unitOpsLoading ? (
+                            <div className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="animate-spin" size={14} />Loading {activeOpsTab.label.toLowerCase()}…</div>
+                          ) : (
+                            <div className="space-y-3">
+                              {unitOpsRecords.map((r) => (
+                                <div key={r.operationalRecordId} className="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl flex justify-between gap-4">
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-2"><p className="text-xs font-bold text-white">{r.title}</p><span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">{r.status}</span></div>
+                                    <p className="text-[10px] text-slate-400">{r.contactName || 'No contact'}{r.dueDate ? ` · Due ${new Date(r.dueDate).toLocaleDateString()}` : ''}</p>
+                                    {r.details && <p className="text-[10px] text-slate-500 whitespace-pre-wrap">{r.details}</p>}
+                                    {Number(r.amount || 0) !== 0 && <p className="text-[10px] text-emerald-400">R {Number(r.amount).toLocaleString()}</p>}
+                                  </div>
+                                  <button type="button" onClick={() => editUnitOp(r)} className="h-fit p-1.5 text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                                </div>
+                              ))}
+                              {!unitOpsRecords.length && <p className="text-[10px] text-slate-500">No {activeOpsTab.label.toLowerCase()} records for this unit yet.</p>}
+                            </div>
+                          )}
                         </div>
-                      ))}
-                      {!unitOpsRecords.length && <p className="text-[10px] text-slate-500">No {activeOpsTab.label.toLowerCase()} records for this unit yet.</p>}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 📎 DOCUMENT VAULT (name + description + actual file saved to server disk) */}
+                  {modalTab === 'documents' && (
+                    <div className="space-y-4">
+                      {unitDocError && <div className="p-3 rounded-xl text-xs bg-red-950/40 border border-red-900 text-red-300">{unitDocError}</div>}
+                      {unitDocSuccess && <div className="p-3 rounded-xl text-xs bg-emerald-950/40 border border-emerald-900 text-emerald-300">{unitDocSuccess}</div>}
+                      <form onSubmit={uploadUnitDocument} className="grid sm:grid-cols-2 gap-3 items-end">
+                        <label className="label">Document name<input required value={unitDocForm.name} onChange={e => setUnitDocForm({ ...unitDocForm, name: e.target.value })} className="field" placeholder="e.g. Maintenance Report Q3" /></label>
+                        <label className="label">Description<textarea rows={2} value={unitDocForm.description} onChange={e => setUnitDocForm({ ...unitDocForm, description: e.target.value })} className="field" placeholder="What is this document?" /></label>
+                        <label className="label sm:col-span-2">Actual document
+                          <input required type="file" onChange={e => setUnitDocForm({ ...unitDocForm, file: e.target.files?.[0] || null })} className="text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700" />
+                          <span className="text-[10px] text-slate-500 block mt-1">{unitDocForm.file?.name || 'No file chosen'}</span>
+                        </label>
+                        <div className="sm:col-span-2">
+                          <button type="submit" disabled={unitDocUploading} className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 disabled:opacity-60 text-white rounded-xl text-xs font-bold"><Upload size={13} />{unitDocUploading ? 'Uploading…' : 'Save to vault'}</button>
+                        </div>
+                      </form>
+                      <div className="border-t border-slate-800 pt-3 space-y-2">
+                        <h6 className="text-[10px] font-bold uppercase text-slate-400">Stored documents</h6>
+                        {unitDocs.length === 0
+                          ? <p className="text-[10px] text-slate-500">No documents linked to this unit yet.</p>
+                          : <div className="space-y-2">{unitDocs.map((d) => (
+                              <div key={d.storedName} className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-white truncate">{d.name || d.fileName}</p>
+                                  {d.description && <p className="text-[10px] text-slate-400 truncate">{d.description}</p>}
+                                  <p className="text-[10px] text-slate-500">{d.contentType || 'file'} · {(d.sizeBytes / 1024).toFixed(1)} KB · {new Date(d.uploadedAt).toLocaleDateString()}</p>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button type="button" onClick={() => downloadUnitDocument(d)} title="Download" className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"><Download size={13} /></button>
+                                  {canManage && (
+                                    <button type="button" onClick={() => deleteUnitDocument(d)} title="Delete document" className="p-1.5 text-slate-400 hover:text-red-400 rounded-lg hover:bg-slate-800"><Trash2 size={13} /></button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}</div>}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -813,7 +1033,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               ].map(([key, label]) => <label key={key} className="text-[10px] text-slate-400 uppercase">{label}<input value={propertyForm[key] ?? ''} onChange={e => setPropertyForm({ ...propertyForm, [key]: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case" /></label>)}
               <label className="text-[10px] text-slate-400 uppercase">Market class<select value={propertyForm.marketClass || 'Sale'} onChange={e => setPropertyForm({ ...propertyForm, marketClass: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case"><option>Sale</option><option>Rental</option></select></label>
             </div>
-            <div className="flex gap-3"><button type="button" onClick={() => setIsEditingProperty(false)} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Cancel</button><button className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">Save property</button></div>
+            <div className="flex gap-3"><button type="button" onClick={() => setIsEditingProperty(false)} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Cancel</button><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">Save property</button></div>
           </form>
         </div>
       )}

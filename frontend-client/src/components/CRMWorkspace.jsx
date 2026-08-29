@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Briefcase, DollarSign, TrendingUp, UserPlus, Filter, User, CheckCircle, Loader2, Layers, Sparkles, Building2, Edit2 } from 'lucide-react';
-import { crmService } from '../services/ crmService.js';
+import React, { useState, useEffect, useRef } from 'react';
+import { Briefcase, DollarSign, TrendingUp, UserPlus, Filter, User, CheckCircle, Loader2, Layers, Sparkles, Building2, Edit2, Search } from 'lucide-react';
+import { crmService } from '../services/crmService.js';
 
 export default function CRMWorkspace({ currentUserRole }) {
   // Navigation active control dashboard sub-tabs
@@ -12,7 +12,8 @@ export default function CRMWorkspace({ currentUserRole }) {
   const [companies, setCompanies] = useState([]);
   const [legalEntities, setLegalEntities] = useState([]);
   const [contacts, setContacts] = useState([]);
-  
+  const [brokers, setBrokers] = useState([]);
+
   const [summaryReport, setSummaryReport] = useState({
     activeLeadsCount: 0, valuationsInProcessCount: 0, conveyancingAtDeedsCount: 0, finalizedClosedCount: 0, totalPipelineEstimatedValue: 0
   });
@@ -23,6 +24,14 @@ export default function CRMWorkspace({ currentUserRole }) {
   const [editingContact, setEditingContact] = useState(null);
   const [selectedLeadForEdit, setSelectedLeadForEdit] = useState(null);
   const [selectedDealForEdit, setSelectedDealForEdit] = useState(null);
+
+  // 💰 Create-Lead form bindings (commission % / amount toggle lives here)
+  const [isLeadFormOpen, setIsLeadFormOpen] = useState(false);
+  const [leadForm, setLeadForm] = useState({
+    clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential',
+    preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '',
+    allocatedToAgent: ''
+  });
 
   // Common Modal form bindings
   const [nextStageValue, setNextStageValue] = useState('');
@@ -42,9 +51,11 @@ export default function CRMWorkspace({ currentUserRole }) {
       setSummaryReport(metrics);
 
       if (activeTab === 'leads' || activeTab === 'deals') {
-        const boards = await crmService.getCRMBoards();
+        const [boardsRes, brokersRes] = await Promise.all([crmService.getCRMBoards(), crmService.getBrokers()]);
+        const boards = boardsRes || {};
         setUnverifiedLeads(boards.unverifiedLeads || []);
         setVerifiedDeals(boards.verifiedDeals || []);
+        setBrokers(brokersRes || []);
       } else if (activeTab === 'companies') {
         const res = await crmService.getCompanies();
         setCompanies(res || []);
@@ -65,6 +76,39 @@ export default function CRMWorkspace({ currentUserRole }) {
   useEffect(() => {
     loadActiveWorkspaceData();
   }, [activeTab]);
+
+  // --- 🔍 CLIENT-SIDE SEARCH + PAGINATED INFINITE SCROLL (20 per page, fetches more on scroll) ---
+  const PAGE_SIZE = 20;
+  const [searchTerm, setSearchTerm] = useState('');
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // Reset paging + search whenever the active tab changes.
+  const handleSetTab = (id) => {
+    setActiveTab(id);
+    setSearchTerm('');
+    setVisibleCount(PAGE_SIZE);
+  };
+
+  const sentinelRef = useRef(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) setVisibleCount((c) => c + PAGE_SIZE);
+    }, { threshold: 1 });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [sentinelRef]);
+
+  // Case-insensitive search across the supplied field selectors for the active tab.
+  const filterBySearch = (items, fieldFns) => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return items;
+    return items.filter((item) =>
+      fieldFns.some((fn) => String(fn(item) ?? '').toLowerCase().includes(term))
+    );
+  };
+  const firstVisible = (items, fieldFns) => filterBySearch(items, fieldFns).slice(0, visibleCount);
   // --- 💾 RELATIONAL RECORD MODIFICATION SUBMISSION HANDLERS ---
   const handleUpdateCompanySubmit = async (e) => {
     e.preventDefault();
@@ -136,6 +180,50 @@ export default function CRMWorkspace({ currentUserRole }) {
     }
   };
 
+  const handleCreateLead = async (e) => {
+    e.preventDefault();
+    try {
+      await crmService.createLead({
+        ...leadForm,
+        estimatedBudget: parseFloat(leadForm.estimatedBudget) || 0,
+        commissionValue: parseFloat(leadForm.commissionValue) || 0
+      });
+      setLeadForm({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedToAgent: '' });
+      setIsLeadFormOpen(false);
+      await loadActiveWorkspaceData();
+    } catch (err) {
+      alert(err || 'Failed to create lead record.');
+    }
+  };
+
+  // 🚀 Promote a lead to a deal with automatic property matching (rent or sale).
+  const handlePromoteLead = async (lead, isRent) => {
+    try {
+      const res = await crmService.promoteLeadToDeal(lead.leadId, {
+        isRent,
+        propertyTypeOverride: lead.propertyInterestClass,
+        preferredAreaOverride: lead.preferredArea
+      });
+      alert(`Lead promoted to deal DL-${res.dealId}` +
+        (res.linkedPropertyId ? ` (matched property ${res.linkedPropertyId})` : ' — no matching property found.'));
+      await loadActiveWorkspaceData();
+    } catch (err) {
+      alert(err || 'Deal auto-promotion engine failed.');
+    }
+  };
+
+  // ❌ Delete a deal — only AgencyAdmin + PlatformAdmin at the UI layer (server also enforces).
+  const canManageDeals = currentUserRole === 'PlatformAdmin' || currentUserRole === 'AgencyAdmin';
+  const handleDeleteDeal = async (deal) => {
+    if (!window.confirm(`Delete deal DL-${deal.dealId}? This cannot be undone.`)) return;
+    try {
+      await crmService.deleteDeal(deal.dealId);
+      await loadActiveWorkspaceData();
+    } catch (err) {
+      alert(err || 'Deal deletion permission denied or failed.');
+    }
+  };
+
   const formatEnumTitle = (enumString) => {
     if (!enumString) return '';
     return String(enumString || '').replace(/([A-Z])/g, " $1").replace(/^./, str => str.toUpperCase());
@@ -197,7 +285,7 @@ export default function CRMWorkspace({ currentUserRole }) {
         ].map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => handleSetTab(tab.id)}
             type="button"
             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer whitespace-nowrap ${
               activeTab === tab.id ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
@@ -213,6 +301,20 @@ export default function CRMWorkspace({ currentUserRole }) {
         </div>
       )}
 
+      {/* 🔍 TAB-SCOPED SEARCH — filters the active pipeline list client-side */}
+      {!isLoading && (
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            placeholder="Search this list..."
+            value={searchTerm}
+            onChange={(e) => { setSearchTerm(e.target.value); setVisibleCount(PAGE_SIZE); }}
+            className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+          />
+        </div>
+      )}
+
       {/* ⏳ ASYNC LOADING DATA SPINNER OVERLAY MASK */}
       {isLoading ? (
         <div className="py-20 flex flex-col items-center justify-center text-slate-500 gap-3">
@@ -221,9 +323,46 @@ export default function CRMWorkspace({ currentUserRole }) {
         </div>
       ) : (
         <div className="space-y-4">
-          
           {/* 🎯 RENDERING PIPELINE VIEW 1: UNVERIFIED LEADS */}
-          {activeTab === 'leads' && unverifiedLeads.map((lead) => (
+
+          {/* ➕ CREATE LEAD PANEL (with commission % / amount toggle) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+            <button
+              type="button"
+              onClick={() => setIsLeadFormOpen(!isLeadFormOpen)}
+              className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white cursor-pointer"
+            >
+              <UserPlus size={14} /> New Lead {isLeadFormOpen ? '▲' : '▼'}
+            </button>
+            {isLeadFormOpen && (
+              <form onSubmit={handleCreateLead} className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Client Name & Surname</label><input required type="text" value={leadForm.clientName} onChange={(e) => setLeadForm({ ...leadForm, clientName: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Email Address</label><input required type="email" value={leadForm.contactEmail} onChange={(e) => setLeadForm({ ...leadForm, contactEmail: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Phone Number</label><input type="text" value={leadForm.contactPhone} onChange={(e) => setLeadForm({ ...leadForm, contactPhone: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Property Interest</label><select value={leadForm.propertyInterestClass} onChange={(e) => setLeadForm({ ...leadForm, propertyInterestClass: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option>Residential</option><option>Commercial</option><option>Retail</option><option>Industrial</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Preferred Area / Suburb</label><input type="text" placeholder="Cape Town" value={leadForm.preferredArea} onChange={(e) => setLeadForm({ ...leadForm, preferredArea: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Estimated Budget (R)</label><input required type="number" value={leadForm.estimatedBudget} onChange={(e) => setLeadForm({ ...leadForm, estimatedBudget: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                {/* 💰 Commission toggle: percentage OR fixed amount */}
+                <div className="space-y-1 md:col-span-2 lg:col-span-1">
+                  <label className="text-[10px] text-slate-400 uppercase">Commission</label>
+                  <div className="grid grid-cols-2 gap-1 h-10">
+                    {[{ v: 'Percent', label: '% of Deal' }, { v: 'Amount', label: 'Fixed R' }].map((o) => (
+                      <button key={o.v} type="button" onClick={() => setLeadForm({ ...leadForm, commissionType: o.v })} className={`text-xs font-bold rounded-lg border transition-all cursor-pointer ${leadForm.commissionType === o.v ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white'}`}>{o.label}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">{leadForm.commissionType === 'Percent' ? '% Commission' : 'Amount (R)'}</label><input required type="number" value={leadForm.commissionValue} onChange={(e) => setLeadForm({ ...leadForm, commissionValue: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1 lg:col-span-3"><label className="text-[10px] text-slate-400 uppercase">Allocated To Agent</label><input list="broker-suggestions" type="text" placeholder="Leave blank for Unassigned Pool" value={leadForm.allocatedToAgent} onChange={(e) => setLeadForm({ ...leadForm, allocatedToAgent: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" />
+                <datalist id="broker-suggestions">{brokers.map((b) => <option key={b.brokerId || b.fullName} value={b.fullName || b.emailAddress} />)}</datalist>
+                {currentUserRole !== 'Broker' && <p className="text-[10px] text-slate-500">Type or select an existing broker from your agency. Brokers always self-allocate to themselves.</p>}</div>
+                <div className="lg:col-span-3 flex gap-3 pt-1"><button type="submit" className="py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer">Create Lead Record</button><button type="button" onClick={() => setIsLeadFormOpen(false)} className="py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl border border-slate-800 cursor-pointer">Cancel</button></div>
+              </form>
+            )}
+          </div>
+
+          {activeTab === 'leads' && firstVisible(unverifiedLeads, [
+            (l) => l.clientName, (l) => l.contactEmail, (l) => l.contactPhone, (l) => l.leadStage
+          ]).map((lead) => (
             <div key={lead.leadId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row justify-between lg:items-center gap-4 hover:border-slate-700 transition-colors">
               <div className="space-y-2 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -235,14 +374,27 @@ export default function CRMWorkspace({ currentUserRole }) {
                 <div>
                   <h4 className="text-white font-bold text-base tracking-tight">{lead.clientName}</h4>
                   <p className="text-xs text-slate-400 font-medium">Email: {lead.contactEmail} • Phone: {lead.contactPhone}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    💰 Budget: R {Number(lead.estimatedBudget || 0).toLocaleString()} •
+                    Commission: {lead.commissionType === 'Percent' ? `${Number(lead.commissionValue || 0).toLocaleString()}%` : `R ${Number(lead.commissionValue || 0).toLocaleString()}`} •
+                    Agent: <span className="text-blue-400 font-semibold">{lead.allocatedToAgent || 'Unassigned'}</span>
+                  </p>
                 </div>
               </div>
-              <button onClick={() => { setSelectedLeadForEdit(lead); setNextStageValue(lead.leadStage); }} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Update Stage</button>
-            </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button onClick={() => { setSelectedLeadForEdit(lead); setNextStageValue(lead.leadStage); }} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Update Stage</button>
+                  <button onClick={() => handlePromoteLead(lead, true)} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Rent Deal 🚀</button>
+                  <button onClick={() => handlePromoteLead(lead, false)} className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Sale Deal 🚀</button>
+                </div>
+
+                </div>
+
           ))}
 
           {/* 💼 RENDERING PIPELINE VIEW 2: VERIFIED CORPORATE DEALS */}
-          {activeTab === 'deals' && verifiedDeals.map((deal) => (
+          {activeTab === 'deals' && firstVisible(verifiedDeals, [
+            (d) => d.buyerClientId, (d) => d.sellerClientId, (d) => d.dealStage
+          ]).map((deal) => (
             <div key={deal.dealId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row justify-between lg:items-center gap-4 hover:border-slate-700 transition-colors">
               <div className="space-y-2 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -256,13 +408,28 @@ export default function CRMWorkspace({ currentUserRole }) {
                   <span className="text-xs text-slate-500 font-mono">Reference: DL-{deal.dealId}</span>
                 </div>
                 <p className="text-xs text-slate-400 font-medium">Buyer: <span className="text-blue-400 font-semibold">{deal.buyerClientId}</span> • Seller: <span className="text-purple-400 font-semibold">{deal.sellerClientId}</span></p>
+                {deal.commissionValue > 0 && (
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    💰 Commission: {deal.commissionType === 'Percent' ? `${deal.commissionValue}%` : `R ${deal.commissionValue.toLocaleString()}`}
+                    {deal.dealStage === 'ClosedWon' && deal.realisedCommission !== null && deal.realisedCommission !== undefined && ` → realised R ${Number(deal.realisedCommission).toLocaleString()}`}
+                  </p>
+                )}
               </div>
-              <button onClick={() => { setSelectedDealForEdit(deal); setNextStageValue(deal.dealStage); }} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Progress Deal</button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setSelectedDealForEdit(deal); setNextStageValue(deal.dealStage); }} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Progress Deal</button>
+                {canManageDeals ? (
+                  <button onClick={() => handleDeleteDeal(deal)} className="p-2 bg-red-950/40 hover:bg-red-900/40 text-red-400 rounded-xl border border-red-900 cursor-pointer" title="Delete deal (AgencyAdmin/PlatformAdmin only)">✕</button>
+                ) : (
+                  <span title="Deal deletion restricted to AgencyAdmin / PlatformAdmin" className="p-2 text-slate-600 cursor-not-allowed">🚫</span>
+                )}
+              </div>
             </div>
           ))}
 
           {/* 🏢 RENDERING PIPELINE VIEW 3: COMPANIES REGISTRY DIRECTORY */}
-          {activeTab === 'companies' && companies.map((comp) => (
+          {activeTab === 'companies' && firstVisible(companies, [
+            (c) => c.businessName, (c) => c.registrationNumber, (c) => c.vatNumber, (c) => c.industryVertical
+          ]).map((comp) => (
             <div key={comp.companyId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center hover:border-slate-700 transition-colors">
               <div>
                 <h4 className="text-white font-bold text-base tracking-tight flex items-center gap-2"><Building2 size={16} className="text-slate-500" /> {comp.businessName}</h4>
@@ -273,7 +440,9 @@ export default function CRMWorkspace({ currentUserRole }) {
             </div>
           ))}
           {/* ⚖️ RENDERING PIPELINE VIEW 4: CONTRACTUAL LEGAL ENTITIES */}
-          {activeTab === 'legalEntities' && legalEntities.map((ent) => (
+          {activeTab === 'legalEntities' && firstVisible(legalEntities, [
+            (e) => e.registeredLegalName, (e) => e.entityTypeClassifier, (e) => e.taxRegistrationIndex, (e) => e.deedsOfficeIdentifier
+          ]).map((ent) => (
             <div key={ent.legalEntityId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center hover:border-slate-700 transition-colors">
               <div>
                 <h4 className="text-white font-bold text-base tracking-tight">{ent.registeredLegalName}</h4>
@@ -285,7 +454,9 @@ export default function CRMWorkspace({ currentUserRole }) {
           ))}
 
           {/* 👤 RENDERING PIPELINE VIEW 5: HUMAN CONTACTS DIRECTORY */}
-          {activeTab === 'contacts' && contacts.map((con) => (
+          {activeTab === 'contacts' && firstVisible(contacts, [
+            (c) => c.fullName, (c) => c.contactRoleType, (c) => c.positionJobTitle, (c) => c.emailAddress, (c) => c.phoneNumber
+          ]).map((con) => (
             <div key={con.contactId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center hover:border-slate-700 transition-colors">
               <div>
                 <h4 className="text-white font-bold text-base tracking-tight">{con.fullName}</h4>
@@ -300,15 +471,20 @@ export default function CRMWorkspace({ currentUserRole }) {
             </div>
           ))}
 
-          {((activeTab === 'leads' && unverifiedLeads.length === 0) || 
-            (activeTab === 'deals' && verifiedDeals.length === 0) ||
-            (activeTab === 'companies' && companies.length === 0) ||
-            (activeTab === 'legalEntities' && legalEntities.length === 0) ||
-            (activeTab === 'contacts' && contacts.length === 0)) && !errorMessage && (
+          {((activeTab === 'leads' && filterBySearch(unverifiedLeads, []).length === 0) ||
+            (activeTab === 'deals' && filterBySearch(verifiedDeals, []).length === 0) ||
+            (activeTab === 'companies' && filterBySearch(companies, []).length === 0) ||
+            (activeTab === 'legalEntities' && filterBySearch(legalEntities, []).length === 0) ||
+            (activeTab === 'contacts' && filterBySearch(contacts, []).length === 0)) && !errorMessage && (
             <div className="py-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-sm">
-              No active records found matching this pipeline layout screen state.
+              {searchTerm.trim()
+                ? 'No records match your search. Try a different term.'
+                : 'No active records found matching this pipeline layout screen state.'}
             </div>
           )}
+
+          {/* 🔁 INFINITE-SCROLL SENTINEL: fetches the next PAGE_SIZE as the list is scrolled */}
+          <div ref={sentinelRef} className="h-1" />
         </div>
       )}
 
@@ -417,6 +593,14 @@ export default function CRMWorkspace({ currentUserRole }) {
                   </div>
                 </div>
               )}
+              {selectedLeadForEdit.leadNotes && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Lead Note History</label>
+                  <div className="max-h-36 overflow-y-auto bg-slate-950 border border-slate-700 rounded-xl p-2 text-[10px] text-slate-400 space-y-1">
+                    {selectedLeadForEdit.leadNotes.split(' | ').filter(Boolean).map((n, i) => <p key={i} className="leading-snug">• {n.trim()}</p>)}
+                  </div>
+                </div>
+              )}
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Append Action Progress Note</label>
                 <textarea rows={3} placeholder="Provide latest discussion logs..." value={notesUpdateText} onChange={(e) => setNotesUpdateText(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" />
@@ -454,6 +638,14 @@ export default function CRMWorkspace({ currentUserRole }) {
                   <option value="ClosedLost">Closed Lost (Dropped) ❌</option>
                 </select>
               </div>
+              {selectedDealForEdit.dealNotes && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Deal Note History</label>
+                  <div className="max-h-36 overflow-y-auto bg-slate-950 border border-slate-700 rounded-xl p-2 text-[10px] text-slate-400 space-y-1">
+                    {selectedDealForEdit.dealNotes.split(' | ').filter(Boolean).map((n, i) => <p key={i} className="leading-snug">• {n.trim()}</p>)}
+                  </div>
+                </div>
+              )}
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Append Stage Progress Notes</label>
                 <textarea rows={3} placeholder="Provide agreement changes or objective adjustments log entry..." value={notesUpdateText} onChange={(e) => setNotesUpdateText(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500" />

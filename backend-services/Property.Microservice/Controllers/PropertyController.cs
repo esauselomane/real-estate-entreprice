@@ -6,8 +6,11 @@ using Property.Microservice.Models;
 using Property.Microservice.Services;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.IO;
 using System.Linq;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Property.Microservice.Controllers
@@ -18,11 +21,31 @@ namespace Property.Microservice.Controllers
     {
         private readonly PropertyDbContext _context;
         private readonly KafkaPublisherService _kafkaPublisher;
+        private readonly string _storageRootPath;
+
+        // 🧷 Unit document metadata is persisted as JSON in UnitDocumentsJson. ASP.NET Core
+        // serializes the API surface in camelCase, so we serialize this column with camelCase
+        // too — otherwise the frontend would receive PascalCase keys (Name/StoredName) that
+        // don't match its camel-typed bindings (name/storedName).
+        private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        };
 
         public PropertyController(PropertyDbContext context, KafkaPublisherService kafkaPublisher)
         {
             _context = context;
             _kafkaPublisher = kafkaPublisher;
+
+            // 📁 LOCAL DISK VAULT: actual property media (images + documents) are persisted
+            // to the server filesystem here so they survive beyond a single request, not
+            // just as ephemeral URL references.
+            _storageRootPath = Path.Combine(AppContext.BaseDirectory, "PropertyMediaVault");
+            if (!Directory.Exists(_storageRootPath))
+            {
+                Directory.CreateDirectory(_storageRootPath);
+            }
         }
 
         // --- 📥 DATA TRANSFER INTERFACE MODEL BINDINGS ---
@@ -32,6 +55,9 @@ namespace Property.Microservice.Controllers
             public string PropertyType { get; set; } = "All"; // All, Residential, Commercial, Industrial, Retail
             public int? MinSize { get; set; }
             public int? MaxSize { get; set; }
+            public string ListingType { get; set; } = "All"; // All | Sale | Rent — filters on IsForSale/IsForRent flags
+            public int? MinPrice { get; set; }
+            public int? MaxPrice { get; set; }
         }
 
         public class ImageUploadPayload
@@ -49,12 +75,43 @@ namespace Property.Microservice.Controllers
 
         public class CreatePropertyUnitPayload
         {
+            [Required, MaxLength(50)]
             public string UnitNumber { get; set; } = string.Empty;
             public string UnitDescription { get; set; } = string.Empty;
             public decimal NetRentableAreaSqM { get; set; }
             public decimal? SpecificUnitRentalPrice { get; set; }
             public decimal? SpecificUnitSalePrice { get; set; }
             public bool IsCurrentlyVacant { get; set; } = true;
+        }
+
+        public class UpdatePropertyUnitPayload
+        {
+            [Required, MaxLength(50)] public string UnitNumber { get; set; } = string.Empty;
+            public string UnitDescription { get; set; } = string.Empty;
+            public decimal NetRentableAreaSqM { get; set; }
+            public decimal? SpecificUnitRentalPrice { get; set; }
+            public decimal? SpecificUnitSalePrice { get; set; }
+            public bool IsCurrentlyVacant { get; set; } = true;
+        }
+
+        public class DocumentUploadPayload
+        {
+            [Required] public string Name { get; set; } = string.Empty;        // human-friendly document name
+            public string Description { get; set; } = string.Empty;             // free-form document description
+            [Required] public string FileName { get; set; } = string.Empty;    // original file name from the client
+            public string ContentType { get; set; } = string.Empty;
+            [Required] public string Base64DataString { get; set; } = string.Empty; // raw file bytes, base64-encoded (mirrors image upload)
+        }
+
+        public class DocumentMeta
+        {
+            public string Name { get; set; } = string.Empty;
+            public string Description { get; set; } = string.Empty;
+            public string FileName { get; set; } = string.Empty;   // original name (for download / display)
+            public string StoredName { get; set; } = string.Empty;  // on-disk file name (for retrieval)
+            public string ContentType { get; set; } = string.Empty;
+            public long SizeBytes { get; set; }
+            public DateTime UploadedAt { get; set; }
         }
 
         public class CreatePropertyPayload
@@ -90,41 +147,89 @@ namespace Property.Microservice.Controllers
         }
 
         // --- 🔍 ENDPOINT: GET SINGLE PROPERTY WITH LINKED SUB-UNITS ---
+        [Authorize]
         [HttpGet("{propertyId}")]
         public async Task<IActionResult> GetPropertyById(int propertyId)
         {
-            var property = await _context.PropertyAssets
+            var role = GetCurrentCanonicalRole();
+            var userTenantId = User.FindFirst("TenantId")?.Value;
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
+
+            var query = _context.PropertyAssets
                 .Include(p => p.PropertyTypeDetails)
                 .Include(p => p.SubUnits)
                 .Include(p => p.SyndicationLinks)
                     .ThenInclude(s => s.PlatformDetails)
-                .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
+                .Where(p => p.PropertyId == propertyId);
 
+            query = ApplyPropertyVisibility(query);
+
+            var property = await query.FirstOrDefaultAsync();
             if (property == null) return NotFound(new { message = "Target property record not found." });
+
+            // A Tenant only sees their leased unit, never sibling units of the same property.
+            if (role == "Tenant" && !string.IsNullOrWhiteSpace(userId))
+            {
+                var leasedUnitIds = await GetLeasedUnitIdsAsync(userId, userTenantId);
+                property.SubUnits = property.SubUnits
+                    .Where(u => leasedUnitIds.Contains(u.PropertyUnitId))
+                    .ToList();
+                if (!property.SubUnits.Any())
+                    return NotFound(new { message = "Target property record not found." });
+            }
+
             return Ok(property);
         }
 
         // --- 🏢 ENDPOINT: GET SUB-UNITS FOR A PROPERTY ---
+        [Authorize]
         [HttpGet("{propertyId}/units")]
         public async Task<IActionResult> GetPropertyUnits(int propertyId)
         {
-            var propertyExists = await _context.PropertyAssets.AnyAsync(p => p.PropertyId == propertyId);
-            if (!propertyExists) return NotFound(new { message = "Target property record not found." });
+            // 🛡️ Reuse the unit resolver so only units the role may see are returned
+            // (PlatformAdmin/AgencyAdmin/Broker => all tenant units; Owner => owned property;
+            //  Tenant => only their leased unit).
+            var role = GetCurrentCanonicalRole();
+            var userTenantId = User.FindFirst("TenantId")?.Value;
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
 
-            var units = await _context.PropertyUnits
-                .Where(u => u.PropertyId == propertyId)
-                .OrderBy(u => u.UnitNumber)
-                .ToListAsync();
+            var propertyQuery = _context.PropertyAssets.Where(p => p.PropertyId == propertyId);
+            if (role != "PlatformAdmin") propertyQuery = propertyQuery.Where(p => p.TenantId == userTenantId);
+            if (role == "Owner" && !string.IsNullOrWhiteSpace(userId))
+                propertyQuery = propertyQuery.Where(p => p.LinkedOwnerId == userId);
+            if (!await propertyQuery.AnyAsync()) return NotFound(new { message = "Target property record not found." });
 
+            var query = _context.PropertyUnits.Where(u => u.PropertyId == propertyId);
+            if (role == "Tenant" && !string.IsNullOrWhiteSpace(userId))
+            {
+                var leasedUnitIds = await GetLeasedUnitIdsAsync(userId, userTenantId!);
+                query = query.Where(u => leasedUnitIds.Contains(u.PropertyUnitId));
+            }
+
+            var units = await query.OrderBy(u => u.UnitNumber).ToListAsync();
             return Ok(units);
         }
 
         // --- ➕ ENDPOINT: ADD SUB-UNIT TO PROPERTY ---
+        [Authorize]
         [HttpPost("{propertyId}/units")]
         public async Task<IActionResult> AddPropertyUnit(int propertyId, [FromBody] CreatePropertyUnitPayload payload)
         {
-            var property = await _context.PropertyAssets.FindAsync(propertyId);
-            if (property == null) return NotFound(new { message = "Target property record not found." });
+            // 🛡️ Tenants and Owners may never add (or delete) units — that is an agency-level
+            // action. Any authenticated user outside a read-only role is permitted.
+            if (IsReadOnlyRole()) return Forbid();
+
+            var userTenantId = User.FindFirst("TenantId")?.Value;
+            if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
+            var role = GetCurrentCanonicalRole();
+            if (role != "PlatformAdmin")
+            {
+                var property = await _context.PropertyAssets
+                    .FirstOrDefaultAsync(p => p.PropertyId == propertyId && p.TenantId == userTenantId);
+                if (property == null) return NotFound(new { message = "Target property record not found." });
+            }
 
             if (payload == null || string.IsNullOrWhiteSpace(payload.UnitNumber))
             {
@@ -151,11 +256,19 @@ namespace Property.Microservice.Controllers
         }
 
         // --- ❌ ENDPOINT: DELETE SUB-UNIT FROM PROPERTY ---
+        [Authorize]
         [HttpDelete("{propertyId}/units/{unitId}")]
         public async Task<IActionResult> DeletePropertyUnit(int propertyId, int unitId)
         {
-            var unit = await _context.PropertyUnits.FirstOrDefaultAsync(u => u.PropertyUnitId == unitId && u.PropertyId == propertyId);
-            if (unit == null) return NotFound(new { message = "Property unit not found." });
+            // 🛡️ Tenants and Owners may never delete anything.
+            if (IsReadOnlyRole()) return Forbid();
+
+            var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+            if (unit == null)
+            {
+                if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+                return NotFound(new { message = "Property unit not found." });
+            }
 
             _context.PropertyUnits.Remove(unit);
             await _context.SaveChangesAsync();
@@ -163,7 +276,255 @@ namespace Property.Microservice.Controllers
             return Ok(new { message = "Unit successfully unlinked and deleted from property." });
         }
 
+        // --- ✏️ ENDPOINT: UPDATE UNIT DETAILS (editable unit on property page) ---
+        [Authorize]
+        [HttpPut("{propertyId}/units/{unitId:int}")]
+        public async Task<IActionResult> UpdatePropertyUnit(int propertyId, int unitId, [FromBody] UpdatePropertyUnitPayload payload)
+        {
+            var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+            if (unit == null)
+            {
+                if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+                return NotFound(new { message = "Target property or unit not found." });
+            }
+
+            if (payload == null || string.IsNullOrWhiteSpace(payload.UnitNumber))
+                return BadRequest(new { message = "Unit number is required." });
+
+            unit.UnitNumber = payload.UnitNumber;
+            unit.UnitDescription = payload.UnitDescription ?? string.Empty;
+            unit.NetRentableAreaSqM = payload.NetRentableAreaSqM;
+            unit.SpecificUnitRentalPrice = payload.SpecificUnitRentalPrice;
+            unit.SpecificUnitSalePrice = payload.SpecificUnitSalePrice;
+            unit.IsCurrentlyVacant = payload.IsCurrentlyVacant;
+
+            await _context.SaveChangesAsync();
+            return Ok(unit);
+        }
+
+        // --- 📎 ENDPOINT: UPLOAD A DOCUMENT TO A UNIT (saved to server disk + metadata persisted) ---
+        [Authorize]
+        [HttpPost("{propertyId}/units/{unitId:int}/documents")]
+        public async Task<IActionResult> UploadPropertyUnitDocument(int propertyId, int unitId, [FromBody] DocumentUploadPayload payload)
+        {
+            var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+            if (unit == null)
+            {
+                if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+                return NotFound(new { message = "Target property or unit not found." });
+            }
+
+            if (payload == null || string.IsNullOrWhiteSpace(payload.Name) || string.IsNullOrEmpty(payload.Base64DataString))
+                return BadRequest(new { message = "Document name and file data are required." });
+
+            byte[] docBytes;
+            try { docBytes = Convert.FromBase64String(payload.Base64DataString); }
+            catch { return BadRequest(new { message = "Corrupt document payload could not be decoded." }); }
+            if (docBytes.Length == 0) return BadRequest(new { message = "Uploaded document is empty." });
+
+            // Sanitize the original name and generate a unique on-disk name to avoid collisions / traversal.
+            string safeOrigName = Path.GetFileName(payload.FileName ?? payload.Name) ?? "document";
+            string ext = Path.GetExtension(safeOrigName);
+            string storedName = $"{Guid.NewGuid():N}{ext}";
+
+            string unitFolder = Path.Combine(_storageRootPath, $"Property_{propertyId}", $"Unit_{unitId}", "Documents");
+            Directory.CreateDirectory(unitFolder);
+            string finalPath = Path.Combine(unitFolder, storedName);
+            await System.IO.File.WriteAllBytesAsync(finalPath, docBytes);
+
+            var docs = ParseUnitDocuments(unit.UnitDocumentsJson);
+            var meta = new DocumentMeta
+            {
+                Name = payload.Name,
+                Description = payload.Description,
+                FileName = safeOrigName,
+                StoredName = storedName,
+                ContentType = payload.ContentType,
+                SizeBytes = docBytes.Length,
+                UploadedAt = DateTime.UtcNow
+            };
+            docs.Add(meta);
+            unit.UnitDocumentsJson = JsonSerializer.Serialize(docs, JsonOptions);
+            await _context.SaveChangesAsync();
+
+            return Ok(meta);
+        }
+
+        // --- 📄 ENDPOINT: DOWNLOAD / VIEW A UNIT DOCUMENT ---
+        [Authorize]
+        [HttpGet("{propertyId}/units/{unitId:int}/documents/{storedName}")]
+        public async Task<IActionResult> DownloadPropertyUnitDocument(int propertyId, int unitId, string storedName)
+        {
+            var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+            if (unit == null)
+            {
+                if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+                return NotFound(new { message = "Target property or unit not found." });
+            }
+
+            var docs = ParseUnitDocuments(unit.UnitDocumentsJson);
+            var doc = docs.FirstOrDefault(d => d.StoredName == storedName);
+            if (doc == null) return NotFound(new { message = "Document record not found." });
+
+            string filePath = Path.Combine(_storageRootPath, $"Property_{propertyId}", $"Unit_{unitId}", "Documents", storedName);
+            if (!System.IO.File.Exists(filePath)) return NotFound(new { message = "Document file is missing from server disk." });
+
+            byte[] fileBytes = await System.IO.File.ReadAllBytesAsync(filePath);
+            // Serve with the original file name so downloads keep a friendly name.
+            return File(fileBytes, string.IsNullOrEmpty(doc.ContentType) ? "application/octet-stream" : doc.ContentType, doc.FileName);
+        }
+
+        // --- 📋 ENDPOINT: LIST A UNIT'S STORED DOCUMENTS (read-only; role-scoped via unit resolver) ---
+        [Authorize]
+        [HttpGet("{propertyId}/units/{unitId:int}/documents")]
+        public async Task<IActionResult> ListUnitDocuments(int propertyId, int unitId)
+        {
+            var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+            if (unit == null)
+            {
+                if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+                return NotFound(new { message = "Target property or unit not found." });
+            }
+
+            var docs = ParseUnitDocuments(unit.UnitDocumentsJson);
+            return Ok(docs);
+        }
+
+        // --- ❌ ENDPOINT: DELETE A UNIT DOCUMENT FROM THE VAULT ---
+        [Authorize]
+        [HttpDelete("{propertyId}/units/{unitId:int}/documents/{storedName}")]
+        public async Task<IActionResult> DeletePropertyUnitDocument(int propertyId, int unitId, string storedName)
+        {
+            // 🛡️ Tenants and Owners may never delete anything (documents included).
+            if (IsReadOnlyRole()) return Forbid();
+
+            var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+            if (unit == null)
+            {
+                if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+                return NotFound(new { message = "Target property or unit not found." });
+            }
+
+            var docs = ParseUnitDocuments(unit.UnitDocumentsJson);
+            var doc = docs.FirstOrDefault(d => d.StoredName == storedName);
+            if (doc == null) return NotFound(new { message = "Document record not found." });
+
+            string filePath = Path.Combine(_storageRootPath, $"Property_{propertyId}", $"Unit_{unitId}", "Documents", storedName);
+            if (System.IO.File.Exists(filePath)) System.IO.File.Delete(filePath);
+
+            docs.Remove(doc);
+            unit.UnitDocumentsJson = JsonSerializer.Serialize(docs);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Document successfully removed from unit vault." });
+        }
+
+        // --- 🛡️ SHARED: role/tenant/lease-scoped unit resolver ---
+        // Enforces the visibility matrix end-to-end:
+        //   • PlatformAdmin       -> any unit, any tenant
+        //   • AgencyAdmin / Broker-> any unit within the caller's tenant
+        //   • Owner               -> only units belonging to a property they own (LinkedOwnerId)
+        //   • Tenant              -> only the unit they currently have an ACTIVE lease on
+        private async Task<PropertyUnit?> GetAccessibleUnitAsync(int propertyId, int unitId)
+        {
+            var role = GetCurrentCanonicalRole();
+            var userTenantId = User.FindFirst("TenantId")?.Value;
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrWhiteSpace(userTenantId)) return null;
+
+            var isPlatformAdmin = role == "PlatformAdmin";
+            var propertyQuery = _context.PropertyAssets.Where(p => p.PropertyId == propertyId);
+            if (!isPlatformAdmin) propertyQuery = propertyQuery.Where(p => p.TenantId == userTenantId);
+
+            // Owner may only touch units under a property they actually own.
+            if (role == "Owner" && !string.IsNullOrWhiteSpace(userId))
+                propertyQuery = propertyQuery.Where(p => p.LinkedOwnerId == userId);
+
+            var propertyExists = await propertyQuery.AnyAsync();
+            if (!propertyExists) return null;
+
+            var unit = await _context.PropertyUnits.FirstOrDefaultAsync(u => u.PropertyUnitId == unitId && u.PropertyId == propertyId);
+            if (unit == null) return null;
+
+            // A Tenant may only address the specific unit they currently lease.
+            if (role == "Tenant")
+            {
+                var isLeased = await _context.UnitLeases.AnyAsync(l =>
+                    l.UserId == userId && l.TenantId == userTenantId && l.PropertyUnitId == unitId &&
+                    l.PropertyId == propertyId && l.IsActive && l.LeaseEnd >= DateTime.UtcNow);
+                if (!isLeased) return null;
+            }
+
+            return unit;
+        }
+
+        // Resolve the caller's canonical role, normalizing legacy seed aliases
+        // (SuperAdmin/Manager/Agent/Admin) to the advertised 5-role contract.
+        private string? GetCurrentCanonicalRole()
+        {
+            var role = User.FindFirst(c =>
+                c.Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/role")?.Value
+                ?? User.FindFirst(ClaimTypes.Role)?.Value;
+            return role switch
+            {
+                "SuperAdmin" => "PlatformAdmin",
+                "Manager" => "AgencyAdmin",
+                "Admin" => "AgencyAdmin",
+                "Agent" => "Broker",
+                _ => role
+            };
+        }
+
+        private static readonly System.Collections.Generic.HashSet<string> ReadOnlyRoles =
+            new(System.StringComparer.OrdinalIgnoreCase) { "Tenant", "Owner" };
+
+        // Tenants and Owners may never delete anything (units, documents, maintenance calls).
+        private bool IsReadOnlyRole() => ReadOnlyRoles.Contains(GetCurrentCanonicalRole() ?? string.Empty);
+
+        // Apply role + tenant scoping to a PropertyAsset queryable so search / look-ups
+        // only surface properties a role is entitled to see.
+        private IQueryable<PropertyAsset> ApplyPropertyVisibility(IQueryable<PropertyAsset> query)
+        {
+            var role = GetCurrentCanonicalRole();
+            if (role == "PlatformAdmin") return query;
+
+            var tenantId = User.FindFirst("TenantId")?.Value;
+            if (string.IsNullOrWhiteSpace(tenantId)) return query.Where(p => false);
+            query = query.Where(p => p.TenantId == tenantId);
+
+            if (role == "Owner")
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!string.IsNullOrWhiteSpace(userId)) query = query.Where(p => p.LinkedOwnerId == userId);
+            }
+            else if (role == "Tenant")
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var leasedPropertyIds = _context.UnitLeases
+                    .Where(l => l.UserId == userId && l.TenantId == tenantId && l.IsActive && l.LeaseEnd >= DateTime.UtcNow)
+                    .Select(l => l.PropertyId).ToList();
+                query = query.Where(p => leasedPropertyIds.Contains(p.PropertyId));
+            }
+            return query;
+        }
+
+        private async Task<HashSet<int>> GetLeasedUnitIdsAsync(string userId, string tenantId)
+        {
+            return await _context.UnitLeases
+                .Where(l => l.UserId == userId && l.TenantId == tenantId && l.IsActive && l.LeaseEnd >= DateTime.UtcNow)
+                .Select(l => l.PropertyUnitId)
+                .ToHashSetAsync();
+        }
+
+    private static List<DocumentMeta> ParseUnitDocuments(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json.Trim() == "[]") return new List<DocumentMeta>();
+        try { return JsonSerializer.Deserialize<List<DocumentMeta>>(json, JsonOptions) ?? new List<DocumentMeta>(); }
+        catch { return new List<DocumentMeta>(); }
+    }
+
         // --- 🏠 ENDPOINT: CREATE PROPERTY WITH OPTIONAL SUB-UNITS ---
+        [Authorize]
         [HttpPost("create")]
         public async Task<IActionResult> CreateProperty([FromBody] CreatePropertyPayload payload)
         {
@@ -172,9 +533,16 @@ namespace Property.Microservice.Controllers
                 return BadRequest(new { message = "Property address is required." });
             }
 
+            // 🛡️ Multi-tenant isolation: the owning TenantId is taken from the JWT, never
+            // from the client payload, so a user cannot mint a property into another sandbox.
+            var userTenantId = User.FindFirst("TenantId")?.Value;
+            if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
+            if (GetCurrentCanonicalRole() == "Tenant" || GetCurrentCanonicalRole() == "Owner")
+                return Forbid();
+
             var newProp = new PropertyAsset
             {
-                TenantId = "TEN-001",
+                TenantId = userTenantId,
                 CompleteAddress = payload.CompleteAddress,
                 ErfSpatialSize = payload.ErfSpatialSize ?? "200 m²",
                 TitleDeedType = payload.TitleDeedType ?? "Freehold",
@@ -282,14 +650,23 @@ namespace Property.Microservice.Controllers
                 .FirstAsync(p => p.PropertyId == propertyId));
         }
         // --- 🔍 ENDPOINT A: MULTI-CRITERIA REAL ESTATE SEARCH PIPELINE ---
+        [Authorize]
         [HttpPost("search")]
-        public async Task<IActionResult> SearchProperties([FromBody] PropertySearchCriteria criteria)
+        public async Task<IActionResult> SearchProperties([FromBody] PropertySearchCriteria criteria, [FromQuery] int page = 1)
         {
+            if (page < 1) page = 1;
+            const int PAGE_SIZE = 20;
+
             // Eagerly load relational structures (Property Type lookups and sub-units)
             var query = _context.PropertyAssets
                 .Include(p => p.PropertyTypeDetails)
                 .Include(p => p.SubUnits)
                 .AsQueryable();
+
+            // 🛡️ Role + tenant visibility scoping: a PlatformAdmin sees every property,
+            // an Owner only their owned properties, a Tenant only active-leased properties,
+            // and AgencyAdmin/Broker only their own tenant's properties.
+            query = ApplyPropertyVisibility(query);
 
             // 1. Filter by target locations array matching text boundaries
             if (criteria.Locations != null && criteria.Locations.Any())
@@ -304,6 +681,21 @@ namespace Property.Microservice.Controllers
                                          p.PropertyTypeDetails.Name == criteria.PropertyType);
             }
 
+            // 📈 Listing eligibility filter (a property may be listed for SALE and/or RENT).
+            if (!string.Equals(criteria.ListingType, "All", StringComparison.OrdinalIgnoreCase))
+            {
+                if (criteria.ListingType.Equals("Sale", StringComparison.OrdinalIgnoreCase))
+                    query = query.Where(p => p.IsForSale);
+                else if (criteria.ListingType.Equals("Rent", StringComparison.OrdinalIgnoreCase))
+                    query = query.Where(p => p.IsForRent);
+            }
+
+            // Price range filter (uses the active listing price; sale→SalePrice, rent→BaseRentalRate)
+            if (criteria.MinPrice.HasValue)
+                query = query.Where(p => (criteria.ListingType == "Rent" ? p.BaseRentalRate : p.SalePrice) >= criteria.MinPrice.Value);
+            if (criteria.MaxPrice.HasValue)
+                query = query.Where(p => (criteria.ListingType == "Rent" ? p.BaseRentalRate : p.SalePrice) <= criteria.MaxPrice.Value);
+
             // The UI submits area bounds in square metres.  Use linked unit area
             // where available, falling back to the text field only for display.
             if (criteria.MinSize.HasValue)
@@ -311,7 +703,10 @@ namespace Property.Microservice.Controllers
             if (criteria.MaxSize.HasValue)
                 query = query.Where(p => p.SubUnits.Any(u => u.NetRentableAreaSqM <= criteria.MaxSize.Value));
 
-            var results = await query.ToListAsync();
+            var total = await query.CountAsync();
+            var results = await query.OrderBy(p => p.PropertyId)
+                .Skip((page - 1) * PAGE_SIZE).Take(PAGE_SIZE).ToListAsync();
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
             return Ok(results);
         }
 
@@ -406,6 +801,93 @@ namespace Property.Microservice.Controllers
                 payload.DealId.ToString(),
                 System.Text.Json.JsonSerializer.Serialize(payload));
             return Accepted(new { message = "Brochure generation request queued." });
+        }
+
+    // --- 🛠️ ENDPOINTS: PROPERTY-UNIT MAINTENANCE CALLS (tenant-logged) ---
+    // A Tenant may create a maintenance call only against a unit they currently lease;
+    // an Owner/Broker/AgencyAdmin may create one for units in their scope. Tenants and
+    // Owners may never delete anything. A dedicated payload DTO is used so the
+    // server-derived TenantId/RequestedByUserId are never validated against missing
+    // client input.
+    public class MaintenanceCallPayload
+    {
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public DateTime? DueDate { get; set; }
+    }
+
+    [Authorize]
+    [HttpGet("{propertyId}/units/{unitId:int}/maintenance")]
+    public async Task<IActionResult> GetUnitMaintenanceCalls(int propertyId, int unitId)
+    {
+        var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+        if (unit == null)
+        {
+            if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+            return NotFound(new { message = "Target property or unit not found." });
+        }
+
+        var calls = await _context.MaintenanceCalls
+            .Where(m => m.PropertyId == propertyId && m.PropertyUnitId == unitId)
+            .OrderByDescending(m => m.UpdatedAt)
+            .ToListAsync();
+        return Ok(calls);
+    }
+
+    [Authorize]
+    [HttpPost("{propertyId}/units/{unitId:int}/maintenance")]
+    public async Task<IActionResult> AddUnitMaintenanceCall(int propertyId, int unitId, [FromBody] MaintenanceCallPayload payload)
+    {
+        if (payload == null || string.IsNullOrWhiteSpace(payload.Title))
+            return BadRequest(new { message = "A maintenance call title is required." });
+
+        var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+        if (unit == null)
+        {
+            if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+            return NotFound(new { message = "Target property or unit not found." });
+        }
+
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var tenantId = User.FindFirst("TenantId")?.Value;
+
+        var call = new MaintenanceCall
+        {
+            TenantId = tenantId ?? string.Empty,
+            RequestedByUserId = userId ?? string.Empty,
+            PropertyId = propertyId,
+            PropertyUnitId = unitId,
+            Title = payload.Title,
+            Description = payload.Description ?? string.Empty,
+            Status = "Open",
+            DueDate = payload.DueDate,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _context.MaintenanceCalls.Add(call);
+        await _context.SaveChangesAsync();
+        return Ok(call);
+    }
+
+    [Authorize]
+    [HttpDelete("{propertyId}/units/{unitId:int}/maintenance/{callId:int}")]
+    public async Task<IActionResult> DeleteMaintenanceCall(int callId)
+    {
+        // Tenants and Owners may never delete anything.
+        if (IsReadOnlyRole()) return Forbid();
+
+        var call = await _context.MaintenanceCalls.FindAsync(callId);
+        if (call == null) return NotFound(new { message = "Maintenance call not found." });
+
+        // Tenant isolation: admins only act within their tenant.
+        var tenantId = User.FindFirst("TenantId")?.Value;
+        if (GetCurrentCanonicalRole() != "PlatformAdmin" && call.TenantId != tenantId)
+            return Forbid();
+
+            _context.MaintenanceCalls.Remove(call);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Maintenance call resolved and removed." });
         }
     }
 }

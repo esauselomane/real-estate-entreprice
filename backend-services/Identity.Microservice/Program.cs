@@ -62,6 +62,7 @@ using (var scope = app.Services.CreateScope())
 
 app.UseCors("AllowViteFrontend");
 app.UseRouting();
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 

@@ -15,6 +15,7 @@ namespace Identity.Microservice.Data
         public DbSet<TenantAgency> TenantAgencies { get; set; }
         public DbSet<UserAccount> UserAccounts { get; set; }
         public DbSet<UserAccessClaim> UserAccessClaims { get; set; }
+        public DbSet<SystemRoleDefinition> SystemRoles { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

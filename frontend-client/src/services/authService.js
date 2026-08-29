@@ -1,4 +1,4 @@
-import apiClient from './ apiClient.js';
+import apiClient from './apiClient.js';
 
 export const authService = {
   
@@ -19,8 +19,8 @@ export const authService = {
     }
   },
 
-  // --- 📨 SELF-SERVICE PASSWORD RECOVERY EMAIL INTERFACE ---
-  forgotPassword: async (email) => {
+   // --- 📨 SELF-SERVICE PASSWORD RECOVERY EMAIL INTERFACE ---
+   forgotPassword: async (email) => {
     try {
       const response = await apiClient.post('/auth/forgot-password', { email });
       return response.data;
@@ -46,10 +46,45 @@ export const authService = {
     }
   },
 
-  // --- 👤 LOCAL ACCOUNT STATUS CLEARING ---
-  logout: () => {
-    localStorage.removeItem('user_session_jwt');
-    localStorage.removeItem('user_profile_data');
-    window.location.reload(); // Instantly hard resets the active canvas back to the login screen gate
-  }
+  // --- 👥 USER ROLE ADMINISTRATION (add / remove / reassign a SystemRole on an account) ---
+  getUsers: async () => {
+    try {
+      const response = await apiClient.get('/auth/users');
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'User directory sync failed.';
+    }
+  },
+  updateUserRole: async (userId, systemRole) => {
+    try {
+      const response = await apiClient.put(`/auth/users/${userId}/role`, { systemRole });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Role reassignment failed.';
+    }
+  },
+
+    // --- 👤 LOCAL ACCOUNT STATUS CLEARING ---
+    logout: () => {
+     localStorage.removeItem('user_session_jwt');
+     localStorage.removeItem('user_profile_data');
+     window.location.reload(); // Instantly hard resets the active canvas back to the login screen gate
+   }
+ };
+
+// 🛡️ Resolve the caller's canonical role from the persisted profile for UI gating.
+// Mirrors the backend normalization (SuperAdmin->PlatformAdmin, etc.) so the shell
+// only renders add/delete controls that the role is actually permitted to invoke.
+export const getCurrentRole = () => {
+  try {
+    const profile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
+    return (profile.role || '').toString().trim() || '';
+  } catch { return ''; }
 };
+
+export const isReadOnlyRole = () => {
+  const role = getCurrentRole();
+  return role === 'Tenant' || role === 'Owner';
+};
+
+export const canManageUnits = () => !isReadOnlyRole();

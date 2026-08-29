@@ -1,20 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import LeftSidebar from './components/ LeftSidebar.jsx';
-import PropertySearch from './components/ PropertySearch.jsx';
-import PropertyDetails from './components/ PropertyDetails.jsx';
+import LeftSidebar from './components/LeftSidebar.jsx';
+import PropertySearch from './components/PropertySearch.jsx';
+import PropertyDetails from './components/PropertyDetails.jsx';
 import ClientDetails from './components/ClientDetails.jsx';
 import CRMWorkspace from './components/CRMWorkspace.jsx';
-import PropertyMapWorkspace from './components/ PropertyMapWorkspace.jsx';
+import PropertyMapWorkspace from './components/PropertyMapWorkspace.jsx';
 import OwnersTenantsWorkspace from './components/OwnersTenantsWorkspace.jsx';
 import ReportsWorkspace from './components/ReportsWorkspace.jsx';
 import SystemAdminWorkspace from './components/SystemAdminWorkspace.jsx';
-import BrochureBuilderWorkspace from './components/ BrochureBuilderWorkspace.jsx';
-import OperationsWorkspace from './components/OperationsWorkspace.jsx';
-import RoleDashboard from './components/RoleDashboard.jsx';
+import BrochureBuilderWorkspace from './components/BrochureBuilderWorkspace.jsx';
+
 
 // 🔌 Import our clean encapsulated API microservices client wrappers
 import { authService } from './services/authService.js';
-import { crmService } from './services/ crmService.js';
+import { crmService } from './services/crmService.js';
 
 export default function App() {
   const normalizeRole = (role) => ({ SuperAdmin: 'PlatformAdmin', Manager: 'AgencyAdmin', Agent: 'Broker', Admin: 'AgencyAdmin' }[role] || role || 'Broker');
@@ -287,7 +286,6 @@ export default function App() {
               {currentView === 'owners-tenants' && "Owner & Tenant Directory"}
               {currentView === 'reports' && "Performance Reports"}
               {currentView === 'map' && "Property Map"}
-              {currentView === 'operations' && "Property Operations"}
               {currentView === 'admin' && "SuperAdmin Control Board"}
             </h2>
             <p className="text-slate-400 text-sm">Multi-tenant spatial intelligence portal for {currentAgency.name}</p>
@@ -330,13 +328,6 @@ export default function App() {
                 className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'reports' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 Reports
-              </button>
-              <button
-                onClick={() => navigateTo('operations')}
-                type="button"
-                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'operations' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Operations
               </button>
               {(userRole === 'PlatformAdmin' || userRole === 'AgencyAdmin') && (
                 <button 
@@ -393,11 +384,7 @@ export default function App() {
         )}
 
         {currentView === 'map' && (
-          <PropertyMapWorkspace />
-        )}
-
-        {currentView === 'operations' && (
-          <OperationsWorkspace />
+          <PropertyMapWorkspace onSelectProperty={handleSelectProperty} />
         )}
 
         {currentView === 'details' && (
@@ -418,7 +405,7 @@ export default function App() {
         )}
 
         {currentView === 'admin' && (userRole === 'PlatformAdmin' || userRole === 'AgencyAdmin') && (
-          <SystemAdminWorkspace />
+          <SystemAdminWorkspace currentUserRole={userRole} />
         )}
       </div>
 

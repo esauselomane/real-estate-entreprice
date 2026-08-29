@@ -37,13 +37,40 @@ namespace CRM.Microservice.Models
         [Required]
         public string TenantId { get; set; } = string.Empty;
 
-        [Required]
+         [Required]
         public string Name { get; set; } = string.Empty;
 
+        public string TradingName { get; set; } = string.Empty;
+        public string RegistrationNumber { get; set; } = string.Empty;
+        public string CompanyLogoUrl { get; set; } = string.Empty;
         public string ContactEmail { get; set; } = string.Empty;
         public string HeadquartersAddress { get; set; } = string.Empty;
         public string OperationalStatus { get; set; } = "Active";
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        public ICollection<ContactPerson> ContactPersons { get; set; } = new List<ContactPerson>();
+    }
+
+    // 📇 Primary contact person for an agency. Can be promoted to a Broker (AgencyAdmin profile).
+    public class ContactPerson
+    {
+        [Key]
+        public string ContactPersonId { get; set; } = string.Empty;
+
+        [Required]
+        public string AgencyId { get; set; } = string.Empty;
+
+        [Required]
+        public string FullName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Phone { get; set; } = string.Empty;
+        public string Position { get; set; } = string.Empty;
+        public string Role { get; set; } = "Owner"; // Owner / Tenant / Manager
+        public bool IsAgencyAdmin { get; set; } = false;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        [ForeignKey("AgencyId")]
+        public AgencyRecord? Agency { get; set; }
     }
 
     public class BrokerRecord
@@ -88,6 +115,11 @@ namespace CRM.Microservice.Models
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal BudgetLimit { get; set; }
+
+        // 📋 Interests: JSON-encoded lists so owners/tenants can express demand
+        // across multiple property types and geographic areas (autofilled from Geography).
+        public string PropertyTypeInterests { get; set; } = string.Empty;
+        public string AreaInterestIds { get; set; } = string.Empty;
 
         public string Notes { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -137,8 +169,8 @@ namespace CRM.Microservice.Models
         public string PositionJobTitle { get; set; } = "Director";
         public string ContactRoleType { get; set; } = "Buyer";
 
-        public string AssociatedCompanyId { get; set; } = string.Empty;
-        public string AssociatedLegalEntityId { get; set; } = string.Empty;
+        public string? AssociatedCompanyId { get; set; }
+        public string? AssociatedLegalEntityId { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -168,6 +200,15 @@ namespace CRM.Microservice.Models
         ClosedLost
     }
 
+    // 💰 Commission can be expressed as a percentage of the transaction value
+    // OR as a fixed monetary amount — never both. The toggle lives on the lead/deal.
+    // Stored as a string ("Percent" | "Amount") so it round-trips cleanly through JSON.
+    public static class CommissionTypes
+    {
+        public const string Percent = "Percent";
+        public const string Amount = "Amount";
+    }
+
     public class LeadRecord
     {
         [Key]
@@ -181,6 +222,8 @@ namespace CRM.Microservice.Models
 
         public string ContactEmail { get; set; } = string.Empty;
         public string ContactPhone { get; set; } = string.Empty;
+        // 🔗 Optional link to an existing CRMContact resolved by name/surname or email on creation.
+        public string? LinkedContactId { get; set; } = null;
 
         [Required]
         public string AllocatedToAgent { get; set; } = string.Empty;
@@ -199,6 +242,11 @@ namespace CRM.Microservice.Models
 
         public string LeadNotes { get; set; } = string.Empty;
         public bool IsConvertedToDeal { get; set; } = false;
+
+        // 💰 Commission entitlement captured on the lead and carried into the deal at promotion.
+        public string CommissionType { get; set; } = CommissionTypes.Percent;
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal CommissionValue { get; set; } = 0m;
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
@@ -231,6 +279,13 @@ namespace CRM.Microservice.Models
         public string DealNotes { get; set; } = string.Empty;
         public DateTime LastStageUpdatedAt { get; set; } = DateTime.UtcNow;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        // 💰 Commission locked at promotion time; only realised into revenue when the deal is ClosedWon.
+        public string CommissionType { get; set; } = CommissionTypes.Percent;
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal CommissionValue { get; set; } = 0m;
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal? RealisedCommission { get; set; } = null;
     }
 
     public class PipelineSummaryReport
@@ -255,6 +310,7 @@ namespace CRM.Microservice.Models
         public int TotalLeads { get; set; }
         public int TotalDeals { get; set; }
         public decimal TotalRevenue { get; set; }
+        public decimal TotalRealisedCommission { get; set; }
         public List<ReportDrilldownRow> MonthlyBreakdown { get; set; } = new();
     }
 
@@ -282,5 +338,26 @@ namespace CRM.Microservice.Models
         // (mirrors DealRecord.LinkedPropertyId) since Property & CRM use separate DBs.
         public int? PropertyId { get; set; }
         public int? PropertyUnitId { get; set; }
+    }
+
+    // 🌍 Reference geography used by the owner/tenant area-of-interest auto-fill.
+    // Countries / provinces / suburbs are shared (non-tenant-scoped) reference data.
+    public class GeographyRecord
+    {
+        [Key]
+        public int GeographyId { get; set; }
+
+        [Required]
+        public string Country { get; set; } = "South Africa";
+
+        public string Province { get; set; } = string.Empty;
+        public string City { get; set; } = string.Empty;
+        public string? Suburb { get; set; }
+
+        [Column(TypeName = "decimal(10,6)")]
+        public decimal Latitude { get; set; }
+
+        [Column(TypeName = "decimal(10,6)")]
+        public decimal Longitude { get; set; }
     }
 }

@@ -57,6 +57,92 @@ using (var serviceScope = app.Services.CreateScope())
 {
     var databaseContext = serviceScope.ServiceProvider.GetRequiredService<PropertyDbContext>();
     databaseContext.Database.EnsureCreated();
+
+    // 🛠️ Idempotent migration: add the unit-level document vault column to existing
+    // PropertyUnits tables created before this field existed.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF COL_LENGTH(N'[PropertyUnits]', 'UnitDocumentsJson') IS NULL
+        BEGIN
+            ALTER TABLE [PropertyUnits] ADD [UnitDocumentsJson] nvarchar(max) NOT NULL
+                CONSTRAINT [DF_PropertyUnits_UnitDocumentsJson] DEFAULT '[]';
+        END
+    ");
+
+    // 🛠️ Widen UnitNumber from nvarchar(20) -> nvarchar(50) so realistic unit identifiers
+    // like 'Suite 101 - Renovated' are editable without truncating server-side.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'[PropertyUnits]') AND name = N'UnitNumber' AND (max_length < 50 OR max_length = -1))
+            ALTER TABLE [PropertyUnits] ALTER COLUMN [UnitNumber] nvarchar(50) NOT NULL;
+    ");
+
+    // 🛠️ Idempotent schema additions for the tenant lease ledger and maintenance log.
+    // EnsureCreated() is a no-op against an existing database, so new tables must be
+    // created here (mirroring the UnitDocumentsJson column migration above).
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[UnitLeases]') AND type = N'U')
+        BEGIN
+            CREATE TABLE [UnitLeases] (
+                [UnitLeaseId]        INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [UserId]             NVARCHAR(50)   NOT NULL,
+                [TenantId]           NVARCHAR(50)   NOT NULL,
+                [PropertyId]         INT            NOT NULL,
+                [PropertyUnitId]     INT            NOT NULL,
+                [LeaseStart]         DATETIME2      NOT NULL,
+                [LeaseEnd]           DATETIME2      NOT NULL,
+                [IsActive]           BIT            NOT NULL DEFAULT 1,
+                [CreatedAt]          DATETIME2      NOT NULL DEFAULT GETUTCDATE(),
+                INDEX [IX_UnitLeases_UserId_PropertyUnitId_IsActive] ([UserId], [PropertyUnitId], [IsActive])
+            );
+        END
+    ");
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[MaintenanceCalls]') AND type = N'U')
+        BEGIN
+            CREATE TABLE [MaintenanceCalls] (
+                [MaintenanceCallId]  INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [TenantId]           NVARCHAR(50)   NOT NULL,
+                [RequestedByUserId]  NVARCHAR(50)   NOT NULL,
+                [PropertyId]         INT            NOT NULL,
+                [PropertyUnitId]     INT            NOT NULL,
+                [Title]              NVARCHAR(250)  NOT NULL DEFAULT '',
+                [Description]        NVARCHAR(MAX)  NOT NULL DEFAULT '',
+                [Status]             NVARCHAR(50)   NOT NULL DEFAULT 'Open',
+                [DueDate]            DATETIME2      NULL,
+                [CreatedAt]          DATETIME2      NOT NULL DEFAULT GETUTCDATE(),
+                [UpdatedAt]          DATETIME2      NOT NULL DEFAULT GETUTCDATE(),
+                INDEX [IX_MaintenanceCalls_PropertyUnitId] ([PropertyUnitId])
+            );
+        END
+    ");
+
+    // 📈 New listing-eligibility flags: an asset may be marketed for SALE
+    // and/or RENT simultaneously. Backfilled with safe defaults onto pre-existing DBs.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF COL_LENGTH(N'[PropertyAssets]', 'IsForSale') IS NULL
+            ALTER TABLE [PropertyAssets] ADD [IsForSale] BIT NOT NULL CONSTRAINT DF_PA_IsForSale DEFAULT 1;
+        IF COL_LENGTH(N'[PropertyAssets]', 'IsForRent') IS NULL
+            ALTER TABLE [PropertyAssets] ADD [IsForRent] BIT NOT NULL CONSTRAINT DF_PA_IsForRent DEFAULT 0;
+        -- Distribute flags across the seeded assets (odd = sale, even = rent, every 5th = both)
+        UPDATE [PropertyAssets] SET
+            IsForSale = CASE WHEN ([PropertyId] % 2 = 1 OR [PropertyId] % 5 = 0) THEN 1 ELSE 0 END,
+            IsForRent = CASE WHEN ([PropertyId] % 2 = 0 OR [PropertyId] % 5 = 0) THEN 1 ELSE 0 END;
+    ");
+
+    // 📍 Ring-fence & spread geocoordinates across real South-African city centres (synced
+    // to the address city via PropertyId % 8) with a small jitter. Runs every startup;
+    // idempotent (recomputes the same value). Existing clustered coords are corrected here.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        UPDATE [pa] SET
+            Latitude  = c.La + (CAST([pa].[PropertyId] AS bigint) * 7 % 11 - 5) * 0.01,
+            Longitude = c.Lo + (CAST([pa].[PropertyId] AS bigint) * 3 % 11 - 5) * 0.01
+        FROM [PropertyAssets] AS [pa]
+        INNER JOIN (VALUES
+            (0, -33.9249, 18.4207), (1, -26.2041, 28.0479), (2, -29.8599, 31.0579),
+            (3, -25.7617, 28.1881), (4, -26.1081, 28.0567), (5, -32.5833, 22.2833),
+            (6, -33.9625, 25.6250), (7, -28.7465, 26.1316)
+        ) AS c(n, La, Lo) ON c.n = [pa].[PropertyId] % 8;
+    ");
+
     PropertySeedData.EnsureSeeded(databaseContext);
 }
 

@@ -1,5 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using CRM.Microservice.Data;
 using CRM.Microservice.Models;
 using System;
@@ -11,31 +15,92 @@ namespace CRM.Microservice.Controllers
 {
     [ApiController]
     [Route("api/crm")]
+    [Authorize]
     public class CRMController : ControllerBase
     {
         private readonly CRMDbContext _context;
+        private readonly IHttpClientFactory _http;
+        private const string GATEWAY_URL = "http://localhost:5000/gateway";
 
-        public CRMController(CRMDbContext context)
+        public CRMController(CRMDbContext context, IHttpClientFactory http)
         {
             _context = context;
+            _http = http;
         }
 
-        public class LeadUpdatePayload { public int LeadId { get; set; } public string NextStage { get; set; } = string.Empty; public string NotesUpdate { get; set; } = string.Empty; public int? LinkToPropertyId { get; set; } public string SellerNameIfNewDeal { get; set; } = string.Empty; }
+        // 🔐 Resolves the caller's tenant directly from the bearer JWT claim
+        // instead of trusting a client-supplied URL parameter.
+        private string GetCurrentTenant()
+        {
+            var tenant = User?.FindFirst("TenantId")?.Value
+                         ?? User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+            return tenant ?? string.Empty;
+        }
+
+        // 🔑 Canonical role from the JWT (mirrors Identity normalization) for role-gating.
+        private string GetCurrentCanonicalRole()
+        {
+            var role = User?.FindFirst("http://schemas.microsoft.com/ws/2008/06/identity/claims/role")?.Value
+                       ?? User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+            return role switch
+            {
+                "SuperAdmin" or "Manager" => "PlatformAdmin",
+                "Admin" or "AgencyAdmin" => "AgencyAdmin",
+                _ => role ?? string.Empty
+            };
+        }
+
+        private const int PAGE_SIZE = 20;
+        private int GetPage([FromQuery] int page) => page > 0 ? page : 1;
+
+
+        // 📄 Server-side pagination helper: returns the page slice + total count
+        // (total is exposed via the X-Total-Count response header for infinite scroll).
+        private async Task<(List<T> Items, int Total)> PageAsync<T>(IQueryable<T> query, int page)
+        {
+            var total = await query.CountAsync();
+            var items = await query.Skip((page - 1) * PAGE_SIZE).Take(PAGE_SIZE).ToListAsync();
+            return (items, total);
+        }
+
+        public class LeadUpdatePayload { public int LeadId { get; set; } public string NextStage { get; set; } = string.Empty; public string NotesUpdate { get; set; } = string.Empty; public int? LinkToPropertyId { get; set; } public string SellerNameIfNewDeal { get; set; } = string.Empty; public string CommissionType { get; set; } = CommissionTypes.Percent; public decimal CommissionValue { get; set; } = 0m; }
         public class DealUpdatePayload { public int DealId { get; set; } public string NextStage { get; set; } = string.Empty; public string NotesUpdate { get; set; } = string.Empty; }
         public class ReallocatePayload { public int TargetId { get; set; } public bool IsDeal { get; set; } public string TargetAgentName { get; set; } = string.Empty; }
 
-        [HttpGet("operations")]
-        public async Task<IActionResult> GetOperationalRecords([FromQuery] string tenantId, [FromQuery] string module, [FromQuery] int? propertyId, [FromQuery] int? propertyUnitId)
+        // 🚀 Promotion request: converts a qualified lead into a deal, auto-matching a property
+        // from the Property microservice when one is not supplied manually.
+        public class PromotionRequest
         {
+            public bool IsRent { get; set; } = false;
+            public string? PropertyTypeOverride { get; set; }
+            public string? PreferredAreaOverride { get; set; }
+            public int? MinSize { get; set; }
+            public int? MaxSize { get; set; }
+            public int? LinkToPropertyId { get; set; }
+            public string? SellerNameIfNewDeal { get; set; }
+        }
+
+        // 🏠 Shape of a property returned by the Property microservice search (auto-match engine).
+        public class PropertyMatchDto
+        {
+            public int PropertyId { get; set; }
+            public string? LinkedOwnerId { get; set; }
+            public decimal ValuationPrice { get; set; }
+        }
+
+
+        [HttpGet("operations")]
+        public async Task<IActionResult> GetOperationalRecords([FromQuery] int page = 1, [FromQuery] string? module = null, [FromQuery] int? propertyId = null, [FromQuery] int? propertyUnitId = null)
+        {
+            var tenantId = GetCurrentTenant();
             var query = _context.OperationalRecords.Where(r => r.TenantId == tenantId);
             if (!string.IsNullOrWhiteSpace(module)) query = query.Where(r => r.Module == module);
-
-            // 🔗 Optional property / unit scoping so records can be surfaced on the
-            // property page bound to a specific sub-unit without re-typing anything.
             if (propertyId.HasValue) query = query.Where(r => r.PropertyId == propertyId.Value);
             if (propertyUnitId.HasValue) query = query.Where(r => r.PropertyUnitId == propertyUnitId.Value);
 
-            return Ok(await query.OrderByDescending(r => r.UpdatedAt).ToListAsync());
+            var (items, total) = await PageAsync(query.OrderByDescending(r => r.UpdatedAt), page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
         }
 
         [HttpPost("operations")]
@@ -70,20 +135,23 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("companies")]
-        public async Task<IActionResult> GetCompanies([FromQuery] string tenantId)
+        public async Task<IActionResult> GetCompanies([FromQuery] int page)
         {
-            var companies = await _context.CRMCompanies.Where(c => c.TenantId == tenantId).ToListAsync();
-            return Ok(companies);
+            var tenantId = GetCurrentTenant();
+            var query = _context.CRMCompanies.Where(c => c.TenantId == tenantId).OrderBy(c => c.BusinessName);
+            var (items, total) = await PageAsync(query, page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
         }
 
         [HttpGet("owners-tenants")]
-        public async Task<IActionResult> GetOwnerTenantRecords([FromQuery] string tenantId)
+        public async Task<IActionResult> GetOwnerTenantRecords([FromQuery] int page)
         {
-            var rows = await _context.OwnerTenantRecords
-                .Where(r => r.TenantId == tenantId)
-                .OrderByDescending(r => r.CreatedAt)
-                .ToListAsync();
-            return Ok(rows);
+            var tenantId = GetCurrentTenant();
+            var query = _context.OwnerTenantRecords.Where(r => r.TenantId == tenantId).OrderByDescending(r => r.CreatedAt);
+            var (items, total) = await PageAsync(query, page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
         }
 
         [HttpGet("owners-tenants/{ownerTenantId:int}")]
@@ -93,6 +161,32 @@ namespace CRM.Microservice.Controllers
             return record == null
                 ? NotFound(new { message = "Owner or tenant record not found." })
                 : Ok(record);
+        }
+
+        // 🌍 Geography auto-complete reference data for owner/tenant area-of-interest selection.
+        [HttpGet("geography")]
+        public async Task<IActionResult> SearchGeography([FromQuery] string? search)
+        {
+            var query = _context.GeographyRecords.AsQueryable();
+            var term = (search ?? string.Empty).Trim().ToLower();
+            if (!string.IsNullOrEmpty(term))
+            {
+                query = query.Where(g =>
+                    g.Country.ToLower().Contains(term) ||
+                    g.Province.ToLower().Contains(term) ||
+                    g.City.ToLower().Contains(term) ||
+                    (g.Suburb ?? string.Empty).ToLower().Contains(term));
+            }
+            var results = await query.OrderBy(g => g.Country).ThenBy(g => g.Province).ThenBy(g => g.City).ThenBy(g => g.Suburb)
+                .Take(50).ToListAsync();
+            return Ok(results);
+        }
+
+        [HttpGet("geography/{geographyId:int}")]
+        public async Task<IActionResult> GetGeography(int geographyId)
+        {
+            var geo = await _context.GeographyRecords.FindAsync(geographyId);
+            return geo == null ? NotFound(new { message = "Geography record not found." }) : Ok(geo);
         }
 
         [HttpPost("owners-tenants")]
@@ -118,32 +212,44 @@ namespace CRM.Microservice.Controllers
             existing.CompanyName = updatedRecord.CompanyName;
             existing.EmailAddress = updatedRecord.EmailAddress;
             existing.PhoneNumber = updatedRecord.PhoneNumber;
-            existing.PrimaryLocation = updatedRecord.PrimaryLocation;
-            existing.BudgetLimit = updatedRecord.BudgetLimit;
-            existing.Notes = updatedRecord.Notes;
+             existing.PrimaryLocation = updatedRecord.PrimaryLocation;
+             existing.BudgetLimit = updatedRecord.BudgetLimit;
+             existing.PropertyTypeInterests = updatedRecord.PropertyTypeInterests;
+             existing.AreaInterestIds = updatedRecord.AreaInterestIds;
+             existing.Notes = updatedRecord.Notes;
+
 
             await _context.SaveChangesAsync();
             return Ok(existing);
         }
 
         [HttpGet("agencies")]
-        public async Task<IActionResult> GetAgencies([FromQuery] string tenantId)
+        public async Task<IActionResult> GetAgencies([FromQuery] int page)
         {
-            var agencies = await _context.AgencyRecords
+            var tenantId = GetCurrentTenant();
+            var query = _context.AgencyRecords
                 .Where(a => string.IsNullOrWhiteSpace(tenantId) || a.TenantId == tenantId)
-                .ToListAsync();
-            return Ok(agencies);
+                .OrderBy(a => a.Name);
+            var (items, total) = await PageAsync(query, page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
         }
 
         [HttpPost("agencies")]
         public async Task<IActionResult> CreateAgency([FromBody] AgencyRecord agency)
         {
+            // 🔐 Only a PlatformAdmin may provision a new agency (agency = a tenant-scoped
+            // billing entity). AgencyAdmin / Broker must never see this functionality.
+            if (GetCurrentCanonicalRole() != "PlatformAdmin")
+                return Forbid();
+
             if (agency == null || string.IsNullOrWhiteSpace(agency.Name))
                 return BadRequest(new { message = "Agency name is required." });
 
             if (string.IsNullOrWhiteSpace(agency.AgencyId))
                 agency.AgencyId = "TEN-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
-
+            // 🔐 Tenant taken from the caller's JWT, never from the request body.
+            agency.TenantId = GetCurrentTenant();
             agency.CreatedAt = DateTime.UtcNow;
             _context.AgencyRecords.Add(agency);
             await _context.SaveChangesAsync();
@@ -153,9 +259,14 @@ namespace CRM.Microservice.Controllers
         [HttpPut("agencies/{agencyId}")]
         public async Task<IActionResult> UpdateAgency(string agencyId, [FromBody] AgencyRecord updatedAgency)
         {
-            var agency = await _context.AgencyRecords.FindAsync(agencyId);
+            var agency = await _context.AgencyRecords
+                .Include(a => a.ContactPersons)
+                .FirstOrDefaultAsync(a => a.AgencyId == agencyId);
             if (agency == null) return NotFound(new { message = "Agency record not found." });
             agency.Name = updatedAgency.Name;
+            agency.TradingName = updatedAgency.TradingName;
+            agency.RegistrationNumber = updatedAgency.RegistrationNumber;
+            agency.CompanyLogoUrl = updatedAgency.CompanyLogoUrl;
             agency.ContactEmail = updatedAgency.ContactEmail;
             agency.HeadquartersAddress = updatedAgency.HeadquartersAddress;
             agency.OperationalStatus = updatedAgency.OperationalStatus;
@@ -163,13 +274,94 @@ namespace CRM.Microservice.Controllers
             return Ok(agency);
         }
 
-        [HttpGet("brokers")]
-        public async Task<IActionResult> GetBrokers([FromQuery] string tenantId)
+        // 📇 Contact-person sub-resource for an agency (editable; promotable to a broker).
+        [HttpGet("agencies/{agencyId}/contacts")]
+        public async Task<IActionResult> GetAgencyContacts(string agencyId)
         {
-            var brokers = await _context.BrokerRecords
+            var exists = await _context.AgencyRecords.AnyAsync(a => a.AgencyId == agencyId);
+            if (!exists) return NotFound(new { message = "Agency not found." });
+            var contacts = await _context.ContactPersons
+                .Where(c => c.AgencyId == agencyId)
+                .OrderBy(c => c.FullName).ToListAsync();
+            return Ok(contacts);
+        }
+
+        [HttpPost("agencies/{agencyId}/contacts")]
+        public async Task<IActionResult> CreateContactPerson(string agencyId, [FromBody] ContactPerson contact)
+        {
+            var agency = await _context.AgencyRecords.FirstOrDefaultAsync(a => a.AgencyId == agencyId);
+            if (agency == null) return NotFound(new { message = "Agency not found." });
+            if (string.IsNullOrWhiteSpace(contact.FullName))
+                return BadRequest(new { message = "Contact full name is required." });
+
+            contact.ContactPersonId = "CPT-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
+            contact.AgencyId = agencyId;
+            contact.CreatedAt = DateTime.UtcNow;
+            _context.ContactPersons.Add(contact);
+            await _context.SaveChangesAsync();
+            return Ok(contact);
+        }
+
+        [HttpPut("contact-persons/{contactId}")]
+        public async Task<IActionResult> UpdateContactPerson(string contactId, [FromBody] ContactPerson updated)
+        {
+            var existing = await _context.ContactPersons.FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
+            if (existing == null) return NotFound(new { message = "Contact person not found." });
+            existing.FullName = updated.FullName;
+            existing.Email = updated.Email;
+            existing.Phone = updated.Phone;
+            existing.Position = updated.Position;
+            existing.Role = updated.Role;
+            existing.IsAgencyAdmin = updated.IsAgencyAdmin;
+            await _context.SaveChangesAsync();
+            return Ok(existing);
+        }
+
+        [HttpDelete("contact-persons/{contactId}")]
+        public async Task<IActionResult> DeleteContactPerson(string contactId)
+        {
+            var existing = await _context.ContactPersons.FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
+            if (existing == null) return NotFound(new { message = "Contact person not found." });
+            _context.ContactPersons.Remove(existing);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Contact person removed." });
+        }
+
+        // 🚀 Promote an agency contact into a Broker record (creates an AgencyAdmin profile).
+        [HttpPost("contact-persons/{contactId}/promote-to-broker")]
+        public async Task<IActionResult> PromoteContactToBroker(string contactId)
+        {
+            var contact = await _context.ContactPersons.FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
+            if (contact == null) return NotFound(new { message = "Contact person not found." });
+
+            var broker = new BrokerRecord
+            {
+                BrokerId = "BRK-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper(),
+                TenantId = GetCurrentTenant(),
+                AgencyId = contact.AgencyId,
+                FullName = contact.FullName,
+                Email = contact.Email,
+                Phone = contact.Phone,
+                Role = contact.IsAgencyAdmin ? "Manager" : "Broker",
+                Status = "Active",
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.BrokerRecords.Add(broker);
+            contact.IsAgencyAdmin = true;
+            await _context.SaveChangesAsync();
+            return Ok(new { broker, contact = contact });
+        }
+
+        [HttpGet("brokers")]
+        public async Task<IActionResult> GetBrokers([FromQuery] int page)
+        {
+            var tenantId = GetCurrentTenant();
+            var query = _context.BrokerRecords
                 .Where(b => string.IsNullOrWhiteSpace(tenantId) || b.TenantId == tenantId)
-                .ToListAsync();
-            return Ok(brokers);
+                .OrderBy(b => b.AgencyId).ThenBy(b => b.FullName);
+            var (items, total) = await PageAsync(query, page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
         }
 
         [HttpPost("brokers")]
@@ -178,9 +370,10 @@ namespace CRM.Microservice.Controllers
             if (broker == null || string.IsNullOrWhiteSpace(broker.FullName))
                 return BadRequest(new { message = "Broker details are required." });
 
-            if (string.IsNullOrWhiteSpace(broker.BrokerId))
+             if (string.IsNullOrWhiteSpace(broker.BrokerId))
                 broker.BrokerId = "BRK-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
-
+            // 🔐 Tenant taken from the caller's JWT, never from the request body.
+            broker.TenantId = GetCurrentTenant();
             broker.CreatedAt = DateTime.UtcNow;
             _context.BrokerRecords.Add(broker);
             await _context.SaveChangesAsync();
@@ -206,6 +399,8 @@ namespace CRM.Microservice.Controllers
         public async Task<IActionResult> CreateCompany([FromBody] CRMCompany company)
         {
             if (string.IsNullOrEmpty(company.CompanyId)) company.CompanyId = "COM-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
+            // 🔐 Tenant taken from the caller's JWT, never from the request body.
+            company.TenantId = GetCurrentTenant();
             company.CreatedAt = DateTime.UtcNow;
             _context.CRMCompanies.Add(company);
             await _context.SaveChangesAsync();
@@ -231,13 +426,16 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("legal-entities")]
-        public async Task<IActionResult> GetLegalEntities([FromQuery] string tenantId)
+        public async Task<IActionResult> GetLegalEntities([FromQuery] int page)
         {
-            var entities = await _context.CRMLegalEntities
+            var tenantId = GetCurrentTenant();
+            var query = _context.CRMLegalEntities
                 .Include(e => e.CompanyDetails)
                 .Where(e => e.TenantId == tenantId)
-                .ToListAsync();
-            return Ok(entities);
+                .OrderBy(e => e.RegisteredLegalName);
+            var (items, total) = await PageAsync(query, page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
         }
 
         [HttpPost("legal-entity/create")]
@@ -245,7 +443,8 @@ namespace CRM.Microservice.Controllers
         {
             if (string.IsNullOrEmpty(legalEntity.LegalEntityId))
                 legalEntity.LegalEntityId = "LGE-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
-
+            // 🔐 Tenant taken from the caller's JWT, never from the request body.
+            legalEntity.TenantId = GetCurrentTenant();
             legalEntity.CreatedAt = DateTime.UtcNow;
             _context.CRMLegalEntities.Add(legalEntity);
             await _context.SaveChangesAsync();
@@ -269,14 +468,17 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("contacts")]
-        public async Task<IActionResult> GetContacts([FromQuery] string tenantId)
+        public async Task<IActionResult> GetContacts([FromQuery] int page)
         {
-            var contacts = await _context.CRMContacts
+            var tenantId = GetCurrentTenant();
+            var query = _context.CRMContacts
                 .Include(c => c.CompanyDetails)
                 .Include(c => c.LegalEntityDetails)
                 .Where(c => c.TenantId == tenantId)
-                .ToListAsync();
-            return Ok(contacts);
+                .OrderBy(c => c.FullName);
+            var (items, total) = await PageAsync(query, page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
         }
 
         [HttpPost("contact/create")]
@@ -284,7 +486,8 @@ namespace CRM.Microservice.Controllers
         {
             if (string.IsNullOrEmpty(contact.ContactId))
                 contact.ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
-
+            // 🔐 Tenant taken from the caller's JWT, never from the request body.
+            contact.TenantId = GetCurrentTenant();
             contact.CreatedAt = DateTime.UtcNow;
             _context.CRMContacts.Add(contact);
             await _context.SaveChangesAsync();
@@ -310,19 +513,27 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("boards")]
-        public async Task<IActionResult> GetCRMBoards([FromQuery] string tenantId, [FromQuery] string agentName, [FromQuery] string userRole)
+        public async Task<IActionResult> GetCRMBoards([FromQuery] int page, [FromQuery] string agentName = "", [FromQuery] string userRole = "")
         {
+            var tenantId = GetCurrentTenant();
+            // 🔐 Scoping is authoritative from the JWT, never from a client-supplied role string.
+            var callerRole = GetCurrentCanonicalRole();
+            var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? agentName ?? string.Empty;
+
             var leadsQuery = _context.LeadRecords.Where(l => l.TenantId == tenantId && !l.IsConvertedToDeal);
             var dealsQuery = _context.DealRecords.Where(d => d.TenantId == tenantId);
 
-            if (userRole == "Agent")
+            // Only a Broker (agent) is restricted to their own records; admins see the full tenant pipeline.
+            if (callerRole == "Broker")
             {
-                leadsQuery = leadsQuery.Where(l => l.AllocatedToAgent == agentName);
-                dealsQuery = dealsQuery.Where(d => d.AllocatedToAgent == agentName);
+                leadsQuery = leadsQuery.Where(l => l.AllocatedToAgent == callerName);
+                dealsQuery = dealsQuery.Where(d => d.AllocatedToAgent == callerName);
             }
 
-            var activeLeads = await leadsQuery.ToListAsync();
-            var activeDeals = await dealsQuery.ToListAsync();
+            var (activeLeads, leadTotal) = await PageAsync(leadsQuery.OrderByDescending(l => l.CreatedAt), page);
+            var (activeDeals, dealTotal) = await PageAsync(dealsQuery.OrderByDescending(d => d.LastStageUpdatedAt), page);
+            HttpContext.Response.Headers["X-Lead-Count"] = leadTotal.ToString();
+            HttpContext.Response.Headers["X-Deal-Count"] = dealTotal.ToString();
 
             return Ok(new
             {
@@ -331,20 +542,181 @@ namespace CRM.Microservice.Controllers
             });
         }
 
-        [HttpPost("lead/create")]
-        public async Task<IActionResult> CreateLead([FromBody] LeadRecord newLead)
-        {
-            if (newLead == null) return BadRequest(new { message = "Invalid lead structural parameters." });
+         [HttpPost("lead/create")]
+         public async Task<IActionResult> CreateLead([FromBody] LeadRecord newLead)
+         {
+             if (newLead == null) return BadRequest(new { message = "Invalid lead structural parameters." });
 
+            var tenantId = GetCurrentTenant();
+            newLead.TenantId = tenantId;
+            // 🔐 A Broker always creates leads allocated to themselves — the client value is ignored
+            // so an agent can never claim another broker's pipeline.
+            if (GetCurrentCanonicalRole() == "Broker")
+                newLead.AllocatedToAgent = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? newLead.AllocatedToAgent;
             newLead.LeadStage = LeadWorkflowStage.Contacted;
             newLead.IsConvertedToDeal = false;
             newLead.CreatedAt = DateTime.UtcNow;
 
-            _context.LeadRecords.Add(newLead);
+             // 🔗 Item 3: try to bind the lead to an EXISTING contact by email or by name/surname.
+             // If none is found, the lead's own ClientName/ContactEmail/ContactPhone are retained
+             // as the "new contact" details (no contact record created until promotion).
+             var match = !string.IsNullOrWhiteSpace(newLead.ContactEmail)
+                 ? await _context.CRMContacts.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.EmailAddress == newLead.ContactEmail)
+                 : null;
+             if (match == null && !string.IsNullOrWhiteSpace(newLead.ClientName))
+             {
+                 var term = newLead.ClientName.ToLower();
+                 var surname = (newLead.ClientName.Split(' ').LastOrDefault() ?? "");
+                 match = await _context.CRMContacts
+                     .Where(c => c.TenantId == tenantId && c.FullName != null)
+                     .FirstOrDefaultAsync(c => c.FullName.ToLower().Contains(term) ||
+                                               (surname.Length > 2 && c.FullName.ToLower().Contains(surname)));
+             }
+             if (match != null) newLead.LinkedContactId = match.ContactId;
+
+             _context.LeadRecords.Add(newLead);
+             await _context.SaveChangesAsync();
+
+             return Ok(new { message = "Unverified lead record successfully catalogued.", leadId = newLead.LeadId, linkedContactId = newLead.LinkedContactId });
+         }
+
+        // 🚀 Promote a lead to a deal with automatic property matching.
+        [HttpPost("leads/{leadId:int}/promote")]
+        public async Task<IActionResult> PromoteLeadToDeal(int leadId, [FromBody] PromotionRequest request)
+        {
+            var lead = await _context.LeadRecords
+                .FirstOrDefaultAsync(l => l.LeadId == leadId && l.TenantId == GetCurrentTenant());
+            if (lead == null) return NotFound(new { message = "Target lead record not found." });
+            if (lead.IsConvertedToDeal) return Conflict(new { message = "Lead already promoted to a deal." });
+
+            // Resolve / create the buyer contact (reuse the contact-linking pattern).
+            var tenantId = lead.TenantId;
+            var buyerContact = !string.IsNullOrEmpty(lead.ContactEmail)
+                ? await _context.CRMContacts.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.EmailAddress == lead.ContactEmail)
+                : null;
+            if (buyerContact == null)
+            {
+                buyerContact = new CRMContact
+                {
+                    ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper(),
+                    TenantId = tenantId,
+                    FullName = lead.ClientName,
+                    EmailAddress = lead.ContactEmail,
+                    PhoneNumber = lead.ContactPhone,
+                    ContactRoleType = "Buyer",
+                    PositionJobTitle = "Private Individual",
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.CRMContacts.Add(buyerContact);
+            }
+
+            int? matchedPropertyId = request.LinkToPropertyId;
+            string sellerClientId = "Unknown Seller Pool";
+
+            // 🧭 Auto-match a property via the Property microservice (through the gateway),
+            // forwarding the caller's bearer token so tenant visibility scoping applies.
+            if (!matchedPropertyId.HasValue)
+            {
+                var accessToken = Request.Headers["Authorization"].FirstOrDefault();
+                accessToken = accessToken?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true
+                    ? accessToken.Substring("Bearer ".Length) : null;
+                var client = _http.CreateClient();
+                if (!string.IsNullOrEmpty(accessToken))
+                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+                var criteria = new
+                {
+                    locations = new[] { request.PreferredAreaOverride ?? lead.PreferredArea },
+                    propertyType = request.PropertyTypeOverride ?? lead.PropertyInterestClass,
+                    minSize = request.MinSize,
+                    maxSize = request.MaxSize,
+                    listingType = request.IsRent ? "Rent" : "Sale",
+                    minPrice = (int?)null,
+                    maxPrice = request.IsRent ? (int?)null : (int?)lead.EstimatedBudget
+                };
+                var payload = new StringContent(JsonSerializer.Serialize(criteria), System.Text.Encoding.UTF8, "application/json");
+                var matchResponse = await client.PostAsync($"{GATEWAY_URL}/properties/search?page=1", payload);
+                if (matchResponse.IsSuccessStatusCode)
+                {
+                    var props = JsonSerializer.Deserialize<List<PropertyMatchDto>>(await matchResponse.Content.ReadAsStringAsync(),
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    var match = props?.FirstOrDefault();
+                    if (match != null)
+                    {
+                        matchedPropertyId = match.PropertyId;
+                        sellerClientId = match.LinkedOwnerId ?? "Unknown Seller Pool";
+                    }
+                }
+            }
+
+            // If a manual seller name was supplied, resolve/create a seller contact.
+            if (!string.IsNullOrEmpty(request.SellerNameIfNewDeal))
+            {
+                var sellerContact = await _context.CRMContacts
+                    .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.FullName.Contains(request.SellerNameIfNewDeal));
+                if (sellerContact == null)
+                {
+                    sellerContact = new CRMContact
+                    {
+                        ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper(),
+                        TenantId = tenantId,
+                        FullName = request.SellerNameIfNewDeal,
+                        ContactRoleType = "Seller",
+                        PositionJobTitle = "Property Owner / Developer",
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _context.CRMContacts.Add(sellerContact);
+                }
+                sellerClientId = sellerContact.ContactId;
+            }
+
+            var deal = new DealRecord
+            {
+                TenantId = tenantId,
+                AllocatedToAgent = lead.AllocatedToAgent,
+                DealStage = DealWorkflowStage.DiscoveryNeedsAnalysis,
+                LinkedPropertyId = matchedPropertyId,
+                BuyerClientId = buyerContact.ContactId,
+                SellerClientId = sellerClientId,
+                TransactionValue = lead.EstimatedBudget,
+                    CommissionType = lead.CommissionType,
+                    CommissionValue = lead.CommissionValue,
+                DealNotes = $"[Auto-Promoted] Lead {lead.LeadId} | Intent: {(request.IsRent ? "Rent" : "Sale")} | Interest: {lead.PropertyInterestClass} in {lead.PreferredArea} | {lead.LeadNotes}",
+                LastStageUpdatedAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            _context.DealRecords.Add(deal);
+            lead.IsConvertedToDeal = true;
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = "Unverified lead record successfully catalogued.", leadId = newLead.LeadId });
+            return Ok(new
+            {
+                message = "Lead promoted to deal with property auto-matching.",
+                dealId = deal.DealId,
+                linkedPropertyId = matchedPropertyId,
+                buyerClientId = buyerContact.ContactId,
+                sellerClientId = sellerClientId
+            });
         }
+
+        // ❌ Delete a deal — restricted to AgencyAdmin and above (PlatformAdmin).
+        [HttpDelete("deals/{dealId:int}")]
+        public async Task<IActionResult> DeleteDeal(int dealId)
+        {
+            var callerRole = GetCurrentCanonicalRole();
+            if (callerRole != "AgencyAdmin" && callerRole != "PlatformAdmin")
+                return Forbid();
+
+            var deal = await _context.DealRecords
+                .FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == GetCurrentTenant());
+            if (deal == null) return NotFound(new { message = "Target deal record not found." });
+
+            _context.DealRecords.Remove(deal);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Deal record deleted." });
+        }
+
 
         [HttpPost("reallocate")]
         public async Task<IActionResult> ReallocateTarget([FromBody] ReallocatePayload payload)
@@ -369,8 +741,13 @@ namespace CRM.Microservice.Controllers
         [HttpPost("update-lead-stage")]
         public async Task<IActionResult> UpdateLeadStage([FromBody] LeadUpdatePayload payload)
         {
-            var lead = await _context.LeadRecords.FindAsync(payload.LeadId);
+            var tenantId = GetCurrentTenant();
+            var lead = await _context.LeadRecords.FirstOrDefaultAsync(l => l.LeadId == payload.LeadId && l.TenantId == tenantId);
             if (lead == null) return NotFound(new { message = "Target lead tracking record not found." });
+
+            // 🔐 A Broker may only advance leads allocated to themselves.
+            if (GetCurrentCanonicalRole() == "Broker" && lead.AllocatedToAgent != (User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty))
+                return Forbid();
 
             if (!Enum.TryParse<LeadWorkflowStage>(payload.NextStage, true, out var nextStageEnum))
             {
@@ -433,7 +810,9 @@ namespace CRM.Microservice.Controllers
                     TransactionValue = lead.EstimatedBudget,
                     DealNotes = $"[Auto-Promoted from Lead ID {lead.LeadId}]. Original Interest: {lead.PropertyInterestClass} in {lead.PreferredArea}. Notes: {lead.LeadNotes}",
                     LastStageUpdatedAt = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    CommissionType = lead.CommissionType,
+                    CommissionValue = lead.CommissionValue
                 };
 
                 _context.DealRecords.Add(dynamicDeal);
@@ -447,8 +826,13 @@ namespace CRM.Microservice.Controllers
         [HttpPost("update-deal-stage")]
         public async Task<IActionResult> UpdateDealStage([FromBody] DealUpdatePayload payload)
         {
-            var deal = await _context.DealRecords.FindAsync(payload.DealId);
+            var tenantId = GetCurrentTenant();
+            var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == payload.DealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Target deal record not found." });
+
+            // 🔐 A Broker may only advance deals allocated to themselves.
+            if (GetCurrentCanonicalRole() == "Broker" && deal.AllocatedToAgent != (User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty))
+                return Forbid();
 
             if (!Enum.TryParse<DealWorkflowStage>(payload.NextStage, true, out var nextDealStageEnum))
             {
@@ -462,15 +846,37 @@ namespace CRM.Microservice.Controllers
                 deal.DealNotes += $" | [Stage Update]: {payload.NotesUpdate}";
             }
 
+            // 💰 Commission is only realised into revenue once the deal is concluded (ClosedWon).
+            if (nextDealStageEnum == DealWorkflowStage.ClosedWon)
+            {
+                deal.RealisedCommission = deal.CommissionType == CommissionTypes.Percent
+                    ? Math.Round(deal.TransactionValue * deal.CommissionValue / 100m, 2)
+                    : deal.CommissionValue;
+            }
+            else if (nextDealStageEnum == DealWorkflowStage.ClosedLost)
+            {
+                deal.RealisedCommission = 0m;
+            }
+
             await _context.SaveChangesAsync();
             return Ok(new { message = $"Deal successfully progressed to {payload.NextStage}." });
         }
 
         [HttpGet("report/summary")]
-        public async Task<IActionResult> GetPipelineReportSummary([FromQuery] string tenantId)
+        public async Task<IActionResult> GetPipelineReportSummary()
         {
-            var tenantLeads = await _context.LeadRecords.Where(l => l.TenantId == tenantId && !l.IsConvertedToDeal).ToListAsync();
-            var tenantDeals = await _context.DealRecords.Where(d => d.TenantId == tenantId).ToListAsync();
+            var tenantId = GetCurrentTenant();
+            var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
+            var isBroker = GetCurrentCanonicalRole() == "Broker";
+
+            var tenantLeads = await _context.LeadRecords
+                .Where(l => l.TenantId == tenantId && !l.IsConvertedToDeal)
+                .Where(l => !isBroker || l.AllocatedToAgent == callerName)
+                .ToListAsync();
+            var tenantDeals = await _context.DealRecords
+                .Where(d => d.TenantId == tenantId)
+                .Where(d => !isBroker || d.AllocatedToAgent == callerName)
+                .ToListAsync();
 
             var summaryReport = new PipelineSummaryReport
             {
@@ -485,14 +891,19 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("report/overview")]
-        public async Task<IActionResult> GetReportOverview([FromQuery] string tenantId, [FromQuery] int? year)
+        public async Task<IActionResult> GetReportOverview([FromQuery] int? year)
         {
+            var tenantId = GetCurrentTenant();
+            var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
+            var isBroker = GetCurrentCanonicalRole() == "Broker";
             var activeYear = year ?? DateTime.UtcNow.Year;
             var tenantLeads = await _context.LeadRecords
                 .Where(l => l.TenantId == tenantId && l.CreatedAt.Year == activeYear)
+                .Where(l => !isBroker || l.AllocatedToAgent == callerName)
                 .ToListAsync();
             var tenantDeals = await _context.DealRecords
                 .Where(d => d.TenantId == tenantId && d.CreatedAt.Year == activeYear)
+                .Where(d => !isBroker || d.AllocatedToAgent == callerName)
                 .ToListAsync();
 
             var monthlyBreakdown = Enumerable.Range(1, 12)
@@ -501,7 +912,7 @@ namespace CRM.Microservice.Controllers
                     Period = new DateTime(activeYear, month, 1).ToString("MMM"),
                     Leads = tenantLeads.Count(l => l.CreatedAt.Month == month),
                     Deals = tenantDeals.Count(d => d.CreatedAt.Month == month),
-                    Revenue = tenantDeals.Where(d => d.CreatedAt.Month == month).Sum(d => d.TransactionValue)
+                    Revenue = tenantDeals.Where(d => d.CreatedAt.Month == month && d.DealStage == DealWorkflowStage.ClosedWon).Sum(d => d.TransactionValue)
                 })
                 .ToList();
 
@@ -509,9 +920,49 @@ namespace CRM.Microservice.Controllers
             {
                 TotalLeads = tenantLeads.Count,
                 TotalDeals = tenantDeals.Count,
-                TotalRevenue = tenantDeals.Sum(d => d.TransactionValue),
+                TotalRevenue = tenantDeals.Where(d => d.DealStage == DealWorkflowStage.ClosedWon).Sum(d => d.TransactionValue),
+                TotalRealisedCommission = tenantDeals.Where(d => d.DealStage == DealWorkflowStage.ClosedWon).Sum(d => d.RealisedCommission ?? 0m),
                 MonthlyBreakdown = monthlyBreakdown
             });
+        }
+
+        // 📊 Commission realised per deal stage — only ClosedWon carries a realised amount.
+        [HttpGet("report/commission-by-stage")]
+        public async Task<IActionResult> GetCommissionByStage()
+        {
+            var tenantId = GetCurrentTenant();
+            var rows = await _context.DealRecords
+                .Where(d => d.TenantId == tenantId)
+                .GroupBy(d => d.DealStage)
+                .Select(g => new ReportDrilldownRow
+                {
+                    Period = g.Key.ToString(),
+                    Deals = g.Count(),
+                    Revenue = g.Sum(d => d.RealisedCommission ?? 0m)
+                })
+                .ToListAsync();
+            return Ok(rows);
+        }
+
+        // 📊 Broker leaderboard — deal count + pipeline value, ranked.
+        [HttpGet("report/broker-leaderboard")]
+        public async Task<IActionResult> GetBrokerLeaderboard()
+        {
+            var tenantId = GetCurrentTenant();
+            var rows = await _context.DealRecords
+                .Where(d => d.TenantId == tenantId && d.AllocatedToAgent != null && d.AllocatedToAgent != "")
+                .GroupBy(d => d.AllocatedToAgent)
+                .Select(g => new
+                {
+                    agent = g.Key,
+                    deals = g.Count(),
+                    totalValue = g.Sum(d => d.TransactionValue),
+                    totalCommission = g.Sum(d => d.RealisedCommission ?? 0m),
+                    won = g.Count(d => d.DealStage == DealWorkflowStage.ClosedWon)
+                })
+                .OrderByDescending(r => r.totalValue)
+                .ToListAsync();
+            return Ok(rows);
         }
     }
 }

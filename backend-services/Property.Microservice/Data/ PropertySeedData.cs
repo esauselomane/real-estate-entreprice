@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Property.Microservice.Data
 {
@@ -50,11 +51,13 @@ namespace Property.Microservice.Data
                     assets.Add(new Property.Microservice.Models.PropertyAsset
                     {
                         TenantId = "TEN-001",
-                        CompleteAddress = $"{i} {GetStreetName(i)}, {GetCity(i)}, South Africa",
+                        CompleteAddress = $"{i} {GetStreetName(i)}, {GetCityInfo(i).City}, South Africa",
                         ErfSpatialSize = $"{(220 + (i % 180))} m²",
                         TitleDeedType = i % 3 == 0 ? "Sectional Title" : "Freehold",
                         PortfolioZoning = i % 4 == 0 ? "Commercial Zone" : i % 3 == 0 ? "Residential Zone" : "Mixed Use Zone",
                         MarketClass = isRental ? "Rental" : "Sale",
+                        IsForSale = isRental ? (i % 5 == 0) : true,   // every 5th rental unit is also marketed for sale
+                        IsForRent = isRental || (i % 5 == 0),        // rentals + every 5th sale unit is also marketed for rent
                         PropertyTypeId = propertyType.PropertyTypeId,
                         ValuationPrice = 350000m + i * 18000,
                         SalePrice = isRental ? null : 325000m + i * 20000,
@@ -62,9 +65,9 @@ namespace Property.Microservice.Data
                         RentEscalationPercentage = isRental ? 7.5m + (i % 5) * 0.25m : null,
                         LeaseTermMonths = isRental ? 12 + (i % 20) * 6 : null,
                         TenantInstallationAllowance = isRental ? 25000m + i * 500 : 0,
-                        Latitude = -33.9m + ((i % 100) * 0.01m),
-                        Longitude = 18.4m + ((i % 70) * 0.02m),
-                        VerificationDocumentsJson = "[]",
+                        Latitude = GetCityInfo(i).Lat,
+                        Longitude = GetCityInfo(i).Lon,
+                        VerificationDocumentsJson = SamplePropertyImageRefs((i % 9) + 1),
                         LinkedOwnerId = $"OT-{((i % 500) + 1):0000}",
                         CreatedAt = DateTime.UtcNow.AddDays(-i)
                     });
@@ -74,6 +77,18 @@ namespace Property.Microservice.Data
             }
 
             context.SaveChanges();
+
+            // Backfill sample image references for any property rows whose gallery is still
+            // empty, so the brochure builder always has photos to select from.
+            var emptyProps = context.PropertyAssets
+                .Where(p => p.VerificationDocumentsJson == null || p.VerificationDocumentsJson == "[]")
+                .ToList();
+            if (emptyProps.Any())
+            {
+                foreach (var p in emptyProps)
+                    p.VerificationDocumentsJson = SamplePropertyImageRefs((p.PropertyId % 9) + 1);
+                context.SaveChanges();
+            }
 
             if (context.PropertyUnits.Count() < 2000)
             {
@@ -93,7 +108,7 @@ namespace Property.Microservice.Data
                             NetRentableAreaSqM = 60 + (offset * 35),
                             SpecificUnitRentalPrice = 5500m + propertyId + offset * 250,
                             SpecificUnitSalePrice = 150000m + propertyId * 500 + offset * 1000,
-                            UnitImagesJson = "[]",
+                            UnitImagesJson = SamplePropertyImageRefs(((propertyId + offset) % 6) + 1),
                             IsCurrentlyVacant = offset % 2 == 0,
                             CreatedAt = DateTime.UtcNow.AddDays(-propertyId)
                         });
@@ -104,6 +119,17 @@ namespace Property.Microservice.Data
             }
 
             context.SaveChanges();
+
+            // Backfill sample unit image references for any unit rows whose gallery is empty.
+            var emptyUnits = context.PropertyUnits
+                .Where(u => u.UnitImagesJson == null || u.UnitImagesJson == "[]")
+                .ToList();
+            if (emptyUnits.Any())
+            {
+                foreach (var u in emptyUnits)
+                    u.UnitImagesJson = SamplePropertyImageRefs((u.PropertyUnitId % 6) + 1);
+                context.SaveChanges();
+            }
 
             if (context.PropertyPlatformSyndications.Count() < 1000)
             {
@@ -129,6 +155,70 @@ namespace Property.Microservice.Data
             }
 
             context.SaveChanges();
+
+            // 🌐 Ownership link: bind property #1 to the seeded Owner user so the
+            // Owner role (UserId = USR-OWNER-01, TenantId = TEN-001) resolves "their
+            // properties" via PropertyAsset.LinkedOwnerId == User.UserId. Idempotent.
+            var ownerUnitFirstId = context.PropertyUnits
+                .Where(u => u.PropertyId == 1)
+                .OrderBy(u => u.PropertyUnitId)
+                .Select(u => u.PropertyUnitId)
+                .FirstOrDefault();
+
+            var firstProperty = context.PropertyAssets.FirstOrDefault(p => p.PropertyId == 1);
+            if (firstProperty != null && firstProperty.LinkedOwnerId != "USR-OWNER-01")
+            {
+                firstProperty.LinkedOwnerId = "USR-OWNER-01";
+            }
+
+            // 🏷️ Active lease: bind the seeded Tenant user (UserId = USR-TENANT-01,
+            // TenantId = TEN-001) to unit #1 of property #1. This is the ONLY property
+            // the Tenant sees; flipping IsActive -> false revokes their access.
+            if (ownerUnitFirstId > 0)
+            {
+                var existingLease = context.UnitLeases
+                    .FirstOrDefault(l => l.UserId == "USR-TENANT-01" && l.PropertyUnitId == ownerUnitFirstId);
+                if (existingLease == null)
+                {
+                    context.UnitLeases.Add(new Property.Microservice.Models.UnitLease
+                    {
+                        UserId = "USR-TENANT-01",
+                        TenantId = "TEN-001",
+                        PropertyId = 1,
+                        PropertyUnitId = ownerUnitFirstId,
+                        LeaseStart = DateTime.UtcNow.AddDays(-30),
+                        LeaseEnd = DateTime.UtcNow.AddDays(30),
+                        IsActive = true,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+                else
+                {
+                    existingLease.IsActive = true;
+                    existingLease.LeaseEnd = DateTime.UtcNow.AddDays(30);
+                }
+
+                // An active maintenance call so the Tenant has something to view.
+                var existingCall = context.MaintenanceCalls
+                    .FirstOrDefault(m => m.RequestedByUserId == "USR-TENANT-01" && m.PropertyUnitId == ownerUnitFirstId);
+                if (existingCall == null)
+                {
+                    context.MaintenanceCalls.Add(new Property.Microservice.Models.MaintenanceCall
+                    {
+                        TenantId = "TEN-001",
+                        RequestedByUserId = "USR-TENANT-01",
+                        PropertyId = 1,
+                        PropertyUnitId = ownerUnitFirstId,
+                        Title = "Routine HVAC inspection requested",
+                        Description = "Please schedule the annual HVAC service for the leased suite.",
+                        Status = "Open",
+                        CreatedAt = DateTime.UtcNow.AddDays(-3),
+                        UpdatedAt = DateTime.UtcNow.AddDays(-3)
+                    });
+                }
+            }
+
+            context.SaveChanges();
         }
 
         private static string GetStreetName(int index)
@@ -137,10 +227,47 @@ namespace Property.Microservice.Data
             return names[index % names.Length] + " Street";
         }
 
+        private static (string City, decimal Lat, decimal Lon) GetCityInfo(int index)
+        {
+            // 📍 South-African city centres — coords ring-fenced to SA and spread nationwide
+            // (no longer clustered at a single point). The address city and the lat/lon stay
+            // in sync because both are driven by the same index % cities.Length selector.
+            var cities = new (string City, decimal Lat, decimal Lon)[]
+            {
+                ("Cape Town",    -33.9249m,  18.4207m),
+                ("Johannesburg",  -26.2041m,  28.0479m),
+                ("Durban",        -29.8599m,  31.0579m),
+                ("Pretoria",      -25.7617m,  28.1881m),
+                ("Sandton",       -26.1081m,  28.0567m),
+                ("Citrusdal",     -32.5833m,  22.2833m),
+                ("Gqeberha",      -33.9625m,  25.6250m),
+                ("Bloemfontein",  -28.7465m,  26.1316m)
+            };
+            var c = cities[index % cities.Length];
+            // Small ±5km jitter so pins scatter within each city region instead of overlapping.
+            var lat = Math.Round(c.Lat + ((index * 7 % 11 - 5) * 0.01m), 6);
+            var lon = Math.Round(c.Lon + ((index * 3 % 11 - 5) * 0.01m), 6);
+            return (c.City, lat, lon);
+        }
+
         private static string GetCity(int index)
         {
-            var cities = new[] { "Cape Town", "Johannesburg", "Durban", "Pretoria", "Sandton", "Citrusdal", "Gqeberha", "Bloemfontein" };
-            return cities[index % cities.Length];
+            return GetCityInfo(index).City;
+        }
+
+        // 📸 Sample photo references that stand-in for media-vault uploads so the brochure
+        // builder always has existing photos for a broker to select from. A broker never
+        // creates images here — they pick from these existing references.
+        private static string SamplePropertyImageRefs(int seed)
+        {
+            var refs = new[]
+            {
+                $"exterior-day-{seed}.jpg",
+                $"interior-living-{seed}.jpg",
+                $"interior-kitchen-{seed}.jpg",
+                $"garden-facing-{seed}.jpg"
+            };
+            return JsonSerializer.Serialize(refs);
         }
     }
 }

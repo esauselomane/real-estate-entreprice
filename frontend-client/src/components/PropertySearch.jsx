@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Search, MapPin, X, SlidersHorizontal, Building2, Loader2 } from 'lucide-react';
-import { propertyService } from '../services/ propertyService.js';
+import { propertyService } from '../services/propertyService.js';
 
 export default function PropertySearch({ onSelectProperty }) {
   // Search parameters states
   const [selectedLocations, setSelectedLocations] = useState([]);
   const [locationInput, setLocationInput] = useState('');
   const [propertyType, setPropertyType] = useState('All');
+  const [listingType, setListingType] = useState('All');
   const [minSize, setMinSize] = useState('');
   const [maxSize, setMaxSize] = useState('');
 
@@ -25,7 +26,8 @@ export default function PropertySearch({ onSelectProperty }) {
           selectedLocations,
           propertyType,
           minSize,
-          maxSize
+          maxSize,
+          listingType
         );
         setProperties(liveInventory);
       } catch (err) {
@@ -36,7 +38,8 @@ export default function PropertySearch({ onSelectProperty }) {
     };
 
     fetchLiveProperties();
-  }, [selectedLocations, propertyType, minSize, maxSize]); // Re-fires instantly on layout modifications
+    }, [selectedLocations, propertyType, minSize, maxSize, listingType]); // Re-fires instantly on layout modifications
+
 
   const handleAddLocation = (e) => {
     e.preventDefault();
@@ -109,6 +112,24 @@ export default function PropertySearch({ onSelectProperty }) {
             </div>
           </div>
 
+          {/* 📈 Listing Eligibility Toggle — a property may be marketed for SALE and/or RENT. */}
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Listing Mode</label>
+            <div className="grid grid-cols-3 gap-1 h-10">
+              {[{ v: 'All', label: 'Both' }, { v: 'Sale', label: 'For Sale' }, { v: 'Rent', label: 'For Rent' }].map((o) => (
+                <button
+                  key={o.v} type="button"
+                  onClick={() => setListingType(o.v)}
+                  className={`text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                    listingType === o.v
+                      ? 'bg-blue-600 border-blue-600 text-white'
+                      : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white hover:border-blue-800'
+                  }`}
+                >{o.label}</button>
+              ))}
+            </div>
+          </div>
+
           {/* 📐 Size Threshold Area Fields (Erf/Floor size in m²) */}
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Size Boundary Extent (m²)</label>
@@ -161,16 +182,13 @@ export default function PropertySearch({ onSelectProperty }) {
                 className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 transition-all flex flex-col justify-between group cursor-pointer"
               >
                 <div>
-                  <div className="flex justify-between items-start mb-2">
-                    <span className={`text-xs font-bold uppercase px-2 py-0.5 rounded-md ${
-                      prop.marketClass === 'Sale' ? 'bg-emerald-950 text-emerald-400 border border-emerald-900' :
-                      prop.marketClass === 'Rental' ? 'bg-blue-950 text-blue-400 border border-blue-900' :
-                      'bg-amber-950 text-amber-400 border border-amber-900'
-                    }`}>
-                      {prop.marketClass}
-                    </span>
-                    <span className="text-sm font-bold text-slate-300">{prop.erfSpatialSize}</span>
-                  </div>
+                <div className="flex justify-between items-start mb-2">
+                     <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
+                       {prop.isForSale && prop.isForRent ? 'SALE + RENT' : prop.isForSale ? 'FOR SALE' : prop.isForRent ? 'FOR RENT' : 'OFF MARKET'}
+                     </span>
+                     <span className="text-sm font-bold text-slate-300">{prop.erfSpatialSize}</span>
+                   </div>
+
                   
                   <h4 className="text-white font-bold text-base mb-1 tracking-tight group-hover:text-blue-400 transition-colors">
                     {prop.completeAddress}
@@ -189,7 +207,7 @@ export default function PropertySearch({ onSelectProperty }) {
                   <div>
                     <span className="block text-[10px] text-slate-500 uppercase font-bold tracking-wider">Valuation Cost Structure</span>
                     <span className="text-lg font-black text-white">
-                      {prop.marketClass === 'Rental' ? `R${prop.valuationPrice.toLocaleString()}/mo` : `R${prop.valuationPrice.toLocaleString()}`}
+                      {prop.isForRent ? `R${prop.baseRentalRate?.toLocaleString() || prop.valuationPrice.toLocaleString()}/mo` : `R${prop.salePrice?.toLocaleString() || prop.valuationPrice.toLocaleString()}`}
                     </span>
                   </div>
                   <span className="text-xs text-blue-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity">Drill Down &rarr;</span>

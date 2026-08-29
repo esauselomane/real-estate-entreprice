@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Printer, Image, CheckCircle2, User, Phone, Mail, Building2, MapPin, Layers, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
-import { propertyService } from '../services/ propertyService.js';
+import { propertyService } from '../services/propertyService.js';
 
 export default function BrochureBuilderWorkspace({ dealData, onBack }) {
   // Master asset tracking state grids
@@ -67,7 +67,7 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
         CompleteAddress: propertyDetails?.completeAddress || 'Unknown Address Spec',
         Latitude: propertyDetails?.latitude || 0,
         Longitude: propertyDetails?.longitude || 0,
-        SelectedImages: selectedImageFiles,
+        SelectedImagesJson: JSON.stringify(selectedImageFiles),
         SubUnits: propertyDetails?.subUnits || []
       };
 

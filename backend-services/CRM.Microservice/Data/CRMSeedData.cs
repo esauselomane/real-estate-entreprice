@@ -37,6 +37,27 @@ namespace CRM.Microservice.Data
                 context.AgencyRecords.AddRange(agencies);
             }
 
+            if (context.ContactPersons.Count() == 0)
+            {
+                var contactPersons = new List<ContactPerson>
+                {
+                    new() { ContactPersonId = "CPT-00001", AgencyId = "AG-0001", FullName = "Liam Nel", Email = "liam.nel@agency1.local", Phone = "+27821000001", Position = "Managing Director", Role = "Manager", IsAgencyAdmin = true,  CreatedAt = DateTime.UtcNow },
+                    new() { ContactPersonId = "CPT-00002", AgencyId = "AG-0001", FullName = "Sarah du Toit", Email = "sarah.d@agency1.local", Phone = "+27821000002", Position = "Leasing Broker", Role = "Broker", IsAgencyAdmin = false, CreatedAt = DateTime.UtcNow },
+                    new() { ContactPersonId = "CPT-00003", AgencyId = "AG-0002", FullName = "Marco Botha", Email = "marco.b@agency2.local", Phone = "+27821000003", Position = "Property Manager", Role = "Owner", IsAgencyAdmin = false, CreatedAt = DateTime.UtcNow }
+                };
+                context.ContactPersons.AddRange(contactPersons);
+            }
+
+            if (context.AgencyRecords.Any(a => string.IsNullOrWhiteSpace(a.TradingName)))
+            {
+                foreach (var a in context.AgencyRecords.Where(a => string.IsNullOrWhiteSpace(a.TradingName)))
+                {
+                    a.TradingName = a.Name;
+                    a.RegistrationNumber = $"REG-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}";
+                    a.CompanyLogoUrl = "https://ui-avatars.com/api/?background=0ea5e9&color=fff&name=" + Uri.EscapeDataString(a.Name ?? "Agency");
+                }
+            }
+
             context.SaveChanges();
 
             if (context.BrokerRecords.Count() < 1000)
@@ -221,6 +242,34 @@ namespace CRM.Microservice.Data
                 }
 
                 context.DealRecords.AddRange(deals);
+            }
+
+            if (context.GeographyRecords.Count() < 1)
+            {
+                context.GeographyRecords.AddRange(new List<GeographyRecord>
+                {
+                    new() { Country = "South Africa", Province = "Western Cape", City = "Cape Town", Suburb = "City Bowl", Latitude = -33.9249m, Longitude = 18.4207m },
+                    new() { Country = "South Africa", Province = "Western Cape", City = "Cape Town", Suburb = "Rondebosch", Latitude = -33.9322m, Longitude = 18.4672m },
+                    new() { Country = "South Africa", Province = "Western Cape", City = "Stellenbosch", Suburb = "Stellenbosch Central", Latitude = -33.9348m, Longitude = 18.8659m },
+                    new() { Country = "South Africa", Province = "Gauteng", City = "Johannesburg", Suburb = "Sandton", Latitude = -26.1027m, Longitude = 28.0330m },
+                    new() { Country = "South Africa", Province = "Gauteng", City = "Pretoria", Suburb = "Hatfield", Latitude = -25.7546m, Longitude = 28.2567m },
+                    new() { Country = "South Africa", Province = "KwaZulu-Natal", City = "Durban", Suburb = "Umhlanga", Latitude = -29.9558m, Longitude = 30.9834m }
+                });
+            }
+
+            // Backfill a representative interest profile onto existing owner/tenant rows.
+            if (context.OwnerTenantRecords.Any())
+            {
+                var ots = context.OwnerTenantRecords.ToList();
+                var types = new[] { "Residential", "Commercial", "Retail", "Industrial" };
+                for (int i = 0; i < ots.Count; i++)
+                {
+                    var rec = ots[i];
+                    if (string.IsNullOrWhiteSpace(rec.PropertyTypeInterests))
+                        rec.PropertyTypeInterests = types[(i % types.Length)];
+                    if (string.IsNullOrWhiteSpace(rec.AreaInterestIds))
+                        rec.AreaInterestIds = ((1 + (i % 6)).ToString());
+                }
             }
 
             context.SaveChanges();

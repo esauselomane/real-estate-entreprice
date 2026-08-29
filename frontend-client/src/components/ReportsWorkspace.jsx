@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart3, PieChart, TrendingUp, CalendarRange, DollarSign } from 'lucide-react';
-import { crmService } from '../services/ crmService.js';
+import { crmService } from '../services/crmService.js';
 
 export default function ReportsWorkspace() {
   const [report, setReport] = useState({ totalLeads: 0, totalDeals: 0, totalRevenue: 0, monthlyBreakdown: [] });

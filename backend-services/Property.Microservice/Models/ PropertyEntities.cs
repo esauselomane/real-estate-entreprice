@@ -38,8 +38,13 @@ namespace Property.Microservice.Models
         public string PortfolioZoning { get; set; } = string.Empty;
 
         [Required]
-        // Explicit Listing Classification: "Sale" or "Rental"
-        public string MarketClass { get; set; } = "Sale"; 
+        // Explicit Listing Classification: "Sale" or "Rental" (legacy single-value; superseded by flags below)
+        public string MarketClass { get; set; } = "Sale";
+
+        // 📈 Listing eligibility — a single asset may be marketed for SALE and/or RENT at the same time.
+        public bool IsForSale { get; set; } = true;
+        public bool IsForRent { get; set; } = false;
+
         [Required]
         public int PropertyTypeId { get; set; } // Foreign Key link to lookup table
 
@@ -98,7 +103,7 @@ namespace Property.Microservice.Models
         public int PropertyId { get; set; } // Master Foreign Key link
 
         [Required]
-        [MaxLength(20)] // e.g., "Suite 101", "Bay A"
+        [MaxLength(50)] // e.g., "Suite 101", "Bay A", "Retail Shop 12B"
         public string UnitNumber { get; set; } = string.Empty;
 
         [Required]
@@ -116,6 +121,12 @@ namespace Property.Microservice.Models
 
         [Required]
         public string UnitImagesJson { get; set; } = "[]"; // Serialized string array tracking individual room pictures
+
+        // 📎 Unit-level document vault metadata. Each entry is
+        // { name, description, fileName, storedName, contentType, sizeBytes, uploadedAt }
+        // The actual file is persisted to disk under PropertyMediaVault (see UploadPropertyUnitDocument).
+        [Required]
+        public string UnitDocumentsJson { get; set; } = "[]";
 
         public bool IsCurrentlyVacant { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -190,6 +201,61 @@ namespace Property.Microservice.Models
 
         [ForeignKey("PlatformId")]
         public ExternalPlatform? PlatformDetails { get; set; }
+    }
+
+    // 🏷️ 7. ACTIVE UNIT LEASE LEDGER — binds a Tenant user to a single property unit
+    // while their lease is active. This is the discriminator that scopes Tenant
+    // visibility: they only ever see the property (and unit) they currently lease, and
+    // lose access the moment IsActive flips to false / LeaseEnd passes.
+    public class UnitLease
+    {
+        [Key]
+        public int UnitLeaseId { get; set; }
+
+        [Required]
+        public string UserId { get; set; } = string.Empty;        // tenant user id (NameIdentifier)
+
+        [Required]
+        public string TenantId { get; set; } = string.Empty;       // tenant sandbox
+
+        [Required]
+        public int PropertyId { get; set; }
+
+        [Required]
+        public int PropertyUnitId { get; set; }
+
+        public DateTime LeaseStart { get; set; }
+        public DateTime LeaseEnd { get; set; }
+        public bool IsActive { get; set; } = true;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    // 🛠️ 8. TENANT-LOGGED MAINTENANCE CALLS — a lightweight property-unit-scoped
+    // maintenance log. Tenants can create entries against their leased unit; neither
+    // Tenants nor Owners may delete anything (entries are append/audit-only for them).
+    public class MaintenanceCall
+    {
+        [Key]
+        public int MaintenanceCallId { get; set; }
+
+        [Required]
+        public string TenantId { get; set; } = string.Empty;
+
+        [Required]
+        public string RequestedByUserId { get; set; } = string.Empty;
+
+        [Required]
+        public int PropertyId { get; set; }
+
+        [Required]
+        public int PropertyUnitId { get; set; }
+
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Status { get; set; } = "Open"; // Open, In Progress, Resolved, Closed
+        public DateTime? DueDate { get; set; }
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     }
 
 }

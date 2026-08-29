@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Home, Search, Users, Briefcase, BarChart3, Wrench, ChevronLeft, ChevronRight, LogOut, Shield } from 'lucide-react';
+import { Home, Search, Users, Briefcase, BarChart3, ChevronLeft, ChevronRight, LogOut, Shield } from 'lucide-react';
 
 export default function LeftSidebar({ userRole, currentAgency, activeProfile, onLogout, currentView, onNavigate }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -11,7 +11,6 @@ export default function LeftSidebar({ userRole, currentAgency, activeProfile, on
     { name: 'Leads & CRM', view: 'crm', icon: Briefcase, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker'] },
     { name: 'Clients (Tenants/Owners)', view: 'owners-tenants', icon: Users, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
     { name: 'Performance Reports', view: 'reports', icon: BarChart3, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
-    { name: 'Property Operations', view: 'operations', icon: Wrench, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] },
     { name: 'System Admin', view: 'admin', icon: Shield, roles: ['PlatformAdmin', 'AgencyAdmin'] },
   ];
 

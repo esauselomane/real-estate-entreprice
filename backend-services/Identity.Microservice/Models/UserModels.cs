@@ -74,4 +74,31 @@ namespace Identity.Microservice.Models
         [ForeignKey("UserId")]
         public UserAccount? AccountDetails { get; set; }
     }
+
+    // 🔐 CONFIGURABLE SYSTEM ROLE DEFINITION — what an administrator can grant / revoke
+    // from the System Admin "Roles" configuration tab. The hard-coded role names used by
+    // AuthController.RegisterUser ("PlatformAdmin","AgencyAdmin","Broker","Owner","Tenant")
+    // are now driven from this table so the platform contract stays data-driven.
+    public class SystemRoleDefinition
+    {
+        [Key]
+        public int RoleDefId { get; set; }
+
+        [Required]
+        public string Name { get; set; } = string.Empty; // PlatformAdmin, AgencyAdmin, Broker, Owner, Tenant
+
+        public string Description { get; set; } = string.Empty;
+
+        // Scope of the bearer who may provision into this role (mirrors AuthController matrix)
+        public bool IsPlatformScoped { get; set; } = false;   // PlatformAdmin may assign
+        public bool IsAgencyScoped { get; set; } = false;     // AgencyAdmin may assign
+
+        // JSON array of permission keys granted to holders of this role,
+        // e.g. ["CanDeleteProperties","CanExportFinancialReports","CanBypassValuationStages"]
+        public string PermissionsJson { get; set; } = "[]";
+
+        public bool IsActive { get; set; } = true;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
 }

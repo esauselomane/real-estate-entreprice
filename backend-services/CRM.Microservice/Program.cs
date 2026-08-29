@@ -1,11 +1,39 @@
 using CRM.Microservice.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Register REST Controller frameworks
 builder.Services.AddControllers();
+
+// 🔐 JWT AUTHENTICATION (issued by the Identity microservice). Tenant is resolved
+// from the bearer token claims rather than the URL — see GetCurrentTenant() in CRMController.
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = "Identity.Microservice",
+            ValidAudience = "RealEstateApp.Client",
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("SuperSecretRealEstateEnterpriseCryptographicSigningKey123!"))
+        };
+    });
+
+// 🌐 Outbound HTTP client used by the lead→deal auto-matching engine to query the
+// Property microservice through the API gateway (tenant scoping is enforced there).
+builder.Services.AddHttpClient();
+
 
 // 2. Configure Microsoft SQL Server Enterprise Database Engine Pool Connection
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -18,6 +46,34 @@ using (var serviceScope = app.Services.CreateScope())
 {
     var databaseContext = serviceScope.ServiceProvider.GetRequiredService<CRMDbContext>();
     databaseContext.Database.EnsureCreated();
+
+    // 🛠️ EnsureCreated() is a no-op once the database has any table, so tables that are
+    // ever DROPPED (or created first on a fresh DB) must be recreated here — mirroring the
+    // [OperationalRecords]/[GeographyRecords]/[ContactPersons] scripts below. CRMContacts
+    // supports nullable company/legal-entity links so leads can be auto-promoted to deals
+    // with buyer/seller contacts that are not bound to a company.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[CRMContacts]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [CRMContacts] (
+                [ContactId]              nvarchar(450) NOT NULL CONSTRAINT PK_CRMContacts PRIMARY KEY,
+                [TenantId]               nvarchar(50)  NOT NULL,
+                [FullName]               nvarchar(256) NOT NULL,
+                [EmailAddress]           nvarchar(256) NOT NULL,
+                [PhoneNumber]            nvarchar(64)  NULL,
+                [PositionJobTitle]       nvarchar(128) NOT NULL CONSTRAINT DF_CRMContacts_Position DEFAULT N'Director',
+                [ContactRoleType]        nvarchar(50)  NOT NULL CONSTRAINT DF_CRMContacts_Role DEFAULT N'Buyer',
+                [AssociatedCompanyId]    nvarchar(450) NULL,
+                [AssociatedLegalEntityId] nvarchar(450) NULL,
+                [CreatedAt]              datetime2     NOT NULL CONSTRAINT DF_CRMContacts_CreatedAt DEFAULT GETUTCDATE()
+            );
+            ALTER TABLE [CRMContacts] ADD CONSTRAINT [FK_CRMContacts_CRMCompanies_AssociatedCompanyId]
+                FOREIGN KEY ([AssociatedCompanyId]) REFERENCES [CRMCompanies] ([CompanyId]);
+            ALTER TABLE [CRMContacts] ADD CONSTRAINT [FK_CRMContacts_LegalEntities_AssociatedLegalEntityId]
+                FOREIGN KEY ([AssociatedLegalEntityId]) REFERENCES [CRMLegalEntities] ([LegalEntityId]);
+            CREATE INDEX [IX_CRMContacts_TenantId] ON [CRMContacts] ([TenantId]);
+        END
+    ");
 
     // Batch 1: create the operational ledger table (for fresh databases) and
     // idempotently backfill the unit-linkage columns onto existing databases.
@@ -44,6 +100,47 @@ using (var serviceScope = app.Services.CreateScope())
             ALTER TABLE [OperationalRecords] ADD [PropertyId] int NULL;
         IF COL_LENGTH(N'[OperationalRecords]', 'PropertyUnitId') IS NULL
             ALTER TABLE [OperationalRecords] ADD [PropertyUnitId] int NULL;
+
+        -- 🛠️ Geography reference table (owner/tenant area-of-interest autopopulation).
+        IF OBJECT_ID(N'[GeographyRecords]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [GeographyRecords] (
+                [GeographyId] int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [Country] nvarchar(128) NOT NULL DEFAULT N'South Africa',
+                [Province] nvarchar(128) NOT NULL, [City] nvarchar(128) NOT NULL,
+                [Suburb] nvarchar(128) NULL,
+                [Latitude] decimal(10,6) NOT NULL, [Longitude] decimal(10,6) NOT NULL
+            );
+            CREATE INDEX [IX_GeographyRecords_Suburb] ON [GeographyRecords] ([Country], [Province], [City], [Suburb]);
+        END
+
+        -- 🛠️ Backfill owner/tenant interest columns onto pre-existing databases.
+        IF COL_LENGTH(N'[OwnerTenantRecords]', 'PropertyTypeInterests') IS NULL
+            ALTER TABLE [OwnerTenantRecords] ADD [PropertyTypeInterests] nvarchar(max) NOT NULL CONSTRAINT DF_OT_PropertyTypeInterests DEFAULT N'';
+        IF COL_LENGTH(N'[OwnerTenantRecords]', 'AreaInterestIds') IS NULL
+            ALTER TABLE [OwnerTenantRecords] ADD [AreaInterestIds] nvarchar(max) NOT NULL CONSTRAINT DF_OT_AreaInterestIds DEFAULT N'';
+
+        -- 🛠️ Contact persons bound to agencies (promotable to AgencyAdmin broker profiles).
+        IF OBJECT_ID(N'[ContactPersons]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [ContactPersons] (
+                [ContactPersonId] nvarchar(64) NOT NULL PRIMARY KEY,
+                [AgencyId] nvarchar(64) NOT NULL, [FullName] nvarchar(256) NOT NULL,
+                [Email] nvarchar(256) NOT NULL, [Phone] nvarchar(64) NULL,
+                [Position] nvarchar(128) NULL, [Role] nvarchar(64) NOT NULL CONSTRAINT DF_CP_Role DEFAULT N'Owner',
+                [IsAgencyAdmin] bit NOT NULL CONSTRAINT DF_CP_IsAgencyAdmin DEFAULT 0,
+                [CreatedAt] datetime2 NOT NULL
+            );
+            CREATE INDEX [IX_ContactPersons_Agency] ON [ContactPersons] ([AgencyId]);
+        END
+
+        -- 🛠️ Agency trading / registration / logo fields.
+        IF COL_LENGTH(N'[AgencyRecords]', 'TradingName') IS NULL
+            ALTER TABLE [AgencyRecords] ADD [TradingName] nvarchar(256) NOT NULL CONSTRAINT DF_Agency_TradingName DEFAULT N'';
+        IF COL_LENGTH(N'[AgencyRecords]', 'RegistrationNumber') IS NULL
+            ALTER TABLE [AgencyRecords] ADD [RegistrationNumber] nvarchar(128) NOT NULL CONSTRAINT DF_Agency_RegNo DEFAULT N'';
+        IF COL_LENGTH(N'[AgencyRecords]', 'CompanyLogoUrl') IS NULL
+            ALTER TABLE [AgencyRecords] ADD [CompanyLogoUrl] nvarchar(512) NOT NULL CONSTRAINT DF_Agency_Logo DEFAULT N'';
     ");
 
     // Batch 2: filtered index referencing [PropertyId]. Issued in its OWN batch so it
@@ -57,11 +154,28 @@ using (var serviceScope = app.Services.CreateScope())
             WHERE [PropertyId] IS NOT NULL;
     ");
 
+    // 💰 Commission fields on leads + deals (realised commission only filled at ClosedWon).
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF COL_LENGTH(N'[LeadRecords]', 'CommissionType') IS NULL
+            ALTER TABLE [LeadRecords] ADD [CommissionType] nvarchar(20) NOT NULL CONSTRAINT DF_Lead_CommissionType DEFAULT N'Percent';
+        IF COL_LENGTH(N'[LeadRecords]', 'CommissionValue') IS NULL
+            ALTER TABLE [LeadRecords] ADD [CommissionValue] decimal(18,2) NOT NULL CONSTRAINT DF_Lead_CommissionValue DEFAULT 0;
+        IF COL_LENGTH(N'[DealRecords]', 'CommissionType') IS NULL
+            ALTER TABLE [DealRecords] ADD [CommissionType] nvarchar(20) NOT NULL CONSTRAINT DF_Deal_CommissionType DEFAULT N'Percent';
+        IF COL_LENGTH(N'[DealRecords]', 'CommissionValue') IS NULL
+            ALTER TABLE [DealRecords] ADD [CommissionValue] decimal(18,2) NOT NULL CONSTRAINT DF_Deal_CommissionValue DEFAULT 0;
+        IF COL_LENGTH(N'[DealRecords]', 'RealisedCommission') IS NULL
+            ALTER TABLE [DealRecords] ADD [RealisedCommission] decimal(18,2) NULL;
+        IF COL_LENGTH(N'[LeadRecords]', 'LinkedContactId') IS NULL
+            ALTER TABLE [LeadRecords] ADD [LinkedContactId] nvarchar(50) NULL;
+    ");
+
     CRMSeedData.EnsureSeeded(databaseContext);
 }
 
 // 5. Inject Pipeline Middleware routing and authorization components
 app.UseRouting();
+app.UseAuthentication();
 app.UseAuthorization();
 
 // 6. Map public REST Controller endpoints

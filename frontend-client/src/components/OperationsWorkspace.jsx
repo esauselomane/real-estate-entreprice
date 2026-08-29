@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ReceiptText, ClipboardCheck, MessageSquare, Gavel, Scale, Pencil, Plus, Loader2 } from 'lucide-react';
-import { crmService } from '../services/ crmService.js';
+import { crmService } from '../services/crmService.js';
 
 const modules = [
   { id: 'financials', label: 'Financials', icon: ReceiptText, title: 'Invoice / arrears item', contact: 'Owner / tenant', amount: 'Amount', details: 'Invoice, payment reference or arrears notes' },
