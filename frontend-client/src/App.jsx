@@ -9,6 +9,7 @@ import OwnersTenantsWorkspace from './components/OwnersTenantsWorkspace.jsx';
 import ReportsWorkspace from './components/ReportsWorkspace.jsx';
 import SystemAdminWorkspace from './components/SystemAdminWorkspace.jsx';
 import BrochureBuilderWorkspace from './components/BrochureBuilderWorkspace.jsx';
+import RoleDashboard from './components/RoleDashboard.jsx';
 
 
 // 🔌 Import our clean encapsulated API microservices client wrappers

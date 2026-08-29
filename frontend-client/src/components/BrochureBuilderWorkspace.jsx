@@ -1,16 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { Sparkles, Printer, Image, CheckCircle2, User, Phone, Mail, Building2, MapPin, Layers, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Sparkles, Printer, Image, CheckCircle2, User, Phone, Mail, Building2, MapPin, Layers, Loader2, ArrowLeft } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
+import { crmService } from '../services/crmService.js';
 
 export default function BrochureBuilderWorkspace({ dealData, onBack }) {
   // Master asset tracking state grids
   const [propertyDetails, setPropertyDetails] = useState(null);
   const [selectedImageFiles, setSelectedImageFiles] = useState([]);
-  
+
+  // Broker-curated brochure card (cart) state
+  const [selectedUnits, setSelectedUnits] = useState([]);
+  const [clientInfo, setClientInfo] = useState({ name: '', email: '', phone: '' });
+  const [cardId, setCardId] = useState(null);
+  const [cardStatus, setCardStatus] = useState('idle'); // idle | generating | generated | failed
+
   // UI orchestration feedback indicators
   const [isCompilingPdf, setIsCompilingPdf] = useState(false);
   const [isLoadingAsset, setIsLoadingAsset] = useState(true);
   const [feedbackMessage, setFeedbackMessage] = useState('');
+
+  const pollRef = useRef(null);
 
   const activeProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
   const brokerProfile = {
@@ -21,13 +30,36 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
     companyName: activeProfile.tenantId || 'Agency workspace'
   };
 
+  // --- 📡 RESUME an existing brochure card when the builder is re-opened on a deal ---
+  useEffect(() => {
+    if (!dealData?.dealId) return;
+    (async () => {
+      try {
+        const card = await crmService.getBrochureCardByDeal(dealData.dealId);
+        if (card) {
+          setCardId(card.cardId);
+          setClientInfo({ name: card.clientName || '', email: card.clientEmail || '', phone: card.clientPhone || '' });
+          setCardStatus((card.status || 'active').toLowerCase());
+          if (Array.isArray(card.lines) && card.lines.length) {
+            setSelectedUnits(card.lines.map(l => ({
+              propertyUnitId: l.unitId,
+              unitNumber: l.unitNumber,
+              unitDescription: l.unitDescription,
+              netRentableAreaSqM: l.netRentableAreaSqM
+            })));
+          }
+        }
+      } catch { /* no card yet — clean canvas */ }
+    })();
+  }, [dealData]);
+
   useEffect(() => {
     const fetchTargetAssetDetails = async () => {
       setIsLoadingAsset(true);
       try {
         if (!dealData?.linkedPropertyId) throw new Error('The deal has no linked property. Link a property before creating a brochure.');
         setPropertyDetails(await propertyService.getPropertyById(dealData.linkedPropertyId));
-      } catch (err) {
+      } catch {
         setFeedbackMessage('Failed to pull asset metrics for proposal compiling.');
       } finally {
         setIsLoadingAsset(false);
@@ -35,6 +67,7 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
     };
     fetchTargetAssetDetails();
   }, [dealData]);
+
   // --- 🖼️ IMAGE COLLECTION CONSTRAINT CHECK ARRAY SELECTION HANDLER ---
   const handleToggleImageSelection = (imgUrl) => {
     if (selectedImageFiles.includes(imgUrl)) {
@@ -48,15 +81,67 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
     }
   };
 
-  // --- 📨 DISPATCH ASYNC PAYLOAD TO REACTION KAFKA EVENT QUEUES ---
+  // --- 📦 SUB-UNIT (PROPERTY UNIT) PRESENTATION SELECTION HANDLER (CAP TO 5) ---
+  const handleToggleUnit = (unit) => {
+    if (selectedUnits.some(u => u.propertyUnitId === unit.propertyUnitId)) {
+      setSelectedUnits(selectedUnits.filter(u => u.propertyUnitId !== unit.propertyUnitId));
+    } else {
+      if (selectedUnits.length >= 5) {
+        alert("Presentation constraints limit the brochure to 5 curated property units per client deck.");
+        return;
+      }
+      setSelectedUnits([...selectedUnits, unit]);
+    }
+  };
+
+  const handleRemoveUnit = async (unitId) => {
+    setSelectedUnits(selectedUnits.filter(u => u.propertyUnitId !== unitId));
+    // Persist the removal onto the live card immediately if one already exists.
+    if (cardId) {
+      try { await crmService.removeBrochureCardLine(cardId, unitId); }
+      catch (err) { setFeedbackMessage(err || 'Could not remove unit from card.'); }
+    }
+  };
+
+  // --- 📨 PERSIST CARD -> DISPATCH KAFKA -> POLL FOR WORKER COMPLETION ---
   const handleTriggerKafkaGeneration = async (e) => {
     e.preventDefault();
+    if (!selectedUnits.length) {
+      setFeedbackMessage('Select at least one property unit to present to the client.');
+      return;
+    }
+    if (!clientInfo.name.trim()) {
+      setFeedbackMessage('Enter the client name before generating the brochure.');
+      return;
+    }
     setIsCompilingPdf(true);
     setFeedbackMessage('');
+    setCardStatus('generating');
 
     try {
+      // 1. Persist / upsert the broker's card (client details + curated unit line items).
+      const savedCard = await crmService.saveBrochureCard({
+        dealId: dealData.dealId,
+        clientName: clientInfo.name,
+        clientEmail: clientInfo.email,
+        clientPhone: clientInfo.phone,
+        units: selectedUnits.map(u => ({
+          propertyId: propertyDetails?.propertyId || 0,
+          unitId: u.propertyUnitId,
+          unitNumber: u.unitNumber,
+          unitDescription: u.unitDescription,
+          netRentableAreaSqM: u.netRentableAreaSqM,
+          imageRef: ''
+        }))
+      });
+      const newCardId = savedCard?.cardId || cardId;
+      setCardId(newCardId);
+
+      // 2. Build the EXACT worker payload the BrochureGeneration.Worker consumes.
+      //    SelectedImages is now a flat array (not a JSON string); SubUnits is the
+      //    broker-curated <=5 set; BrochureCardId lets the worker callback to close the card.
       const payloadEnvelope = {
-        DealId: dealData?.dealId || 0,
+        DealId: dealData.dealId || 0,
         PropertyId: propertyDetails?.propertyId || 0,
         BrokerName: brokerProfile.fullName,
         BrokerEmail: brokerProfile.emailAddress,
@@ -67,18 +152,62 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
         CompleteAddress: propertyDetails?.completeAddress || 'Unknown Address Spec',
         Latitude: propertyDetails?.latitude || 0,
         Longitude: propertyDetails?.longitude || 0,
-        SelectedImagesJson: JSON.stringify(selectedImageFiles),
-        SubUnits: propertyDetails?.subUnits || []
+        SelectedImages: selectedImageFiles,
+        SubUnits: selectedUnits.map(u => ({
+          UnitNumber: u.unitNumber,
+          UnitDescription: u.unitDescription,
+          NetRentableAreaSqM: u.netRentableAreaSqM
+        })),
+        BrochureCardId: newCardId,
+        ClientName: clientInfo.name,
+        ClientEmail: clientInfo.email,
+        ClientPhone: clientInfo.phone,
+        BaseRentalRate: propertyDetails?.baseRentalRate || 0,
+        RentEscalationPercentage: propertyDetails?.rentEscalationPercentage || 0,
+        LeaseTermMonths: propertyDetails?.leaseTermMonths || 12,
+        SalePrice: propertyDetails?.salePrice || 0
       };
 
+      // 3. Dispatch onto the brochure-generation Kafka topic (Property -> Worker).
       await propertyService.dispatchBrochureGenerationTask(payloadEnvelope);
-      setFeedbackMessage('Brochure generation request dispatched onto Kafka clusters! Worker processing has initiated.');
+      setFeedbackMessage('Brochure request dispatched to Kafka. The worker is compiling the PDF...');
+
+      // 4. Poll the CRM: when the worker callback fires it soft-deletes the card and
+      //    advances the deal, which makes the card disappear (resume = null).
+      pollRef.current = setInterval(async () => {
+        try {
+          const card = await crmService.getBrochureCardByDeal(dealData.dealId);
+          if (!card) {
+            clearInterval(pollRef.current);
+            setCardStatus('generated');
+            setIsCompilingPdf(false);
+            setFeedbackMessage('✅ Brochure generated and saved to the server brochure folder. The card has been closed and the deal advanced to Proposal / Quote Sent.');
+          } else if (card.status === 'Generated') {
+            clearInterval(pollRef.current);
+            setCardStatus('generated');
+            setIsCompilingPdf(false);
+            setFeedbackMessage('✅ Brochure generated. Card closed and deal advanced.');
+          }
+        } catch { /* transient — keep polling */ }
+      }, 3000);
+
+      // Safety timeout so the deck never polls forever.
+      setTimeout(() => {
+        if (isCompilingPdf) {
+          clearInterval(pollRef.current);
+          setIsCompilingPdf(false);
+          setCardStatus('failed');
+          setFeedbackMessage('Generation timed out — see the worker logs. The card remains active and can be regenerated.');
+        }
+      }, 60000);
     } catch (err) {
-      setFeedbackMessage(err || 'Failed to dispatch background event to event-driven processing pipelines.');
-    } finally {
+      clearInterval(pollRef.current);
       setIsCompilingPdf(false);
+      setCardStatus('failed');
+      setFeedbackMessage(err || 'Failed to dispatch the background generation event.');
     }
   };
+
   if (isLoadingAsset) {
     return (
       <div className="py-20 flex flex-col items-center justify-center text-slate-500 gap-3">
@@ -88,13 +217,15 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
     );
   }
 
+  const activeUnitsCount = selectedUnits.length;
+
   return (
     <div className="space-y-6 animate-fade-in pb-12">
-      
+
       {/* 🧭 CONTROL NAVIGATION ACTION PANEL BAR ROW */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-4">
         <div className="flex items-center gap-3">
-          <button 
+          <button
             onClick={onBack}
             className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer"
           >
@@ -106,13 +237,24 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
           </div>
         </div>
 
+        {cardStatus === 'generated' && (
+          <span className="text-[10px] font-bold font-mono text-emerald-400 bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-900">
+            ✅ BROCHURE GENERATED
+          </span>
+        )}
+        {cardStatus === 'generating' && (
+          <span className="text-[10px] font-bold font-mono text-amber-400 bg-amber-950/40 px-2.5 py-1 rounded-lg border border-amber-900">
+            ⏳ COMPILING VIA WORKER
+          </span>
+        )}
+
         <button
           onClick={handleTriggerKafkaGeneration}
-          disabled={isCompilingPdf}
+          disabled={isCompilingPdf || cardStatus === 'generated'}
           className="bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-lg transition-colors cursor-pointer flex items-center gap-2"
         >
           {isCompilingPdf ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
-          {isCompilingPdf ? 'Queue Processing...' : 'Compile Brochure Task'}
+          {isCompilingPdf ? 'Queue Processing...' : cardStatus === 'generated' ? 'Regenerate Brochure' : 'Compile Brochure Task'}
         </button>
       </div>
 
@@ -122,16 +264,46 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
         </div>
       )}
 
+      {/* 📋 CLIENT PRESENTATION DETAILS (broker-curated) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-800/60 pb-2">
+          <User size={14} className="text-blue-400" /> Client Presentation Recipients
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1.5">Recipient Name</label>
+            <input type="text" value={clientInfo.name}
+              onChange={(e) => setClientInfo({ ...clientInfo, name: e.target.value })}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
+              placeholder="Attn: Client decision maker" />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1.5">Email Address</label>
+            <input type="email" value={clientInfo.email}
+              onChange={(e) => setClientInfo({ ...clientInfo, email: e.target.value })}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
+              placeholder="client@company.com" />
+          </div>
+          <div>
+            <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1.5">Contact Number</label>
+            <input type="tel" value={clientInfo.phone}
+              onChange={(e) => setClientInfo({ ...clientInfo, phone: e.target.value })}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
+              placeholder="+27 82 000 0000" />
+          </div>
+        </div>
+      </div>
+
       {/* 📊 GRID LAYOUT SPLIT PANELS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+
         {/* LEFT COLUMN PANEL: COVER SHEET PREVIEW BROKER META */}
         <div className="lg:col-span-1 space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-800/60 pb-2">
               <User size={14} className="text-blue-400" /> Page 1: Broker Cover Summary
             </h3>
-            
+
             <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-blue-600 font-black text-white flex items-center justify-center text-sm shadow-md">
@@ -149,10 +321,34 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
               </div>
             </div>
           </div>
+
+          {/* 🧾 SELECTED UNIT LINE-ITEMS SUMMARY (cart) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
+            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Layers size={14} className="text-blue-400" /> Curated Unit Selection ({activeUnitsCount}/5)
+            </h3>
+            {selectedUnits.length ? (
+              <div className="space-y-2">
+                {selectedUnits.map((u) => (
+                  <div key={u.propertyUnitId} className="flex items-center justify-between p-2 bg-slate-950/40 border border-slate-800/80 rounded-lg text-xs">
+                    <span className="text-blue-300 font-mono">{u.unitNumber} · {u.netRentableAreaSqM} m²</span>
+                    <button
+                      onClick={() => handleRemoveUnit(u.propertyUnitId)}
+                      className="text-[10px] text-red-400 hover:text-red-300 cursor-pointer"
+                      title="Remove this unit from the brochure deck"
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-500 italic">No units selected yet.</p>
+            )}
+          </div>
         </div>
-        {/* RIGHT COLUMN PANEL: MASTER ASSET FINANCIAL MATRIX & DYNAMIC SCHEMAS */}
+
+        {/* RIGHT COLUMN PANEL: MASTER ASSET + UNIT SELECTION + IMAGES */}
         <div className="lg:col-span-2 space-y-4">
-          
+
           {/* MASTER ASSET DETAILS & LOCATION PAIRS */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-800/60 pb-2">
@@ -203,25 +399,45 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
               )}
             </div>
           </div>
-          {/* 📋 MULTI-TENANT GRANULAR SUB-UNIT INVENTORY BREAKDOWN GRID */}
+
+          {/* 📋 MULTI-TENANT GRANULAR SUB-UNIT INVENTORY WITH <=5 SELECTION */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-800/60 pb-2">
-              <Layers size={14} className="text-blue-400" /> Sub-Unit Space Layout Pages Breakdown
-            </h3>
-            
+            <div className="flex justify-between items-center border-b border-slate-800/60 pb-2">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Layers size={14} className="text-blue-400" /> Select Up To 5 Sub-Units To Present
+              </h3>
+              <span className="text-[10px] font-bold font-mono text-slate-400 bg-slate-950 px-2 py-1 border border-slate-800 rounded-lg">
+                Selected: {activeUnitsCount} / 5
+              </span>
+            </div>
+
             <div className="space-y-3">
               {propertyDetails?.subUnits && propertyDetails.subUnits.length > 0 ? (
-                propertyDetails.subUnits.map((unit) => (
-                  <div key={unit.propertyUnitId} className="p-3 bg-slate-950/40 border border-slate-800/80 rounded-xl flex justify-between items-center text-xs">
-                    <div>
-                      <p className="font-bold text-white">{unit.unitNumber} — <span className="text-slate-400 font-medium">{unit.netRentableAreaSqM} m² NRA</span></p>
-                      <p className="text-[11px] text-slate-500 mt-0.5 truncate max-w-lg">{unit.unitDescription}</p>
+                propertyDetails.subUnits.map((unit) => {
+                  const isChecked = selectedUnits.some(u => u.propertyUnitId === unit.propertyUnitId);
+                  return (
+                    <div key={unit.propertyUnitId} className={`p-3 bg-slate-950/40 border rounded-xl flex justify-between items-center text-xs transition-colors ${
+                      isChecked ? 'border-blue-700 ring-1 ring-blue-700/30' : 'border-slate-800/80'
+                    }`}>
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleUnit(unit)}
+                          disabled={cardStatus === 'generated'}
+                          className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+                        />
+                        <div>
+                          <p className="font-bold text-white">{unit.unitNumber} — <span className="text-slate-400 font-medium">{unit.netRentableAreaSqM} m² NRA</span></p>
+                          <p className="text-[11px] text-slate-500 mt-0.5 truncate max-w-lg">{unit.unitDescription}</p>
+                        </div>
+                      </label>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded border border-slate-800 bg-slate-900 text-slate-400 font-mono">
+                        {isChecked ? 'Curated' : 'Available'}
+                      </span>
                     </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded border border-slate-800 bg-slate-900 text-slate-400 font-mono">
-                      Page Index Attached
-                    </span>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <p className="text-xs text-slate-500 italic py-2">Consolidated residential single-asset structure profile. No isolated sub-unit sub-pages mapped.</p>
               )}
@@ -247,15 +463,15 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
                     key={index}
                     onClick={() => handleToggleImageSelection(imgName)}
                     className={`relative aspect-video rounded-xl border-2 overflow-hidden bg-slate-950 flex flex-col justify-between p-2.5 cursor-pointer select-none transition-all group ${
-                      isSelected 
-                        ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-lg' 
+                      isSelected
+                        ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-lg'
                         : 'border-slate-800 hover:border-slate-700'
                     }`}
                   >
                     <span className="text-[10px] font-mono text-slate-500 group-hover:text-slate-400 transition-colors truncate">
                       {imgName}
                     </span>
-                    
+
                     <div className="flex justify-end pt-4">
                       <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
                         isSelected ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-700 bg-slate-900'

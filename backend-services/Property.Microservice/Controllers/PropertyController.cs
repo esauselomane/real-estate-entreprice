@@ -49,94 +49,94 @@ namespace Property.Microservice.Controllers
         }
 
         // --- 📥 DATA TRANSFER INTERFACE MODEL BINDINGS ---
-        public class PropertySearchCriteria
-        {
-            public List<string> Locations { get; set; } = new List<string>();
-            public string PropertyType { get; set; } = "All"; // All, Residential, Commercial, Industrial, Retail
-            public int? MinSize { get; set; }
-            public int? MaxSize { get; set; }
-            public string ListingType { get; set; } = "All"; // All | Sale | Rent — filters on IsForSale/IsForRent flags
-            public int? MinPrice { get; set; }
-            public int? MaxPrice { get; set; }
-        }
+                                           
+         
+                                                                             
+                                                                                                                 
+                                             
+                                             
+                                                                                                                        
+                                              
+                                              
+         
 
-        public class ImageUploadPayload
-        {
-            public string FileName { get; set; } = string.Empty;
-            public string Base64DataString { get; set; } = string.Empty;
-        }
+                                       
+         
+                                                                
+                                                                        
+         
 
-        public class SyndicationTogglePayload
-        {
-            public int PropertyId { get; set; }
-            public int PlatformId { get; set; }
-            public bool SyndicateStatus { get; set; }
-        }
+                                             
+         
+                                               
+                                               
+                                                     
+         
 
-        public class CreatePropertyUnitPayload
-        {
-            [Required, MaxLength(50)]
-            public string UnitNumber { get; set; } = string.Empty;
-            public string UnitDescription { get; set; } = string.Empty;
-            public decimal NetRentableAreaSqM { get; set; }
-            public decimal? SpecificUnitRentalPrice { get; set; }
-            public decimal? SpecificUnitSalePrice { get; set; }
-            public bool IsCurrentlyVacant { get; set; } = true;
-        }
+                                              
+         
+                                     
+                                                                  
+                                                                       
+                                                           
+                                                                 
+                                                               
+                                                               
+         
 
-        public class UpdatePropertyUnitPayload
-        {
-            [Required, MaxLength(50)] public string UnitNumber { get; set; } = string.Empty;
-            public string UnitDescription { get; set; } = string.Empty;
-            public decimal NetRentableAreaSqM { get; set; }
-            public decimal? SpecificUnitRentalPrice { get; set; }
-            public decimal? SpecificUnitSalePrice { get; set; }
-            public bool IsCurrentlyVacant { get; set; } = true;
-        }
+                                              
+         
+                                                                                            
+                                                                       
+                                                           
+                                                                 
+                                                               
+                                                               
+         
 
-        public class DocumentUploadPayload
-        {
-            [Required] public string Name { get; set; } = string.Empty;        // human-friendly document name
-            public string Description { get; set; } = string.Empty;             // free-form document description
-            [Required] public string FileName { get; set; } = string.Empty;    // original file name from the client
-            public string ContentType { get; set; } = string.Empty;
-            [Required] public string Base64DataString { get; set; } = string.Empty; // raw file bytes, base64-encoded (mirrors image upload)
-        }
+                                          
+         
+                                                                                                              
+                                                                                                                 
+                                                                                                                    
+                                                                   
+                                                                                                                                            
+         
 
-        public class DocumentMeta
-        {
-            public string Name { get; set; } = string.Empty;
-            public string Description { get; set; } = string.Empty;
-            public string FileName { get; set; } = string.Empty;   // original name (for download / display)
-            public string StoredName { get; set; } = string.Empty;  // on-disk file name (for retrieval)
-            public string ContentType { get; set; } = string.Empty;
-            public long SizeBytes { get; set; }
-            public DateTime UploadedAt { get; set; }
-        }
+                                 
+         
+                                                            
+                                                                   
+                                                                                                            
+                                                                                                        
+                                                                   
+                                               
+                                                    
+         
 
-        public class CreatePropertyPayload
-        {
-            public string CompleteAddress { get; set; } = string.Empty;
-            public string ErfSpatialSize { get; set; } = string.Empty;
-            public string TitleDeedType { get; set; } = "Freehold";
-            public string PortfolioZoning { get; set; } = "Commercial Zone";
-            public string MarketClass { get; set; } = "Sale";
-            public int PropertyTypeId { get; set; } = 1;
-            public decimal ValuationPrice { get; set; }
-            public decimal? SalePrice { get; set; }
-            public decimal? BaseRentalRate { get; set; }
-            public decimal? RentEscalationPercentage { get; set; }
-            public int? LeaseTermMonths { get; set; }
-            public decimal TenantInstallationAllowance { get; set; } = 0;
-            public decimal Latitude { get; set; } = -33.9249m;
-            public decimal Longitude { get; set; } = 18.4241m;
-            public string LinkedOwnerId { get; set; } = "OT-0001";
-            public List<CreatePropertyUnitPayload> SubUnits { get; set; } = new List<CreatePropertyUnitPayload>();
-        }
+                                          
+         
+                                                                       
+                                                                      
+                                                                   
+                                                                            
+                                                             
+                                                        
+                                                       
+                                                   
+                                                        
+                                                                  
+                                                     
+                                                                         
+                                                              
+                                                              
+                                                                  
+                                                                                                                  
+         
 
         // The property editor uses the same fields as creation.  Keeping this as an
         // explicit DTO prevents clients from changing tenant and audit fields.
-        public class UpdatePropertyPayload : CreatePropertyPayload { }
+                                                                      
 
         // --- 📋 ENDPOINT: GET ALL SYNDICATION PLATFORMS ---
         [HttpGet("platforms")]
@@ -809,12 +809,12 @@ namespace Property.Microservice.Controllers
     // Owners may never delete anything. A dedicated payload DTO is used so the
     // server-derived TenantId/RequestedByUserId are never validated against missing
     // client input.
-    public class MaintenanceCallPayload
-    {
-        public string Title { get; set; } = string.Empty;
-        public string Description { get; set; } = string.Empty;
-        public DateTime? DueDate { get; set; }
-    }
+                                       
+     
+                                                         
+                                                               
+                                              
+     
 
     [Authorize]
     [HttpGet("{propertyId}/units/{unitId:int}/maintenance")]

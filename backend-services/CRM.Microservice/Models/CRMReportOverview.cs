@@ -1,0 +1,16 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace CRM.Microservice.Models
+{
+    public class CRMReportOverview
+    {
+        public int TotalLeads { get; set; }
+        public int TotalDeals { get; set; }
+        public decimal TotalRevenue { get; set; }
+        public decimal TotalRealisedCommission { get; set; }
+        public List<ReportDrilldownRow> MonthlyBreakdown { get; set; } = new();
+    }
+}

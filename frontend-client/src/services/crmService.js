@@ -386,5 +386,27 @@ export const crmService = {
   updateContact: async (contactPayload) => {
     const response = await apiClient.put('/crm/contact/update', contactPayload);
     return response.data;
+  },
+
+  // 🧾 Brochure card (cart) for the Presentation stage.
+  getBrochureCardByDeal: async (dealId) => {
+    const response = await apiClient.get('/crm/brochure-cards', { params: { dealId: parseInt(dealId, 10) } });
+    return response.data;
+  },
+
+  getActiveBrochureCards: async () => {
+    const response = await apiClient.get('/crm/brochure-cards/active');
+    return response.data || [];
+  },
+
+  // Upsert the broker's card (client details + curated unit line items; max 5 units).
+  saveBrochureCard: async (cardPayload) => {
+    const response = await apiClient.put('/crm/brochure-cards', cardPayload);
+    return response.data;
+  },
+
+  removeBrochureCardLine: async (cardId, lineId) => {
+    const response = await apiClient.delete(`/crm/brochure-cards/${cardId}/lines/${lineId}`);
+    return response.data;
   }
 };

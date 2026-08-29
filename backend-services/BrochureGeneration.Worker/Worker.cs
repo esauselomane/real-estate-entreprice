@@ -7,6 +7,8 @@ using QuestPDF.Infrastructure;
 using System;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,6 +20,12 @@ namespace BrochureGeneration.Worker
         private readonly ILogger<BrochureKafkaConsumerWorker> _logger;
         private readonly ConsumerConfig _consumerConfig;
         private const string TopicName = "brochure-generation-requests";
+
+        // The API gateway reverse-proxies CRM routes; the worker calls back here once a
+        // brochure has been compiled so the CRM can soft-delete the card + advance the deal.
+        private static readonly string GatewayUrl = Environment.GetEnvironmentVariable("BROCHURE_GATEWAY_URL")
+            ?? "http://localhost:5000/gateway";
+        private static readonly HttpClient _http = new HttpClient();
 
         // Centralized Strong-Typed Typography Style Sheet Matrix to stop compilation breaks
         private readonly TextStyle _titleStyle = TextStyle.Default.FontFamily("Arial").FontSize(24).Bold().Color("#FFFFFF");
@@ -232,15 +240,42 @@ namespace BrochureGeneration.Worker
                     }
                 }).GeneratePdf();
 
-                // 3. PERSIST THE COMPILED BINARY STORAGE ARTIFACT RECORD ONTO DISK VOLUMES
-                string destinationDirectory = Path.Combine(AppContext.BaseDirectory, "GeneratedBrochures");
-                if (!Directory.Exists(destinationDirectory)) Directory.CreateDirectory(destinationDirectory);
+                 // 3. PERSIST THE COMPILED BINARY STORAGE ARTIFACT RECORD ONTO DISK VOLUMES
+                 // The server "brochure" drop folder is relative to the worker process root.
+                 string destinationDirectory = Path.Combine(AppContext.BaseDirectory, "brochure");
+                 if (!Directory.Exists(destinationDirectory)) Directory.CreateDirectory(destinationDirectory);
 
-                string finalFilePath = Path.Combine(destinationDirectory, $"Brochure_Deal_{dealId}.pdf");
-                await File.WriteAllBytesAsync(finalFilePath, compiledDocumentBytes);
+                 string finalFilePath = Path.Combine(destinationDirectory, $"Brochure_Deal_{dealId}.pdf");
+                 await File.WriteAllBytesAsync(finalFilePath, compiledDocumentBytes);
 
-                _logger.LogInformation($"[COMPILATION SUCCESSFUL]: PDF Brochure payload saved to target node disk: '{finalFilePath}'");
-                return true;
+                 _logger.LogInformation($"[COMPILATION SUCCESSFUL]: PDF Brochure payload saved to target node disk: '{finalFilePath}'");
+
+                 // 4. CALLBACK THE CRM to soft-delete the brochure card and advance the deal
+                 //    to the next pipeline stage (Presentation -> ProposalQuoteSent). Best-effort:
+                 //    a gateway failure must never roll back an already-produced document.
+                 int brochureCardId = root.TryGetProperty("BrochureCardId", out var bcProp) ? bcProp.GetInt32() : 0;
+                 if (brochureCardId > 0)
+                 {
+                     var callbackPayload = new
+                     {
+                         DealId = dealId,
+                         CardId = brochureCardId,
+                         FilePath = finalFilePath,
+                         GeneratedAt = DateTime.UtcNow
+                     };
+                     try
+                     {
+                         var httpContent = new StringContent(JsonSerializer.Serialize(callbackPayload), Encoding.UTF8, "application/json");
+                         var callbackUri = $"{GatewayUrl}/crm/brochure-cards/{brochureCardId}/generated";
+                         var callbackResponse = await _http.PostAsync(callbackUri, httpContent);
+                         _logger.LogInformation($"[CALLBACK OK]: CRM notified of brochure completion for card {brochureCardId}. HTTP {(int)callbackResponse.StatusCode}");
+                     }
+                     catch (Exception cbEx)
+                     {
+                         _logger.LogWarning($"[CALLBACK SKIPPED]: Brochure PDF saved but CRM callback failed for card {brochureCardId}. Reason: {cbEx.Message}");
+                     }
+                 }
+                 return true;
             }
             catch (Exception ex)
             {

@@ -170,6 +170,49 @@ using (var serviceScope = app.Services.CreateScope())
             ALTER TABLE [LeadRecords] ADD [LinkedContactId] nvarchar(50) NULL;
     ");
 
+    // 🧾 Brochure card (cart) + per-line unit selection ledger for the Presentation stage.
+    // The card is broker-scoped per deal; lines hold the curated sub-units (max 5) the
+    // worker renders as disclosure sheets. Soft-deleted by the worker once the PDF lands.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[BrochureCards]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [BrochureCards] (
+                [CardId]            int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [TenantId]          nvarchar(50)      NOT NULL,
+                [DealId]            int               NOT NULL,
+                [BrokerAgentId]     nvarchar(256)     NOT NULL,
+                [ClientName]        nvarchar(256)     NOT NULL CONSTRAINT DF_BrochureCard_ClientName DEFAULT N'',
+                [ClientEmail]       nvarchar(256)     NOT NULL CONSTRAINT DF_BrochureCard_ClientEmail DEFAULT N'',
+                [ClientPhone]       nvarchar(64)      NOT NULL CONSTRAINT DF_BrochureCard_ClientPhone DEFAULT N'',
+                [Status]            nvarchar(20)      NOT NULL CONSTRAINT DF_BrochureCard_Status DEFAULT N'Active',
+                [IsDeleted]         bit               NOT NULL CONSTRAINT DF_BrochureCard_IsDeleted DEFAULT 0,
+                [GeneratedFilePath] nvarchar(512)     NOT NULL CONSTRAINT DF_BrochureCard_FilePath DEFAULT N'',
+                [CreatedAt]         datetime2         NOT NULL CONSTRAINT DF_BrochureCard_CreatedAt DEFAULT GETUTCDATE(),
+                [UpdatedAt]         datetime2         NOT NULL CONSTRAINT DF_BrochureCard_UpdatedAt DEFAULT GETUTCDATE()
+            );
+            CREATE INDEX [IX_BrochureCards_Tenant_Deal] ON [BrochureCards] ([TenantId], [DealId]) WHERE [IsDeleted] = 0;
+            CREATE INDEX [IX_BrochureCards_Broker]    ON [BrochureCards] ([TenantId], [BrokerAgentId]) WHERE [IsDeleted] = 0 AND [Status] IN (N'Active', N'Generating');
+        END
+
+        IF OBJECT_ID(N'[BrochureCardLines]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [BrochureCardLines] (
+                [LineId]             int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [CardId]             int               NOT NULL,
+                [PropertyId]         int               NOT NULL,
+                [UnitId]             int               NOT NULL,
+                [UnitNumber]         nvarchar(50)      NOT NULL CONSTRAINT DF_BrochureLine_UnitNumber DEFAULT N'',
+                [UnitDescription]    nvarchar(256)     NOT NULL CONSTRAINT DF_BrochureLine_UnitDesc DEFAULT N'',
+                [NetRentableAreaSqM] decimal(10,2)     NOT NULL CONSTRAINT DF_BrochureLine_Area DEFAULT 0,
+                [ImageRef]           nvarchar(512)     NOT NULL CONSTRAINT DF_BrochureLine_ImageRef DEFAULT N'',
+                [IsDeleted]          bit               NOT NULL CONSTRAINT DF_BrochureLine_IsDeleted DEFAULT 0
+            );
+            CREATE INDEX [IX_BrochureCardLines_Card] ON [BrochureCardLines] ([CardId]) WHERE [IsDeleted] = 0;
+            ALTER TABLE [BrochureCardLines] ADD CONSTRAINT [FK_BrochureCardLines_BrochureCards]
+                FOREIGN KEY ([CardId]) REFERENCES [BrochureCards] ([CardId]);
+        END
+    ");
+
     CRMSeedData.EnsureSeeded(databaseContext);
 }
 

@@ -24,16 +24,16 @@ namespace Identity.Microservice.Controllers
         }
 
         // --- 📥 TRANSFER DATA STRUCUTRE MODEL BINDINGS ---
-        public class LoginRequest
-        {
-            public string Email { get; set; } = string.Empty;
-            public string Password { get; set; } = string.Empty;
-        }
+                                 
+         
+                                                             
+                                                                
+         
 
-        public class ForgotPasswordRequest
-        {
-            public string Email { get; set; } = string.Empty;
-        }
+                                          
+         
+                                                             
+         
         // --- 🔐 ENDPOINT A: MULTI-TENANT SECURE AUTHENTICATION ---
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
@@ -174,11 +174,11 @@ namespace Identity.Microservice.Controllers
             return Ok(new { message = "If the account path matches an active profile, a recovery reset link has been dispatched." });
         }
 
-        public class ChangePasswordRequest
-        {
-            public string CurrentPassword { get; set; } = string.Empty;
-            public string NewPassword { get; set; } = string.Empty;
-        }
+                                          
+         
+                                                                       
+                                                                   
+         
 
         // --- 🔐 ENDPOINT: SELF-SERVICE PASSWORD CHANGE (any authenticated user, own account only) ---
         [Authorize]
@@ -266,10 +266,10 @@ namespace Identity.Microservice.Controllers
             }));
         }
 
-        public class UpdateUserRoleRequest
-        {
-            public string SystemRole { get; set; } = string.Empty;
-        }
+                                          
+         
+                                                                  
+         
 
         // --- 🔧 ENDPOINT: Assign / change (add or remove) a role on a user account.
         // Role changes run through the same data-driven matrix as RegisterUser, so an

@@ -20,6 +20,8 @@ namespace CRM.Microservice.Data
         public DbSet<OperationalRecord> OperationalRecords { get; set; }
         public DbSet<GeographyRecord> GeographyRecords { get; set; }
         public DbSet<ContactPerson> ContactPersons { get; set; }
+        public DbSet<BrochureCard> BrochureCards { get; set; } = null!;
+        public DbSet<BrochureCardLine> BrochureCardLines { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -56,6 +58,16 @@ namespace CRM.Microservice.Data
                 .WithMany(a => a.ContactPersons)
                 .HasForeignKey(c => c.AgencyId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<BrochureCard>()
+                .Property(c => c.Status)
+                .HasConversion<string>();
+
+            modelBuilder.Entity<BrochureCard>()
+                .HasMany(c => c.Lines)
+                .WithOne(l => l.Card)
+                .HasForeignKey(l => l.CardId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }

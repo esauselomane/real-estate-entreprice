@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Briefcase, DollarSign, TrendingUp, UserPlus, Filter, User, CheckCircle, Loader2, Layers, Sparkles, Building2, Edit2, Search } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 
-export default function CRMWorkspace({ currentUserRole }) {
+export default function CRMWorkspace({ currentUserRole, onOpenBrochureBuilder }) {
   // Navigation active control dashboard sub-tabs
   const [activeTab, setActiveTab] = useState('leads'); // leads, deals, companies, legalEntities, contacts
-  
+
   // Data array storage grids
   const [unverifiedLeads, setUnverifiedLeads] = useState([]);
   const [verifiedDeals, setVerifiedDeals] = useState([]);
@@ -13,6 +13,10 @@ export default function CRMWorkspace({ currentUserRole }) {
   const [legalEntities, setLegalEntities] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [brokers, setBrokers] = useState([]);
+
+  // Broker brochure cards currently in flight — drives the notification badge deck.
+  const [activeCards, setActiveCards] = useState([]);
+  const activeCardDealIds = new Set(activeCards.map((c) => c.dealId));
 
   const [summaryReport, setSummaryReport] = useState({
     activeLeadsCount: 0, valuationsInProcessCount: 0, conveyancingAtDeedsCount: 0, finalizedClosedCount: 0, totalPipelineEstimatedValue: 0
@@ -51,11 +55,16 @@ export default function CRMWorkspace({ currentUserRole }) {
       setSummaryReport(metrics);
 
       if (activeTab === 'leads' || activeTab === 'deals') {
-        const [boardsRes, brokersRes] = await Promise.all([crmService.getCRMBoards(), crmService.getBrokers()]);
+        const [boardsRes, brokersRes, cardsRes] = await Promise.all([
+          crmService.getCRMBoards(),
+          crmService.getBrokers(),
+          crmService.getActiveBrochureCards().catch(() => [])
+        ]);
         const boards = boardsRes || {};
         setUnverifiedLeads(boards.unverifiedLeads || []);
         setVerifiedDeals(boards.verifiedDeals || []);
         setBrokers(brokersRes || []);
+        setActiveCards(cardsRes || []);
       } else if (activeTab === 'companies') {
         const res = await crmService.getCompanies();
         setCompanies(res || []);
@@ -163,6 +172,11 @@ export default function CRMWorkspace({ currentUserRole }) {
     e.preventDefault();
     try {
       await crmService.updateDealStage(selectedDealForEdit.dealId, nextStageValue, notesUpdateText);
+      // 🎯 Presentation stage is the trigger point for the brochure card journey: hand the
+      // deal straight to the builder so the broker can curate the client deck.
+      if (nextStageValue === 'Presentation' && typeof onOpenBrochureBuilder === 'function') {
+        onOpenBrochureBuilder(selectedDealForEdit);
+      }
       setSelectedDealForEdit(null);
       setNotesUpdateText('');
       await loadActiveWorkspaceData();
@@ -405,8 +419,13 @@ export default function CRMWorkspace({ currentUserRole }) {
                   }`}>
                     Deal: {formatEnumTitle(deal.dealStage)}
                   </span>
-                  <span className="text-xs text-slate-500 font-mono">Reference: DL-{deal.dealId}</span>
-                </div>
+                   <span className="text-xs text-slate-500 font-mono">Reference: DL-{deal.dealId}</span>
+                   {deal.dealStage === 'Presentation' && activeCardDealIds.has(deal.dealId) && (
+                     <span title="Brochure card in progress" className="inline-flex items-center gap-1 text-[10px] font-bold font-mono text-blue-300 bg-blue-950/40 px-2 py-0.5 rounded border border-blue-900 animate-pulse">
+                       <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block"></span> Card Active
+                     </span>
+                   )}
+                 </div>
                 <p className="text-xs text-slate-400 font-medium">Buyer: <span className="text-blue-400 font-semibold">{deal.buyerClientId}</span> • Seller: <span className="text-purple-400 font-semibold">{deal.sellerClientId}</span></p>
                 {deal.commissionValue > 0 && (
                   <p className="text-[10px] text-slate-500 mt-1">
@@ -417,6 +436,15 @@ export default function CRMWorkspace({ currentUserRole }) {
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => { setSelectedDealForEdit(deal); setNextStageValue(deal.dealStage); }} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Progress Deal</button>
+                {deal.dealStage === 'Presentation' && (
+                  <button
+                    onClick={() => onOpenBrochureBuilder && onOpenBrochureBuilder(deal)}
+                    className="p-2 bg-indigo-950/40 hover:bg-indigo-800 text-indigo-400 rounded-xl border border-indigo-900 cursor-pointer"
+                    title="Open brochure card (add/remove units & client details)"
+                  >
+                    <Layers size={14} />
+                  </button>
+                )}
                 {canManageDeals ? (
                   <button onClick={() => handleDeleteDeal(deal)} className="p-2 bg-red-950/40 hover:bg-red-900/40 text-red-400 rounded-xl border border-red-900 cursor-pointer" title="Delete deal (AgencyAdmin/PlatformAdmin only)">✕</button>
                 ) : (
