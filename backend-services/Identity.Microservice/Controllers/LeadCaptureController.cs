@@ -240,6 +240,9 @@ namespace Identity.Microservice.Controllers
         [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
         public async Task<IActionResult> GetWorkflow(int id)
         {
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            _logger.LogInformation("GetWorkflow: LeadId={LeadId} RequestedBy={Caller}", id, caller);
+
             var history = await _context.LeadWorkflows
                 .AsNoTracking()
                 .Where(w => w.LeadId == id)
@@ -256,7 +259,10 @@ namespace Identity.Microservice.Controllers
                     w.AgencyId,
                     w.CreatedAt
                 })
-                .ToListAsync();
+                 .ToListAsync();
+
+            _logger.LogInformation("GetWorkflow: Returned {Count} workflow records for LeadId={LeadId}",
+                history.Count, id);
 
             return Ok(history);
         }
@@ -266,8 +272,13 @@ namespace Identity.Microservice.Controllers
         [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
         public async Task<IActionResult> AddWorkflowAction(int id, [FromBody] LeadWorkflowActionDto dto)
         {
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             var lead = await _context.LeadCaptureRequests.FirstOrDefaultAsync(l => l.Id == id);
-            if (lead == null) return NotFound(new { message = "Lead not found." });
+            if (lead == null)
+            {
+                _logger.LogWarning("AddWorkflowAction: LeadId={LeadId} not found, caller={Caller}", id, caller);
+                return NotFound(new { message = "Lead not found." });
+            }
 
             if (string.IsNullOrWhiteSpace(dto?.ActionType) ||
                 !Enum.TryParse<LeadWorkflowActionType>(dto.ActionType, true, out var actionType))
@@ -310,6 +321,9 @@ namespace Identity.Microservice.Controllers
 
             lead.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Workflow action recorded: LeadId={LeadId} Action={Action} NewStatus={Status} By={Caller}",
+                lead.Id, actionType, lead.Status, caller);
 
             return Ok(new
             {

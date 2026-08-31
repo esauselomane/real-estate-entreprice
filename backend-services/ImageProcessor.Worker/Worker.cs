@@ -72,6 +72,8 @@ namespace ImageProcessor.Worker
         // --- 🖼️ GRAPHICS PROCESSING ALGORITHM: GENERATE THUMB, MEDIUM, & LARGE VARIANTS ---
         private async Task ProcessAndPersistImageVariantsAsync(PropertyImageTask task)
         {
+            _logger.LogInformation("[IMAGE PROCESSING START]: PropertyId={PropertyId} FileName={FileName} DataLength={DataLength}",
+                task.PropertyId, task.FileName, task.Base64Data?.Length ?? 0);
             try
             {
                 // 1. Convert the transmission Base64 text string safely back into raw image bytes

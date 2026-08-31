@@ -3,6 +3,7 @@ using Developer.API.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 
@@ -13,18 +14,26 @@ namespace Developer.API.Controllers
     public class DeveloperKeysController : ControllerBase
     {
         private readonly DeveloperDbContext _db;
+        private readonly ILogger<DeveloperKeysController> _logger;
 
-        public DeveloperKeysController(DeveloperDbContext db)
+        public DeveloperKeysController(DeveloperDbContext db, ILogger<DeveloperKeysController> logger)
         {
             _db = db;
+            _logger = logger;
         }
 
         [HttpPost("generate")]
         [Authorize(Roles = "SuperAdmin")]
         public async Task<IActionResult> GenerateKey([FromBody] GenerateApiKeyRequest request)
         {
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            _logger.LogInformation("GenerateKey: requested for AgencyId={AgencyId} By={Caller}", request?.AgencyId, caller);
+
             if (string.IsNullOrWhiteSpace(request.AgencyId) || string.IsNullOrWhiteSpace(request.Name))
+            {
+                _logger.LogWarning("GenerateKey: rejected — missing AgencyId or Name");
                 return BadRequest(new { message = "AgencyId and Name are required." });
+            }
 
             var rawKey = ApiKeyGenerator.GenerateKey();
             var keyHash = ApiKeyGenerator.HashKey(rawKey);
@@ -68,6 +77,9 @@ namespace Developer.API.Controllers
         [Authorize(Roles = "SuperAdmin")]
         public async Task<IActionResult> ListKeys([FromQuery] string? agencyId = null)
         {
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            _logger.LogInformation("ListKeys: AgencyId filter={AgencyId} Caller={Caller}", agencyId, caller);
+
             var query = _db.AgencyApiKeys.AsNoTracking();
 
             if (!string.IsNullOrWhiteSpace(agencyId))
@@ -99,11 +111,18 @@ namespace Developer.API.Controllers
         [Authorize(Roles = "SuperAdmin")]
         public async Task<IActionResult> RevokeKey(int id)
         {
+            _logger.LogInformation("RevokeKey: KeyId={KeyId}", id);
             var key = await _db.AgencyApiKeys.FirstOrDefaultAsync(k => k.Id == id);
-            if (key == null) return NotFound(new { message = "API key not found." });
+            if (key == null)
+            {
+                _logger.LogWarning("RevokeKey: KeyId={KeyId} not found", id);
+                return NotFound(new { message = "API key not found." });
+            }
 
             key.IsRevoked = true;
             await _db.SaveChangesAsync();
+
+            _logger.LogInformation("API key revoked: KeyId={KeyId} AgencyId={AgencyId}", id, key.AgencyId);
 
             return Ok(new { message = "API key revoked successfully." });
         }

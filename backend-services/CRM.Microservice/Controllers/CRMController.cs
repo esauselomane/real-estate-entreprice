@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -21,12 +22,14 @@ namespace CRM.Microservice.Controllers
         private readonly CRMDbContext _context;
         private readonly IHttpClientFactory _http;
         private readonly string _gatewayUrl;
+        private readonly ILogger<CRMController> _logger;
 
-        public CRMController(CRMDbContext context, IHttpClientFactory http, IConfiguration configuration)
+        public CRMController(CRMDbContext context, IHttpClientFactory http, IConfiguration configuration, ILogger<CRMController> logger)
         {
             _context = context;
             _http = http;
             _gatewayUrl = configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
+            _logger = logger;
         }
 
         // 🔐 Resolves the caller's tenant directly from the bearer JWT claim
@@ -227,33 +230,46 @@ namespace CRM.Microservice.Controllers
         [HttpGet("agencies")]
         public async Task<IActionResult> GetAgencies([FromQuery] int page)
         {
-            var tenantId = GetCurrentTenant();
+            var tenant = GetCurrentTenant();
+            var callerRole = GetCurrentCanonicalRole();
+            _logger.LogInformation("GetAgencies: Page={Page} Tenant={Tenant} Role={Role}", page, tenant, callerRole);
+
             var query = _context.AgencyRecords
-                .Where(a => string.IsNullOrWhiteSpace(tenantId) || a.TenantId == tenantId)
+                .Where(a => string.IsNullOrWhiteSpace(tenant) || a.TenantId == tenant)
                 .OrderBy(a => a.Name);
             var (items, total) = await PageAsync(query, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            _logger.LogInformation("GetAgencies: Returned {Count} agencies (page {Page}) out of {Total} total for tenant {Tenant}",
+                items.Count, page, total, tenant);
             return Ok(items);
         }
 
         [HttpPost("agencies")]
         public async Task<IActionResult> CreateAgency([FromBody] AgencyRecord agency)
         {
-            // 🔐 Only a PlatformAdmin may provision a new agency (agency = a tenant-scoped
-            // billing entity). AgencyAdmin / Broker must never see this functionality.
+            var caller = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "Unknown";
             if (GetCurrentCanonicalRole() != "PlatformAdmin")
+            {
+                _logger.LogWarning("CreateAgency: forbidden — caller {Caller} role {Role} cannot provision agencies",
+                    caller, GetCurrentCanonicalRole());
                 return Forbid();
+            }
 
             if (agency == null || string.IsNullOrWhiteSpace(agency.Name))
+            {
+                _logger.LogWarning("CreateAgency: rejected — missing agency name, caller={Caller}", caller);
                 return BadRequest(new { message = "Agency name is required." });
+            }
 
             if (string.IsNullOrWhiteSpace(agency.AgencyId))
                 agency.AgencyId = "TEN-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
-            // 🔐 Tenant taken from the caller's JWT, never from the request body.
             agency.TenantId = GetCurrentTenant();
             agency.CreatedAt = DateTime.UtcNow;
             _context.AgencyRecords.Add(agency);
             await _context.SaveChangesAsync();
+
+            _logger.LogInformation("CreateAgency: created AgencyId={AgencyId} Name={Name} Tenant={Tenant} By={Caller}",
+                agency.AgencyId, agency.Name, agency.TenantId, caller);
             return Ok(agency);
         }
 
@@ -898,6 +914,8 @@ namespace CRM.Microservice.Controllers
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var activeYear = year ?? DateTime.UtcNow.Year;
+            _logger.LogInformation("GetReportOverview: Year={Year} Tenant={Tenant}", activeYear, tenantId);
+
             var tenantLeads = await _context.LeadRecords
                 .Where(l => l.TenantId == tenantId && l.CreatedAt.Year == activeYear)
                 .Where(l => !isBroker || l.AllocatedToAgent == callerName)

@@ -1,6 +1,7 @@
 using Developer.API.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Developer.API.Controllers
 {
@@ -9,10 +10,12 @@ namespace Developer.API.Controllers
     public class DeveloperPropertiesController : ControllerBase
     {
         private readonly PropertyReadDbContext _propertyDb;
+        private readonly ILogger<DeveloperPropertiesController> _logger;
 
-        public DeveloperPropertiesController(PropertyReadDbContext propertyDb)
+        public DeveloperPropertiesController(PropertyReadDbContext propertyDb, ILogger<DeveloperPropertiesController> logger)
         {
             _propertyDb = propertyDb;
+            _logger = logger;
         }
 
         [HttpGet]
@@ -20,9 +23,11 @@ namespace Developer.API.Controllers
         {
             if (!HttpContext.Items.TryGetValue("AgencyId", out var agencyIdObj) || agencyIdObj is not string agencyId)
             {
+                _logger.LogWarning("GetProperties: unauthorized — no API key / AgencyId in context");
                 return Unauthorized(new { message = "A valid API key is required." });
             }
 
+            _logger.LogInformation("GetProperties: AgencyId={AgencyId}", agencyId);
             var properties = await _propertyDb.PropertyAssets
                 .AsNoTracking()
                 .Where(p => p.TenantId == agencyId)
@@ -52,6 +57,7 @@ namespace Developer.API.Controllers
                 })
                 .ToListAsync();
 
+            _logger.LogInformation("GetProperties: returned {Count} properties for AgencyId={AgencyId}", properties.Count, agencyId);
             return Ok(new
             {
                 agencyId,
@@ -65,9 +71,11 @@ namespace Developer.API.Controllers
         {
             if (!HttpContext.Items.TryGetValue("AgencyId", out var agencyIdObj) || agencyIdObj is not string agencyId)
             {
+                _logger.LogWarning("GetProperty: unauthorized — no API key / AgencyId in context");
                 return Unauthorized(new { message = "A valid API key is required." });
             }
 
+            _logger.LogInformation("GetProperty: PropertyId={PropertyId} AgencyId={AgencyId}", id, agencyId);
             var property = await _propertyDb.PropertyAssets
                 .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.PropertyId == id && p.TenantId == agencyId);
@@ -99,6 +107,7 @@ namespace Developer.API.Controllers
                 CreatedAt = property.CreatedAt
             };
 
+            _logger.LogInformation("GetProperty: found PropertyId={PropertyId}", id);
             return Ok(dto);
         }
     }

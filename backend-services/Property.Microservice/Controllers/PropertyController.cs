@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Property.Microservice.Data;
 using Property.Microservice.Models;
 using Property.Microservice.Services;
@@ -21,6 +22,7 @@ namespace Property.Microservice.Controllers
     {
         private readonly PropertyDbContext _context;
         private readonly KafkaPublisherService _kafkaPublisher;
+        private readonly ILogger<PropertyController> _logger;
         private readonly string _storageRootPath;
 
         // 🧷 Unit document metadata is persisted as JSON in UnitDocumentsJson. ASP.NET Core
@@ -33,10 +35,11 @@ namespace Property.Microservice.Controllers
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         };
 
-        public PropertyController(PropertyDbContext context, KafkaPublisherService kafkaPublisher)
+        public PropertyController(PropertyDbContext context, KafkaPublisherService kafkaPublisher, ILogger<PropertyController> logger)
         {
             _context = context;
             _kafkaPublisher = kafkaPublisher;
+            _logger = logger;
 
             // 📁 LOCAL DISK VAULT: actual property media (images + documents) are persisted
             // to the server filesystem here so they survive beyond a single request, not
@@ -528,17 +531,27 @@ namespace Property.Microservice.Controllers
         [HttpPost("create")]
         public async Task<IActionResult> CreateProperty([FromBody] CreatePropertyPayload payload)
         {
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            _logger.LogInformation("CreateProperty: requested by {Caller}", caller);
+
             if (payload == null || string.IsNullOrWhiteSpace(payload.CompleteAddress))
             {
+                _logger.LogWarning("CreateProperty: rejected — address missing, caller={Caller}", caller);
                 return BadRequest(new { message = "Property address is required." });
             }
 
-            // 🛡️ Multi-tenant isolation: the owning TenantId is taken from the JWT, never
-            // from the client payload, so a user cannot mint a property into another sandbox.
             var userTenantId = User.FindFirst("TenantId")?.Value;
-            if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
-            if (GetCurrentCanonicalRole() == "Tenant" || GetCurrentCanonicalRole() == "Owner")
+            if (string.IsNullOrWhiteSpace(userTenantId))
+            {
+                _logger.LogWarning("CreateProperty: forbidden — no tenant claim for caller {Caller}", caller);
                 return Forbid();
+            }
+            if (GetCurrentCanonicalRole() == "Tenant" || GetCurrentCanonicalRole() == "Owner")
+            {
+                _logger.LogWarning("CreateProperty: forbidden — caller {Caller} role {Role} cannot create properties",
+                    caller, GetCurrentCanonicalRole());
+                return Forbid();
+            }
 
             var newProp = new PropertyAsset
             {
@@ -582,6 +595,9 @@ namespace Property.Microservice.Controllers
 
             _context.PropertyAssets.Add(newProp);
             await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Property created: PropertyId={PropertyId} Address={Address} Tenant={Tenant} By={Caller}",
+                newProp.PropertyId, newProp.CompleteAddress, newProp.TenantId, caller);
 
             return CreatedAtAction(nameof(GetPropertyById), new { propertyId = newProp.PropertyId }, newProp);
         }
@@ -654,6 +670,10 @@ namespace Property.Microservice.Controllers
         [HttpPost("search")]
         public async Task<IActionResult> SearchProperties([FromBody] PropertySearchCriteria criteria, [FromQuery] int page = 1)
         {
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            _logger.LogInformation("SearchProperties: Page={Page} PropertyType={PropertyType} ListingType={ListingType} Locations={Locations} Caller={Caller}",
+                page, criteria.PropertyType, criteria.ListingType, string.Join(",", criteria.Locations ?? Enumerable.Empty<string>()), caller);
+
             if (page < 1) page = 1;
             const int PAGE_SIZE = 20;
 
@@ -706,7 +726,9 @@ namespace Property.Microservice.Controllers
             var total = await query.CountAsync();
             var results = await query.OrderBy(p => p.PropertyId)
                 .Skip((page - 1) * PAGE_SIZE).Take(PAGE_SIZE).ToListAsync();
-            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+                         HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            _logger.LogInformation("SearchProperties: returned {Count} results (page {Page}) out of {Total} for caller {Caller}",
+                results.Count, page, total, caller);
             return Ok(results);
         }
 
@@ -714,8 +736,14 @@ namespace Property.Microservice.Controllers
         [HttpPost("{propertyId}/upload-image")]
         public async Task<IActionResult> UploadPropertyImage(int propertyId, [FromBody] ImageUploadPayload payload)
         {
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            _logger.LogInformation("UploadPropertyImage: PropertyId={PropertyId} Caller={Caller}", propertyId, caller);
             var property = await _context.PropertyAssets.FindAsync(propertyId);
-            if (property == null) return NotFound(new { message = "Target property record not found." });
+            if (property == null)
+            {
+                _logger.LogWarning("UploadPropertyImage: PropertyId={PropertyId} not found", propertyId);
+                return NotFound(new { message = "Target property record not found." });
+            }
 
             if (payload == null || string.IsNullOrEmpty(payload.Base64DataString))
             {
@@ -734,7 +762,15 @@ namespace Property.Microservice.Controllers
         [HttpPost("syndicate")]
         public async Task<IActionResult> ToggleSyndication([FromBody] SyndicationTogglePayload payload)
         {
-            if (payload == null) return BadRequest(new { message = "Invalid syndication data envelope." });
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            _logger.LogInformation("ToggleSyndication: PropertyId={PropertyId} PlatformId={PlatformId} Syndicate={Syndicate} Caller={Caller}",
+                payload?.PropertyId, payload?.PlatformId, payload?.SyndicateStatus, caller);
+
+            if (payload == null)
+            {
+                _logger.LogWarning("ToggleSyndication: rejected — null payload, caller={Caller}", caller);
+                return BadRequest(new { message = "Invalid syndication data envelope." });
+            }
 
             var property = await _context.PropertyAssets
                 .Include(p => p.PropertyTypeDetails)
@@ -776,6 +812,9 @@ namespace Property.Microservice.Controllers
             
             await _kafkaPublisher.PublishMessageAsync("platform-syndication", payload.PropertyId.ToString(), kafkaSyncValue);
 
+            _logger.LogInformation("ToggleSyndication: completed — PropertyId={PropertyId} PlatformId={PlatformId} Active={Active} ExternalRef={ExternalRef}",
+                payload.PropertyId, payload.PlatformId, payload.SyndicateStatus, syndicationRecord.ExternalReferenceIndex);
+
             return Ok(new
             {
                 message = payload.SyndicateStatus 
@@ -791,15 +830,25 @@ namespace Property.Microservice.Controllers
         public async Task<IActionResult> GenerateBrochure([FromBody] GeneratedBrochurePayload payload)
         {
             if (payload == null || payload.PropertyId <= 0 || payload.DealId <= 0)
+            {
+                _logger.LogWarning("GenerateBrochure: rejected — invalid payload (PropertyId={PropertyId} DealId={DealId})",
+                    payload?.PropertyId, payload?.DealId);
                 return BadRequest(new { message = "A deal and property are required to generate a brochure." });
+            }
 
             var propertyExists = await _context.PropertyAssets.AnyAsync(p => p.PropertyId == payload.PropertyId);
-            if (!propertyExists) return NotFound(new { message = "Target property record not found." });
+            if (!propertyExists)
+            {
+                _logger.LogWarning("GenerateBrochure: property not found — PropertyId={PropertyId}", payload.PropertyId);
+                return NotFound(new { message = "Target property record not found." });
+            }
 
             await _kafkaPublisher.PublishMessageAsync(
                 "brochure-generation-requests",
                 payload.DealId.ToString(),
                 System.Text.Json.JsonSerializer.Serialize(payload));
+
+            _logger.LogInformation("GenerateBrochure: queued — PropertyId={PropertyId} DealId={DealId}", payload.PropertyId, payload.DealId);
             return Accepted(new { message = "Brochure generation request queued." });
         }
 

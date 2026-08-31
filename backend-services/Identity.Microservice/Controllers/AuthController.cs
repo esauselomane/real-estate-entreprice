@@ -235,8 +235,7 @@ namespace Identity.Microservice.Controllers
             }
 
             var callerTenantId = User.FindFirst("TenantId")?.Value;
-            var callerUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
+            
             var target = await _context.UserAccounts.FirstOrDefaultAsync(u => u.UserId == userId);
             if (target == null) return NotFound(new { message = "Target account not found." });
 

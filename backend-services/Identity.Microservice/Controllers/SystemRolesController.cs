@@ -1,25 +1,25 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Identity.Microservice.Data;
 using Identity.Microservice.Models;
 using System.Security.Claims;
 
 namespace Identity.Microservice.Controllers
 {
-    // 🔐 System-wide role definitions — the configuration surface exposed by the
-    // System Admin "Roles" tab. Read by RegisterUser so the provisioning authority
-    // matrix is fully data-driven instead of hard-coded.
     [ApiController]
     [Route("api/system/roles")]
     [Authorize]
     public class SystemRolesController : ControllerBase
     {
         private readonly IdentityDbContext _context;
+        private readonly ILogger<SystemRolesController> _logger;
 
-        public SystemRolesController(IdentityDbContext context)
+        public SystemRolesController(IdentityDbContext context, ILogger<SystemRolesController> logger)
         {
             _context = context;
+            _logger = logger;
         }
 
                                           
@@ -55,6 +55,7 @@ namespace Identity.Microservice.Controllers
                 .OrderByDescending(r => r.IsPlatformScoped)
                 .ThenBy(r => r.Name)
                 .ToListAsync();
+            _logger.LogInformation("Listed {Count} system role definitions", roles.Count);
             return Ok(roles);
         }
 
@@ -63,7 +64,12 @@ namespace Identity.Microservice.Controllers
         public async Task<IActionResult> GetSystemRole(int id)
         {
             var role = await _context.SystemRoles.FindAsync(id);
-            if (role == null) return NotFound(new { message = "Role definition not found." });
+            if (role == null)
+            {
+                _logger.LogWarning("SystemRole lookup failed: RoleDefId={RoleDefId} not found", id);
+                return NotFound(new { message = "Role definition not found." });
+            }
+            _logger.LogDebug("SystemRole retrieved: RoleDefId={RoleDefId} Name={Name}", role.RoleDefId, role.Name);
             return Ok(role);
         }
 
@@ -71,7 +77,11 @@ namespace Identity.Microservice.Controllers
         [HttpPost]
         public async Task<IActionResult> CreateSystemRole([FromBody] RoleDefinitionRequest request)
         {
-            if (!IsPlatformAdmin()) return Forbid();
+            if (!IsPlatformAdmin())
+            {
+                _logger.LogWarning("CreateSystemRole: forbidden — caller lacks PlatformAdmin role");
+                return Forbid();
+            }
 
             if (string.IsNullOrWhiteSpace(request.Name))
                 return BadRequest(new { message = "Role name is required." });
@@ -94,6 +104,9 @@ namespace Identity.Microservice.Controllers
             _context.SystemRoles.Add(role);
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("SystemRole created: RoleDefId={RoleDefId} Name={Name} PlatformScoped={PlatformScoped} AgencyScoped={AgencyScoped}",
+                role.RoleDefId, role.Name, role.IsPlatformScoped, role.IsAgencyScoped);
+
             return Ok(new { message = "Role definition created.", roleId = role.RoleDefId });
         }
 
@@ -101,10 +114,18 @@ namespace Identity.Microservice.Controllers
         [HttpPut("{id:int}")]
         public async Task<IActionResult> UpdateSystemRole(int id, [FromBody] RoleDefinitionRequest request)
         {
-            if (!IsPlatformAdmin()) return Forbid();
+            if (!IsPlatformAdmin())
+            {
+                _logger.LogWarning("UpdateSystemRole: forbidden — caller lacks PlatformAdmin role");
+                return Forbid();
+            }
 
             var role = await _context.SystemRoles.FindAsync(id);
-            if (role == null) return NotFound(new { message = "Role definition not found." });
+            if (role == null)
+            {
+                _logger.LogWarning("UpdateSystemRole: RoleDefId={RoleDefId} not found", id);
+                return NotFound(new { message = "Role definition not found." });
+            }
 
             if (!string.IsNullOrWhiteSpace(request.Name) && request.Name != role.Name)
             {
@@ -122,6 +143,8 @@ namespace Identity.Microservice.Controllers
 
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("SystemRole updated: RoleDefId={RoleDefId} Name={Name}", id, role.Name);
+
             return Ok(new { message = "Role definition updated.", roleId = role.RoleDefId });
         }
 
@@ -129,10 +152,18 @@ namespace Identity.Microservice.Controllers
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> DeleteSystemRole(int id)
         {
-            if (!IsPlatformAdmin()) return Forbid();
+            if (!IsPlatformAdmin())
+            {
+                _logger.LogWarning("DeleteSystemRole: forbidden — caller lacks PlatformAdmin role");
+                return Forbid();
+            }
 
             var role = await _context.SystemRoles.FindAsync(id);
-            if (role == null) return NotFound(new { message = "Role definition not found." });
+            if (role == null)
+            {
+                _logger.LogWarning("DeleteSystemRole: RoleDefId={RoleDefId} not found", id);
+                return NotFound(new { message = "Role definition not found." });
+            }
 
             // Reserved roles that drive the provisioning matrix cannot be deactivated.
             var reserved = new[] { "PlatformAdmin", "AgencyAdmin", "Broker", "Owner", "Tenant" };
@@ -141,6 +172,8 @@ namespace Identity.Microservice.Controllers
 
             role.IsActive = false;
             await _context.SaveChangesAsync();
+
+            _logger.LogInformation("SystemRole deactivated: RoleDefId={RoleDefId} Name={Name}", id, role.Name);
 
             return Ok(new { message = "Role definition deactivated.", roleId = role.RoleDefId });
         }
