@@ -20,12 +20,13 @@ namespace CRM.Microservice.Controllers
     {
         private readonly CRMDbContext _context;
         private readonly IHttpClientFactory _http;
-        private const string GATEWAY_URL = "http://localhost:5000/gateway";
+        private readonly string _gatewayUrl;
 
-        public CRMController(CRMDbContext context, IHttpClientFactory http)
+        public CRMController(CRMDbContext context, IHttpClientFactory http, IConfiguration configuration)
         {
             _context = context;
             _http = http;
+            _gatewayUrl = configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
         }
 
         // 🔐 Resolves the caller's tenant directly from the bearer JWT claim
@@ -635,7 +636,7 @@ namespace CRM.Microservice.Controllers
                     maxPrice = request.IsRent ? (int?)null : (int?)lead.EstimatedBudget
                 };
                 var payload = new StringContent(JsonSerializer.Serialize(criteria), System.Text.Encoding.UTF8, "application/json");
-                var matchResponse = await client.PostAsync($"{GATEWAY_URL}/properties/search?page=1", payload);
+                var matchResponse = await client.PostAsync($"{_gatewayUrl}/properties/search?page=1", payload);
                 if (matchResponse.IsSuccessStatusCode)
                 {
                     var props = JsonSerializer.Deserialize<List<PropertyMatchDto>>(await matchResponse.Content.ReadAsStringAsync(),

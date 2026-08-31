@@ -9,17 +9,16 @@ namespace PlatformSyndication.Worker
         private readonly ILogger<Worker> _logger;
         private readonly IConsumer<string, string> _kafkaConsumer;
 
-        public Worker(ILogger<Worker> logger)
+        public Worker(ILogger<Worker> logger, IConfiguration configuration)
         {
             _logger = logger;
 
-            // Configure the background message polling properties connection rules
             var consumerConfig = new ConsumerConfig
             {
-                BootstrapServers = "localhost:9092",
+                BootstrapServers = configuration["Kafka:BootstrapServers"] ?? "localhost:9092",
                 GroupId = "realestate-syndication-worker-group",
                 AutoOffsetReset = AutoOffsetReset.Earliest,
-                EnableAutoCommit = false // Manual commit ensures processing confirmation safety
+                EnableAutoCommit = false
             };
 
             _kafkaConsumer = new ConsumerBuilder<string, string>(consumerConfig).Build();

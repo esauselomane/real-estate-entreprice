@@ -1,2 +1,12 @@
 <Solution>
+  <Folder Name="/backend-services/">
+    <Project Path="backend-services/BrochureGeneration.Worker/BrochureGeneration.Worker.csproj" />
+    <Project Path="backend-services/CRM.Microservice/CRM.Microservice.csproj" />
+    <Project Path="backend-services/Identity.Microservice/Identity.Microservice.csproj" />
+    <Project Path="backend-services/ImageProcessor.Worker/ImageProcessor.Worker.csproj" />
+    <Project Path="backend-services/PlatformSyndication.Worker/PlatformSyndication.Worker.csproj" />
+    <Project Path="backend-services/Property.Microservice/Property.Microservice.csproj" />
+  </Folder>
+  <Project Path="api-gateway/api-gateway.csproj" />
+  <Project Path="Developer.API/Developer.API.csproj" />
 </Solution>

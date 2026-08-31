@@ -315,7 +315,7 @@ export default function BibsyWidget() {
           role="presentation"
         >
           <div
-            className="pointer-events-none absolute inset-0 bg-slate-900/50 md:bg-slate-900/40"
+            className="absolute inset-0 bg-slate-900/50 md:bg-slate-900/40"
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />

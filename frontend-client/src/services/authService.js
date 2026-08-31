@@ -8,14 +8,16 @@ export const authService = {
       const response = await apiClient.post('/auth/login', { email, password });
       
       if (response.data && response.data.token) {
-        // Commit the cryptographic access key token cleanly to browser memory registers
         localStorage.setItem('user_session_jwt', response.data.token);
         localStorage.setItem('user_profile_data', JSON.stringify(response.data.profile));
       }
       
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Authentication framework link failed.';
+      const message = error.response?.data?.message 
+        || error.message 
+        || 'Authentication framework link failed.';
+      throw new Error(message);
     }
   },
 

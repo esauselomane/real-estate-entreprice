@@ -7,9 +7,9 @@ export type BibsyEntry = {
 
 export const bibsyKnowledge: BibsyEntry[] = [
   {
-    question: "What is Real Estate Enterprise?",
+    question: "What is Biscove Real Estate Tech?",
     answer:
-      "Real Estate Enterprise is a multi-tenant platform for brokers and agencies — CRM for leads and deals, property listings, automated branded brochure generation and market syndication.",
+      "Biscove Real Estate Tech is a multi-tenant platform for brokers and agencies — CRM for leads and deals, property listings, automated branded brochure generation and market syndication.",
     keywords: ["real", "estate", "enterprise", "platform", "what", "is", "app", "software"],
      apiHint: "none",
   },
@@ -65,7 +65,7 @@ export const bibsyKnowledge: BibsyEntry[] = [
   {
     question: "How do I log in?",
     answer:
-      "Click 'Broker login' in the top right, or visit /login — that opens the application login where you enter your email and password.",
+      "Click 'Login' in the top right, or visit /login — that opens the application login where you enter your email and password.",
     keywords: ["login", "log", "in", "auth", "sign", "broker"],
     apiHint: "none",
   },

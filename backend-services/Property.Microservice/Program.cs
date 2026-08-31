@@ -27,6 +27,9 @@ builder.Services.AddDbContext<PropertyDbContext>(options =>
 });
 
 // 3. 🛡️ REGISTER JWT BEARER AUTHENTICATION (mirrors Identity.Microservice signing keys)
+var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "SuperSecretRealEstateEnterpriseCryptographicSigningKey123!";
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "Identity.Microservice";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "RealEstateApp.Client";
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -40,10 +43,10 @@ builder.Services.AddAuthentication(options =>
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
-        ValidIssuer = "Identity.Microservice",
-        ValidAudience = "RealEstateApp.Client",
+        ValidIssuer = jwtIssuer,
+        ValidAudience = jwtAudience,
         IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes("SuperSecretRealEstateEnterpriseCryptographicSigningKey123!"))
+            Encoding.UTF8.GetBytes(jwtSecret))
     };
 });
 builder.Services.AddAuthorization();
@@ -154,6 +157,7 @@ app.UseAuthorization();
 
 // 7. MAP TARGET REST API ENDPOINT CONTROLLERS
 app.MapControllers();
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "property" }));
 
 // 8. START THE MICROSERVICE WORKSPACE ENGINE LISTENER
 app.Run();

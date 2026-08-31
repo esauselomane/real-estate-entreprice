@@ -8,12 +8,17 @@ namespace Identity.Microservice.Data
 {
     public static class IdentitySeedData
     {
-        public static void EnsureSeeded(IdentityDbContext context)
+        public static void EnsureSeeded(IdentityDbContext context, IConfiguration configuration)
         {
             if (context == null)
             {
                 throw new ArgumentNullException(nameof(context));
             }
+
+            var supportEmail = configuration["Email:SupportAddress"] ?? "hello@realestate.example";
+            var adminEmail = configuration["Email:AdminEmail"] ?? "admin@agency.local";
+            var platformAdminEmail = configuration["Email:PlatformAdminEmail"] ?? "platform.admin@agency.local";
+            var agencyAdminEmail = configuration["Email:AgencyAdminEmail"] ?? "agency.admin@agency.local";
 
             context.Database.EnsureCreated();
 
@@ -37,10 +42,90 @@ namespace Identity.Microservice.Data
                         CONSTRAINT [PK_SystemRoles] PRIMARY KEY ([RoleDefId]),
                         CONSTRAINT [AK_SystemRoles_Name] UNIQUE ([Name])
                     );
-                ");
-            }
+                 ");
+             }
 
-            var existingTenants = context.TenantAgencies.Count();
+             // 📋 Public lead/intake capture table — fed by the marketing website
+             // (Bibsy chatbot + pricing page). Provisioned via raw DDL because
+             // EnsureCreated is a no-op against a pre-existing database, mirroring the
+             // SystemRoles bootstrapping above.
+             var leadTableExists = context.Database.SqlQueryRaw<int>(
+                 "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'LeadCaptureRequests'")
+                 .AsEnumerable().FirstOrDefault();
+             if (leadTableExists == 0)
+             {
+                 context.Database.ExecuteSqlRaw(@"
+                     CREATE TABLE [LeadCaptureRequests] (
+                         [Id] int NOT NULL IDENTITY(1,1),
+                         [FullName] nvarchar(max) NOT NULL,
+                         [Email] nvarchar(max) NOT NULL,
+                         [Phone] nvarchar(max) NULL,
+                         [Company] nvarchar(max) NULL,
+                         [UserType] int NOT NULL DEFAULT 1,
+                         [Package] int NULL,
+                         [DemoRequested] bit NOT NULL DEFAULT 0,
+                         [Message] nvarchar(max) NULL,
+                         [Source] nvarchar(max) NULL,
+                         [Status] int NOT NULL DEFAULT 0,
+                         [HandledBy] nvarchar(max) NULL,
+                         [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                         [UpdatedAt] datetime2 NULL,
+                         CONSTRAINT [PK_LeadCaptureRequests] PRIMARY KEY ([Id])
+                     );
+                 ");
+             }
+
+              // 📋 Internal workflow actions — SuperAdmin-only tracking of callbacks,
+              // quotes, payments and agency provisioning for leads.
+              var workflowTableExists = context.Database.SqlQueryRaw<int>(
+                  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'LeadWorkflows'")
+                  .AsEnumerable().FirstOrDefault();
+              if (workflowTableExists == 0)
+              {
+                  context.Database.ExecuteSqlRaw(@"
+                      CREATE TABLE [LeadWorkflows] (
+                          [Id] int NOT NULL IDENTITY(1,1),
+                          [LeadId] int NOT NULL,
+                          [ActionType] int NOT NULL,
+                          [Notes] nvarchar(max) NULL,
+                          [PerformedBy] nvarchar(max) NULL,
+                          [QuoteAmount] decimal(18,2) NULL,
+                          [Currency] nvarchar(max) NULL DEFAULT 'ZAR',
+                          [PaymentReference] nvarchar(max) NULL,
+                          [AgencyId] nvarchar(max) NULL,
+                          [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                          CONSTRAINT [PK_LeadWorkflows] PRIMARY KEY ([Id]),
+                          CONSTRAINT [FK_LeadWorkflows_LeadCaptureRequests_LeadId] FOREIGN KEY ([LeadId]) REFERENCES [LeadCaptureRequests] ([Id]) ON DELETE CASCADE
+                      );
+                  ");
+              }
+
+              // 💰 Pricing packages — configurable plans for the marketing website.
+              var pricingTableExists = context.Database.SqlQueryRaw<int>(
+                  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'PricingPackages'")
+                  .AsEnumerable().FirstOrDefault();
+              if (pricingTableExists == 0)
+              {
+                  context.Database.ExecuteSqlRaw(@"
+                      CREATE TABLE [PricingPackages] (
+                          [Id] int NOT NULL IDENTITY(1,1),
+                          [Code] nvarchar(100) NOT NULL,
+                          [Name] nvarchar(200) NOT NULL,
+                          [Description] nvarchar(max) NULL,
+                          [MonthlyPrice] decimal(18,2) NULL,
+                          [AnnualPrice] decimal(18,2) NULL,
+                          [FeaturesJson] nvarchar(max) NOT NULL DEFAULT '[]',
+                          [SortOrder] int NOT NULL DEFAULT 0,
+                          [IsActive] bit NOT NULL DEFAULT 1,
+                          [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                          [UpdatedAt] datetime2 NULL,
+                          CONSTRAINT [PK_PricingPackages] PRIMARY KEY ([Id]),
+                          CONSTRAINT [AK_PricingPackages_Code] UNIQUE ([Code])
+                      );
+                  ");
+              }
+
+              var existingTenants = context.TenantAgencies.Count();
             if (existingTenants < 1000)
             {
                 var tenantItems = new List<TenantAgency>();
@@ -61,7 +146,7 @@ namespace Identity.Microservice.Data
                 context.TenantAgencies.AddRange(tenantItems);
             }
 
-            var adminUser = context.UserAccounts.FirstOrDefault(u => u.Email == "admin@agency.local");
+            var adminUser = context.UserAccounts.FirstOrDefault(u => u.Email == adminEmail);
             if (adminUser == null)
             {
                 context.UserAccounts.Add(new UserAccount
@@ -69,7 +154,7 @@ namespace Identity.Microservice.Data
                     UserId = "USR-ADMIN",
                     TenantId = "TEN-001",
                     FullName = "Agency Administrator",
-                    Email = "admin@agency.local",
+                    Email = adminEmail,
                     PasswordHash = "Password123!",
                     SystemRole = "SuperAdmin",
                     AvatarUrl = string.Empty,
@@ -86,8 +171,8 @@ namespace Identity.Microservice.Data
             // for local testing build").
             var roleSeedUsers = new[]
             {
-                new { Email = "platform.admin@agency.local", UserId = "USR-ADMIN-PLAT", FullName = "Platform Administrator", SystemRole = "PlatformAdmin", TenantId = "TEN-001" },
-                new { Email = "agency.admin@agency.local",   UserId = "USR-ADMIN-AGY",  FullName = "Agency Administrator",     SystemRole = "AgencyAdmin",   TenantId = "TEN-001" },
+                new { Email = platformAdminEmail, UserId = "USR-ADMIN-PLAT", FullName = "Platform Administrator", SystemRole = "PlatformAdmin", TenantId = "TEN-001" },
+                new { Email = agencyAdminEmail,   UserId = "USR-ADMIN-AGY",  FullName = "Agency Administrator",     SystemRole = "AgencyAdmin",   TenantId = "TEN-001" },
                 new { Email = "broker@agency.local",          UserId = "USR-BROKER-01",  FullName = "Sales Broker",             SystemRole = "Broker",         TenantId = "TEN-001" },
                 new { Email = "owner@agency.local",           UserId = "USR-OWNER-01",   FullName = "Property Owner",          SystemRole = "Owner",          TenantId = "TEN-001" },
                 new { Email = "tenant@agency.local",          UserId = "USR-TENANT-01",  FullName = "Rental Tenant",           SystemRole = "Tenant",         TenantId = "TEN-001" }
@@ -204,6 +289,67 @@ namespace Identity.Microservice.Data
                     existing.IsAgencyScoped = rd.IsAgencyScoped;
                     existing.PermissionsJson = rd.PermissionsJson;
                     existing.IsActive = true;
+                }
+            }
+            context.SaveChanges();
+
+            // 💰 Seed configurable pricing packages for the marketing website.
+            var pricingPackages = new[]
+            {
+                new PricingPackage
+                {
+                    Code = "SME_AGENCY",
+                    Name = "SME Agency",
+                    Description = "Ideal for small agencies getting started with digital deal management.",
+                    MonthlyPrice = 299.00m,
+                    AnnualPrice = 2990.00m,
+                    FeaturesJson = "[\"Up to 5 users\",\"20 property listings\",\"Basic brochure generation\",\"Email support\",\"Standard CRM pipeline\"]",
+                    SortOrder = 1,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                },
+                new PricingPackage
+                {
+                    Code = "PRIVATE",
+                    Name = "Private",
+                    Description = "For growing agencies that need more power and reach.",
+                    MonthlyPrice = 799.00m,
+                    AnnualPrice = 7990.00m,
+                    FeaturesJson = "[\"Up to 20 users\",\"Unlimited listings\",\"Advanced brochure + image processing\",\"Priority support\",\"Market syndication\",\"Custom branding\"]",
+                    SortOrder = 2,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                },
+                new PricingPackage
+                {
+                    Code = "ENTERPRISE",
+                    Name = "Enterprise",
+                    Description = "Full-scale platform access for large organizations with custom needs.",
+                    MonthlyPrice = 1999.00m,
+                    AnnualPrice = 19990.00m,
+                    FeaturesJson = "[\"Unlimited users\",\"Unlimited listings\",\"Dedicated account manager\",\"API access\",\"Custom integrations\",\"On-premise option\",\"SLA guarantee\",\"Advanced analytics\"]",
+                    SortOrder = 3,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                }
+            };
+            foreach (var pkg in pricingPackages)
+            {
+                var existing = context.PricingPackages.FirstOrDefault(p => p.Code == pkg.Code);
+                if (existing == null)
+                {
+                    context.PricingPackages.Add(pkg);
+                }
+                else
+                {
+                    existing.Name = pkg.Name;
+                    existing.Description = pkg.Description;
+                    existing.MonthlyPrice = pkg.MonthlyPrice;
+                    existing.AnnualPrice = pkg.AnnualPrice;
+                    existing.FeaturesJson = pkg.FeaturesJson;
+                    existing.SortOrder = pkg.SortOrder;
+                    existing.IsActive = pkg.IsActive;
+                    existing.UpdatedAt = DateTime.UtcNow;
                 }
             }
             context.SaveChanges();

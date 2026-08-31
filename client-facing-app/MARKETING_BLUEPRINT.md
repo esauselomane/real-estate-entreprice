@@ -1,8 +1,8 @@
-# Marketing Website Blueprint — Real Estate Enterprise
+# Marketing Website Blueprint — Biscove Real Estate Tech
 
 ## 1. Product Context
 
-**Real Estate Enterprise** is a multi-tenant B2B SaaS platform built for real-estate brokers, agencies and enterprise teams.
+**Biscove Real Estate Tech** is a multi-tenant B2B SaaS platform built for real-estate brokers, agencies and enterprise teams.
 
 ### Core capabilities
 - **Deal pipeline CRM** — leads, brokers and deals from first contact to signature.
@@ -93,7 +93,7 @@ Body:       text-lg (lead), text-base (default), text-sm (captions)
 ├── contact/
 │   └── page.tsx                # Contact / Lead capture
 └── login/
-    └── page.tsx                # Broker login (existing)
+    └── page.tsx                # Login (existing)
 ```
 
 ### 4.1 Landing Page (`/`)

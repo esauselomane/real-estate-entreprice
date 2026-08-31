@@ -23,7 +23,7 @@ export type TeamMember = {
 };
 
 export const site = {
-  name: process.env.NEXT_PUBLIC_SITE_NAME || "Real Estate Enterprise",
+  name: process.env.NEXT_PUBLIC_SITE_NAME || "Biscove Real Estate Tech",
   tagline: "One platform for full-lifecycle real-estate deals.",
   description:
     "CRM, property listings, automated brochure generation and market syndication — unified for brokers, agencies and enterprise teams. We align the code, you sell the abode.",
@@ -36,6 +36,42 @@ export const navigation = [
   { label: "About", href: "/about" },
   { label: "Mission", href: "/mission" },
   { label: "Contact", href: "/contact" },
+];
+
+export type HeroSlide = {
+  image: string;
+  description: string;
+  isClickable?: boolean;
+  url?: string;
+};
+
+export const heroSlides: HeroSlide[] = [
+  {
+    image: "/aligncode.png",
+    description: "",
+  },
+  {
+    image: "/pleasing.png",
+    description: "Never let a lead slip through the cracks. Our intelligent CRM transforms unverified leads into a structured, visual sales pipeline."
+  },
+  {
+    image: "/closeindays.png",
+    description: "Track every deal from the initial introduction through negotiation, while a built-in leaderboard keeps your brokerage team motivated and aligned."
+  },
+  {
+    image: "/rolebased.png",
+    description: "The platform is fully secure, offering tailored access levels for everyone involved.",
+  },
+  {
+    image: "/automatescale.png",
+    description: "Modern, scalable foundation built to elevate your real estate enterprise."
+  },
+  {
+    image: "/elevatedemo.png",
+    description: "",
+    isClickable: true,
+    url: "/contact",
+  }
 ];
 
 export const hero: { headline: string; subhead: string; badge?: string; punchline?: string } = {

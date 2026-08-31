@@ -1,4 +1,5 @@
 using Confluent.Kafka;
+using Microsoft.Extensions.Configuration;
 
 namespace Property.Microservice.Services
 {
@@ -6,13 +7,14 @@ namespace Property.Microservice.Services
     {
         private readonly IProducer<string, string> _producer;
         private readonly ProducerConfig _config;
+        private readonly string _bootstrapServers;
 
-        public KafkaPublisherService()
+        public KafkaPublisherService(IConfiguration configuration)
         {
-            // Configure baseline Kafka developer environment engine connections pointing to docker container cluster
+            _bootstrapServers = configuration["Kafka:BootstrapServers"] ?? "localhost:9092";
             _config = new ProducerConfig
             {
-                BootstrapServers = "localhost:9092",
+                BootstrapServers = _bootstrapServers,
                 AllowAutoCreateTopics = true,
                 Acks = Acks.All
             };
@@ -20,7 +22,6 @@ namespace Property.Microservice.Services
             _producer = new ProducerBuilder<string, string>(_config).Build();
         }
 
-        // Asynchronously stream events out to specific messaging topic arrays
         public async Task RaiseEventAsync(string eventTopic, string eventKey, string serializedPayloadJson)
         {
             try
@@ -40,7 +41,6 @@ namespace Property.Microservice.Services
             }
         }
 
-        // 📨 Standardize naming convention to satisfy controller compiler bindings
         public async Task PublishMessageAsync(string topicName, string routingKey, string messageValue)
         {
             using (var producer = new ProducerBuilder<string, string>(_config).Build())

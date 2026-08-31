@@ -16,6 +16,9 @@ namespace Identity.Microservice.Data
         public DbSet<UserAccount> UserAccounts { get; set; }
         public DbSet<UserAccessClaim> UserAccessClaims { get; set; }
         public DbSet<SystemRoleDefinition> SystemRoles { get; set; }
+        public DbSet<LeadCaptureRequest> LeadCaptureRequests { get; set; }
+        public DbSet<LeadWorkflow> LeadWorkflows { get; set; }
+        public DbSet<PricingPackage> PricingPackages { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

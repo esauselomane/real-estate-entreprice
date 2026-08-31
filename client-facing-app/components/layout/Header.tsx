@@ -21,7 +21,7 @@ export default function Header() {
         aria-label="Main navigation"
       >
         <Link href="/" className="flex items-center gap-3 text-xl font-display font-extrabold text-blue-600">
-          <img src="/logo.svg" alt="Real Estate Enterprise logo" className="h-8 w-auto" />
+          <img src="/logo.svg" alt="Biscove Real Estate Tech logo" className="h-8 w-auto" />
           Biscove Real Estate Tech
         </Link>
 
@@ -39,7 +39,7 @@ export default function Header() {
             href="/login"
             className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
           >
-            Broker login
+            Login
           </Link>
         </div>
 

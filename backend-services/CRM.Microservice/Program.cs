@@ -11,6 +11,9 @@ builder.Services.AddControllers();
 
 // 🔐 JWT AUTHENTICATION (issued by the Identity microservice). Tenant is resolved
 // from the bearer token claims rather than the URL — see GetCurrentTenant() in CRMController.
+var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "SuperSecretRealEstateEnterpriseCryptographicSigningKey123!";
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "Identity.Microservice";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "RealEstateApp.Client";
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -24,9 +27,9 @@ builder.Services.AddAuthentication(options =>
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = "Identity.Microservice",
-            ValidAudience = "RealEstateApp.Client",
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("SuperSecretRealEstateEnterpriseCryptographicSigningKey123!"))
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
         };
     });
 
@@ -223,6 +226,7 @@ app.UseAuthorization();
 
 // 6. Map public REST Controller endpoints
 app.MapControllers();
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "crm" }));
 
 // 7. Start the service listener engine application
 app.Run();

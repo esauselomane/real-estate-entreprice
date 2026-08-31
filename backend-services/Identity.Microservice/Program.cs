@@ -11,11 +11,12 @@ using System.Text;
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. REGISTER THE EXPLICIT CORS POLICY PIPELINE
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowViteFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:5173") // Your React client port
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials(); // Essential for auth cookie/token transfers
@@ -36,6 +37,9 @@ builder.Services.AddDbContext<IdentityDbContext>(options =>
 builder.Services.AddScoped<TokenService>();
 
 // 4. Configure Application Cryptographic JWT Verification Parameters
+var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "SuperSecretRealEstateEnterpriseCryptographicSigningKey123!";
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "Identity.Microservice";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "RealEstateApp.Client";
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -45,9 +49,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = "Identity.Microservice",
-            ValidAudience = "RealEstateApp.Client",
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("SuperSecretRealEstateEnterpriseCryptographicSigningKey123!"))
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
         };
     });
 
@@ -56,8 +60,9 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+    var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
     db.Database.EnsureCreated();
-    IdentitySeedData.EnsureSeeded(db);
+    IdentitySeedData.EnsureSeeded(db, config);
 }
 
 app.UseCors("AllowViteFrontend");
@@ -65,5 +70,6 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "identity" }));
 
 app.Run();

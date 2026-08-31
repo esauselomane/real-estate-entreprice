@@ -19,30 +19,18 @@ namespace BrochureGeneration.Worker
     {
         private readonly ILogger<BrochureKafkaConsumerWorker> _logger;
         private readonly ConsumerConfig _consumerConfig;
+        private readonly string _gatewayUrl;
         private const string TopicName = "brochure-generation-requests";
 
-        // The API gateway reverse-proxies CRM routes; the worker calls back here once a
-        // brochure has been compiled so the CRM can soft-delete the card + advance the deal.
-        private static readonly string GatewayUrl = Environment.GetEnvironmentVariable("BROCHURE_GATEWAY_URL")
-            ?? "http://localhost:5000/gateway";
         private static readonly HttpClient _http = new HttpClient();
 
-        // Centralized Strong-Typed Typography Style Sheet Matrix to stop compilation breaks
-        private readonly TextStyle _titleStyle = TextStyle.Default.FontFamily("Arial").FontSize(24).Bold().Color("#FFFFFF");
-        private readonly TextStyle _subTitleStyle = TextStyle.Default.FontFamily("Arial").FontSize(16).Bold().Color("#38BDF8");
-        private readonly TextStyle _headerStyle = TextStyle.Default.FontFamily("Arial").FontSize(14).Bold().Color("#0F172A");
-        private readonly TextStyle _sectionHeaderStyle = TextStyle.Default.FontFamily("Arial").FontSize(11).Bold().Color("#475569");
-        private readonly TextStyle _bodyStyle = TextStyle.Default.FontFamily("Arial").FontSize(10).Color("#334155");
-        private readonly TextStyle _metaStyle = TextStyle.Default.FontFamily("Arial").FontSize(9).Italic().Color("#94A3B8");
-        private readonly TextStyle _alertHeaderStyle = TextStyle.Default.FontFamily("Arial").FontSize(10).Bold().Color("#1E40AF");
-        private readonly TextStyle _alertPriceStyle = TextStyle.Default.FontFamily("Arial").FontSize(16).Bold().Color("#1E3A8A");
-
-        public BrochureKafkaConsumerWorker(ILogger<BrochureKafkaConsumerWorker> logger)
+        public BrochureKafkaConsumerWorker(ILogger<BrochureKafkaConsumerWorker> logger, IConfiguration configuration)
         {
             _logger = logger;
+            _gatewayUrl = configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
             _consumerConfig = new ConsumerConfig
             {
-                BootstrapServers = "localhost:9092",
+                BootstrapServers = configuration["Kafka:BootstrapServers"] ?? "localhost:9092",
                 GroupId = "brochure-generator-group",
                 AutoOffsetReset = AutoOffsetReset.Earliest,
                 EnableAutoCommit = false
