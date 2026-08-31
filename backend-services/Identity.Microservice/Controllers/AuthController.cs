@@ -3,24 +3,25 @@ using Microsoft.EntityFrameworkCore;
 using Identity.Microservice.Data;
 using Identity.Microservice.Models;
 using Identity.Microservice.Services;
+using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 
 namespace Identity.Microservice.Controllers
 {
-    // Configure public routing maps pointing through our API gateway setup structure
     [ApiController]
     [Route("api/auth")]
     public class AuthController : ControllerBase
     {
         private readonly IdentityDbContext _context;
         private readonly TokenService _tokenService;
+        private readonly ILogger<AuthController> _logger;
 
-        // Inject our localized database context and JWT generation services via dependency injection
-        public AuthController(IdentityDbContext context, TokenService tokenService)
+        public AuthController(IdentityDbContext context, TokenService tokenService, ILogger<AuthController> logger)
         {
             _context = context;
             _tokenService = tokenService;
+            _logger = logger;
         }
 
         // --- 📥 TRANSFER DATA STRUCUTRE MODEL BINDINGS ---
@@ -38,28 +39,32 @@ namespace Identity.Microservice.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-            // 1. Fetch user by email including their explicit tenant permission parameters
+            _logger.LogInformation("Login attempt for email: {Email}", request.Email);
+
             var user = await _context.UserAccounts
                 .FirstOrDefaultAsync(u => u.Email == request.Email && u.AccountStatus == "Active");
 
             if (user == null)
             {
+                _logger.LogWarning("Login failed: no active user found for email: {Email}", request.Email);
                 return Unauthorized(new { message = "Invalid credential parameters provided." });
             }
 
-            // 2. Validate password signatures (Plain-text comparison for local testing build)
             if (user.PasswordHash != request.Password)
             {
+                _logger.LogWarning("Login failed: password mismatch for user: {UserId} ({Email})", user.UserId, user.Email);
                 return Unauthorized(new { message = "Invalid credential parameters provided." });
             }
 
-            // 3. Fetch custom granular access control claims registered for this entity
+            _logger.LogInformation("Login successful for user: {UserId} ({Email}) Role: {Role} Tenant: {TenantId}",
+                user.UserId, user.Email, user.SystemRole, user.TenantId);
+
             var permissions = await _context.UserAccessClaims
                 .FirstOrDefaultAsync(p => p.UserId == user.UserId);
 
             if (permissions == null)
             {
-                // Instantiate a default permissions block safe fallback parameters if none exist
+                _logger.LogWarning("No UserAccessClaims found for user: {UserId}, using defaults", user.UserId);
                 permissions = new UserAccessClaim { UserId = user.UserId };
             }
 
@@ -85,13 +90,16 @@ namespace Identity.Microservice.Controllers
         [HttpPost("register-user")]
         public async Task<IActionResult> RegisterUser([FromBody] UserAccount newUser)
         {
-            // 🛡️ Provisioning authority is now data-driven: the role name and its scope
-            // (platform vs. agency) are validated against the configurable SystemRoles
-            // table so the System Admin "Roles" tab is the single source of truth.
+            _logger.LogInformation("User registration requested: Email={Email} Role={Role} Tenant={TenantId} By={CallerUserId}",
+                newUser.Email, newUser.SystemRole, newUser.TenantId, User?.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+
             var roleDef = await _context.SystemRoles
                 .FirstOrDefaultAsync(r => r.Name == newUser.SystemRole && r.IsActive);
             if (roleDef == null)
+            {
+                _logger.LogWarning("Registration rejected: unsupported role '{Role}' for email {Email}", newUser.SystemRole, newUser.Email);
                 return BadRequest(new { message = "Unsupported account role." });
+            }
 
             var callerRole = GetCurrentCanonicalRole();
             if (callerRole == null) return Forbid();
@@ -143,6 +151,9 @@ namespace Identity.Microservice.Controllers
 
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("User registered: UserId={UserId} Email={Email} Role={Role} Tenant={TenantId}",
+                newUser.UserId, newUser.Email, newUser.SystemRole, newUser.TenantId);
+
             return Ok(new { 
                 message = "New multi-tenant identity profile successfully provisioned.",
                 userId = newUser.UserId,
@@ -154,17 +165,17 @@ namespace Identity.Microservice.Controllers
         [HttpPost("forgot-password")]
         public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
         {
-            // 1. Verify existence of the targeted target address records lookup
+            _logger.LogInformation("Password reset requested for email: {Email}", request.Email);
+
             var userExists = await _context.UserAccounts.AnyAsync(u => u.Email == request.Email);
             
-            // Security Best Practice: Always return a generic success message even if email doesn't exist
-            // This prevents malicious entities from harvesting valid usernames or account identifiers.
             if (!userExists)
             {
+                _logger.LogWarning("Password reset: no active account for email: {Email}", request.Email);
                 return Ok(new { message = "If the account path matches an active profile, a recovery reset link has been dispatched." });
             }
 
-            // 2. Generate a secure, unique password reset transaction identifier
+            _logger.LogInformation("Password reset token generated for email: {Email}", request.Email);
             var recoveryToken = Guid.NewGuid().ToString();
             
             // In a production build, this token would be stored in the database with an expiration time
@@ -209,11 +220,19 @@ namespace Identity.Microservice.Controllers
         public async Task<IActionResult> DisableUser(string userId)
         {
             var callerRole = GetCurrentCanonicalRole();
-            if (callerRole == null) return Forbid();
+            var callerUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-            // Only administrative roles may disable accounts. Agency-level admins operate
-            // within their tenant; platform admins operate across tenants.
-            if (callerRole != "AgencyAdmin" && callerRole != "PlatformAdmin") return Forbid();
+            if (callerRole == null)
+            {
+                _logger.LogWarning("DisableUser: forbidden — caller {CallerUserId} has no resolvable role", callerUserId);
+                return Forbid();
+            }
+
+            if (callerRole != "AgencyAdmin" && callerRole != "PlatformAdmin")
+            {
+                _logger.LogWarning("DisableUser: forbidden — caller {CallerUserId} role {CallerRole} cannot disable users", callerUserId, callerRole);
+                return Forbid();
+            }
 
             var callerTenantId = User.FindFirst("TenantId")?.Value;
             var callerUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -239,6 +258,8 @@ namespace Identity.Microservice.Controllers
 
             target.AccountStatus = "Disabled";
             await _context.SaveChangesAsync();
+            _logger.LogInformation("User disabled: TargetUserId={TargetUserId} TargetEmail={TargetEmail} By={CallerUserId}",
+                target.UserId, target.Email, callerUserId);
             return Ok(new { message = $"Account {target.Email} disabled successfully." });
         }
 
@@ -247,10 +268,24 @@ namespace Identity.Microservice.Controllers
         public async Task<IActionResult> GetUsers()
         {
             var callerRole = GetCurrentCanonicalRole();
-            if (callerRole == null) return Forbid();
-            if (callerRole != "PlatformAdmin" && callerRole != "AgencyAdmin") return Forbid();
+            var callerUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (callerRole == null)
+            {
+                _logger.LogWarning("GetUsers: forbidden — caller {CallerUserId} has no resolvable role", callerUserId);
+                return Forbid();
+            }
+            if (callerRole != "PlatformAdmin" && callerRole != "AgencyAdmin")
+            {
+                _logger.LogWarning("GetUsers: forbidden — caller {CallerUserId} role {CallerRole}", callerUserId, callerRole);
+                return Forbid();
+            }
 
             var callerTenantId = User.FindFirst("TenantId")?.Value;
+            if (callerRole == "PlatformAdmin")
+                _logger.LogInformation("GetUsers: listing all tenant users by {CallerUserId}", callerUserId);
+            else
+                _logger.LogInformation("GetUsers: listing tenant {TenantId} users by {CallerUserId}", callerTenantId, callerUserId);
+
             var users = callerRole == "PlatformAdmin"
                 ? await _context.UserAccounts.ToListAsync()
                 : await _context.UserAccounts.Where(u => u.TenantId == callerTenantId).ToListAsync();
@@ -296,6 +331,8 @@ namespace Identity.Microservice.Controllers
 
             if (target.UserId == callerUserId) return BadRequest(new { message = "You cannot change your own role." });
 
+            _logger.LogInformation("User role updated: TargetUserId={TargetUserId} NewRole={NewRole} By={CallerUserId}",
+                target.UserId, request.SystemRole, callerUserId);
             target.SystemRole = request.SystemRole;
             await _context.SaveChangesAsync();
             return Ok(new { message = "User role updated.", userId = target.UserId, systemRole = target.SystemRole });

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Identity.Microservice.Data;
 using Identity.Microservice.Models;
 using System.Linq;
@@ -8,19 +9,17 @@ using System.Security.Claims;
 
 namespace Identity.Microservice.Controllers
 {
-    // 📋 Public lead/intake capture for the website (Bibsy chatbot + pricing page).
-    // Route sits under the existing /api/system/* umbrella so it is reached through
-    // the gateway at /gateway/system/lead-requests — no new gateway route required.
-    // POST is AllowAnonymous (the website is unauthenticated); GET/PUT are SuperAdmin-only.
     [ApiController]
     [Route("api/system/lead-requests")]
     public class LeadCaptureController : ControllerBase
     {
         private readonly IdentityDbContext _context;
+        private readonly ILogger<LeadCaptureController> _logger;
 
-        public LeadCaptureController(IdentityDbContext context)
+        public LeadCaptureController(IdentityDbContext context, ILogger<LeadCaptureController> logger)
         {
             _context = context;
+            _logger = logger;
         }
 
         // 🟢 PUBLIC — capture a new lead from the marketing website.
@@ -28,10 +27,19 @@ namespace Identity.Microservice.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> CreateLead([FromBody] LeadCaptureRequestDto dto)
         {
+            _logger.LogInformation("Lead capture request: Email={Email} Source={Source} UserType={UserType}",
+                dto?.Email, dto?.Source ?? "website", dto?.UserType);
+
             if (dto == null || string.IsNullOrWhiteSpace(dto.FullName) || string.IsNullOrWhiteSpace(dto.Email))
+            {
+                _logger.LogWarning("Lead capture rejected: missing required fields");
                 return BadRequest(new { message = "Full name and email are required." });
+            }
             if (!dto.Email.Contains("@") || !dto.Email.Contains(".", StringComparison.Ordinal))
+            {
+                _logger.LogWarning("Lead capture rejected: invalid email format for {Email}", dto.Email);
                 return BadRequest(new { message = "A valid email is required." });
+            }
 
             Enum.TryParse<LeadUserType>(dto.UserType, true, out var userType);
             LeadPackage? pkg = null;
@@ -58,6 +66,9 @@ namespace Identity.Microservice.Controllers
             _context.LeadCaptureRequests.Add(lead);
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("Lead created: LeadId={LeadId} Email={Email} Name={FullName}",
+                lead.Id, lead.Email, lead.FullName);
+
             return Ok(new
             {
                 message = "Your details have been captured. A broker will contact you shortly.",
@@ -76,13 +87,16 @@ namespace Identity.Microservice.Controllers
 
          // 🔐 SuperAdmin — list leads, optionally filtered by status.
          // Returns X-Total-Count header for client-side infinite scroll pagination.
-         [HttpGet]
-         [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
-         public async Task<IActionResult> GetLeads([FromQuery] string? status = null, [FromQuery] int page = 1)
-         {
-             IQueryable<LeadCaptureRequest> query = _context.LeadCaptureRequests.AsNoTracking().OrderByDescending(l => l.CreatedAt);
-             if (!string.IsNullOrWhiteSpace(status) && status != "all")
-                 query = query.Where(l => l.Status == Enum.Parse<LeadStatus>(status, true));
+        [HttpGet]
+        [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
+        public async Task<IActionResult> GetLeads([FromQuery] string? status = null, [FromQuery] int page = 1)
+        {
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            _logger.LogInformation("GetLeads: Page={Page} Status={Status} RequestedBy={Caller}", page, status ?? "all", caller);
+
+            IQueryable<LeadCaptureRequest> query = _context.LeadCaptureRequests.AsNoTracking().OrderByDescending(l => l.CreatedAt);
+            if (!string.IsNullOrWhiteSpace(status) && status != "all")
+                query = query.Where(l => l.Status == Enum.Parse<LeadStatus>(status, true));
 
              var projection = query.Select(l => new
              {
@@ -102,9 +116,11 @@ namespace Identity.Microservice.Controllers
                  l.UpdatedAt
              });
 
-             var (items, total) = await PageAsync(projection, page);
-             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
-             return Ok(items);
+            var (items, total) = await PageAsync(projection, page);
+              HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+              _logger.LogInformation("GetLeads: Returned {Count} leads (page {Page}) out of {Total} total, status filter: {Status}",
+                  items.Count, page, total, status ?? "all");
+              return Ok(items);
          }
 
         // 🔐 SuperAdmin — advance a lead through the funnel.
@@ -112,8 +128,13 @@ namespace Identity.Microservice.Controllers
         [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
         public async Task<IActionResult> UpdateStatus(int id, [FromBody] LeadStatusUpdateDto dto)
         {
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             var lead = await _context.LeadCaptureRequests.FirstOrDefaultAsync(l => l.Id == id);
-            if (lead == null) return NotFound(new { message = "Lead not found." });
+            if (lead == null)
+            {
+                _logger.LogWarning("UpdateStatus: LeadId={LeadId} not found, caller={Caller}", id, caller);
+                return NotFound(new { message = "Lead not found." });
+            }
 
             if (string.IsNullOrWhiteSpace(dto?.Status) ||
                 !Enum.TryParse<LeadStatus>(dto.Status, true, out var newStatus))
@@ -124,6 +145,9 @@ namespace Identity.Microservice.Controllers
             lead.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("Lead status updated: LeadId={LeadId} NewStatus={NewStatus} By={Caller}",
+                lead.Id, lead.Status, caller);
+
             return Ok(new
             {
                 message = "Lead status updated.",
@@ -133,12 +157,17 @@ namespace Identity.Microservice.Controllers
         }
 
         // 🔐 SuperAdmin — update editable lead details (name, email, phone, company, package, etc.).
-        [HttpPut("{id:int}")]
-        [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
-        public async Task<IActionResult> UpdateLead(int id, [FromBody] LeadCaptureRequestDto dto)
-        {
-            var lead = await _context.LeadCaptureRequests.FirstOrDefaultAsync(l => l.Id == id);
-            if (lead == null) return NotFound(new { message = "Lead not found." });
+         [HttpPut("{id:int}")]
+         [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
+         public async Task<IActionResult> UpdateLead(int id, [FromBody] LeadCaptureRequestDto dto)
+         {
+             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+             var lead = await _context.LeadCaptureRequests.FirstOrDefaultAsync(l => l.Id == id);
+             if (lead == null)
+             {
+                 _logger.LogWarning("UpdateLead: LeadId={LeadId} not found, caller={Caller}", id, caller);
+                 return NotFound(new { message = "Lead not found." });
+             }
 
             if (dto == null || string.IsNullOrWhiteSpace(dto.FullName) || string.IsNullOrWhiteSpace(dto.Email))
                 return BadRequest(new { message = "Full name and email are required." });
@@ -165,6 +194,8 @@ namespace Identity.Microservice.Controllers
             lead.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Lead updated: LeadId={LeadId} By={Caller}", lead.Id, caller);
 
             return Ok(new
             {

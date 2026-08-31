@@ -3,6 +3,10 @@ using Ocelot.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
+
 builder.Configuration.AddJsonFile("ocelot.json", optional: false, reloadOnChange: true);
 
 var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "")
@@ -25,6 +29,21 @@ builder.Services.AddOcelot(builder.Configuration);
 var app = builder.Build();
 
 app.UseCors("CorsPolicy");
+
+app.Use(async (context, next) =>
+{
+    var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+    var method = context.Request.Method;
+    var path = context.Request.Path;
+    var traceId = context.TraceIdentifier;
+    logger.LogInformation("Request started: {Method} {Path} TraceId={TraceId}", method, path, traceId);
+
+    await next();
+
+    var statusCode = context.Response.StatusCode;
+    var level = statusCode >= 500 ? LogLevel.Error : statusCode >= 400 ? LogLevel.Warning : LogLevel.Information;
+    logger.Log(level, "Request completed: {Method} {Path} TraceId={TraceId} Status={Status}", method, path, traceId, statusCode);
+});
 
 await app.UseOcelot();
 

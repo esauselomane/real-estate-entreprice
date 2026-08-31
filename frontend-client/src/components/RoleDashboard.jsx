@@ -164,7 +164,7 @@ export default function RoleDashboard() {
     <div className="space-y-6">
       <div>
         <p className="text-[10px] uppercase tracking-[.2em] text-slate-500">{roleLabels[role] || role}</p>
-        <h3 className="text-2xl font-bold text-white">Welcome, {profile?.name || 'User'}</h3>
+        <h3 className="text-2xl font-bold text-white">Welcome back, {profile?.name || 'User'}</h3>
         <p className="text-sm text-slate-400 mt-1">Your workspace only surfaces information appropriate to your role.</p>
       </div>
 
