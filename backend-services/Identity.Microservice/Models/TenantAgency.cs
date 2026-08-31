@@ -18,8 +18,13 @@ namespace Identity.Microservice.Models
         
         public string HeadquartersAddress { get; set; } = string.Empty;
         
-        public string OperationalStatus { get; set; } = "Active"; // Active, De-registered
+        public string OperationalStatus { get; set; } = "Active"; // Active, TrialPending, TrialExpired, De-registered
         
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        // 🎯 TRIAL ONBOARDING FIELDS
+        public bool IsTrial { get; set; } = false;
+        public DateTime? TrialStartDate { get; set; }
+        public DateTime? TrialEndDate { get; set; }
     }
 }

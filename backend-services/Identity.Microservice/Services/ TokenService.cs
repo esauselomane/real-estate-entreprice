@@ -28,7 +28,11 @@ namespace Identity.Microservice.Services
                 // Granular Runtime Permissions System Checks
                 new Claim("CanDelete", permissions.CanDeleteProperties.ToString().ToLower()),
                 new Claim("CanExportReports", permissions.CanExportFinancialReports.ToString().ToLower()),
-                new Claim("CanBypassValuation", permissions.CanBypassValuationStages.ToString().ToLower())
+                new Claim("CanBypassValuation", permissions.CanBypassValuationStages.ToString().ToLower()),
+
+                // 🎯 Trial onboarding claims (carried to all downstream services for gating)
+                new Claim("IsTrial", account.IsTrial.ToString().ToLower()),
+                new Claim("TrialEndDate", account.TrialEndDate?.ToString("o") ?? "")
             };
 
             var tokenSignature = new JwtSecurityToken(

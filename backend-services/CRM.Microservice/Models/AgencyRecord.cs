@@ -21,8 +21,13 @@ namespace CRM.Microservice.Models
         public string CompanyLogoUrl { get; set; } = string.Empty;
         public string ContactEmail { get; set; } = string.Empty;
         public string HeadquartersAddress { get; set; } = string.Empty;
-        public string OperationalStatus { get; set; } = "Active";
+        public string OperationalStatus { get; set; } = "Active"; // Active, TrialPending, TrialExpired, De-registered
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        // 🎯 TRIAL ONBOARDING FIELDS
+        public bool IsTrial { get; set; } = false;
+        public DateTime? TrialStartDate { get; set; }
+        public DateTime? TrialEndDate { get; set; }
 
         public ICollection<ContactPerson> ContactPersons { get; set; } = new List<ContactPerson>();
     }

@@ -4,6 +4,8 @@ using Identity.Microservice.Data;
 using Identity.Microservice.Models;
 using Identity.Microservice.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Hosting;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 
@@ -16,12 +18,16 @@ namespace Identity.Microservice.Controllers
         private readonly IdentityDbContext _context;
         private readonly TokenService _tokenService;
         private readonly ILogger<AuthController> _logger;
+        private readonly IEmailService _emailService;
+        private readonly IConfiguration _configuration;
 
-        public AuthController(IdentityDbContext context, TokenService tokenService, ILogger<AuthController> logger)
+        public AuthController(IdentityDbContext context, TokenService tokenService, ILogger<AuthController> logger, IEmailService emailService, IConfiguration configuration)
         {
             _context = context;
             _tokenService = tokenService;
             _logger = logger;
+            _emailService = emailService;
+            _configuration = configuration;
         }
 
         // --- 📥 TRANSFER DATA STRUCUTRE MODEL BINDINGS ---
@@ -56,6 +62,14 @@ namespace Identity.Microservice.Controllers
                 return Unauthorized(new { message = "Invalid credential parameters provided." });
             }
 
+            // 2b. Check trial expiry
+            if (user.IsTrial && user.TrialEndDate.HasValue && DateTime.UtcNow > user.TrialEndDate.Value)
+            {
+                _logger.LogWarning("Login blocked: trial expired for user: {UserId} ({Email}) Agency: {TenantId}",
+                    user.UserId, user.Email, user.TenantId);
+                return Unauthorized(new { message = "Trial Expired. Please contact support to continue." });
+            }
+
             _logger.LogInformation("Login successful for user: {UserId} ({Email}) Role: {Role} Tenant: {TenantId}",
                 user.UserId, user.Email, user.SystemRole, user.TenantId);
 
@@ -81,7 +95,9 @@ namespace Identity.Microservice.Controllers
                     name = user.FullName,
                     email = user.Email,
                     role = user.SystemRole,
-                    avatar = user.AvatarUrl
+                    avatar = user.AvatarUrl,
+                    isTrialActive = user.IsTrial && user.TrialEndDate.HasValue && DateTime.UtcNow <= user.TrialEndDate.Value,
+                    trialExpiresAt = user.TrialEndDate?.ToString("o")
                 }
             });
         }
@@ -335,6 +351,159 @@ namespace Identity.Microservice.Controllers
             target.SystemRole = request.SystemRole;
             await _context.SaveChangesAsync();
             return Ok(new { message = "User role updated.", userId = target.UserId, systemRole = target.SystemRole });
+        }
+
+        // --- 🎯 ENDPOINT: TRIAL ONBOARDING — create agency + pending admin user, send activation email ---
+        [HttpPost("trial/onboarding")]
+        [AllowAnonymous]
+        public async Task<IActionResult> TrialOnboarding([FromBody] TrialOnboardingRequest request)
+        {
+            _logger.LogInformation("Trial onboarding requested for email: {Email} Agency: {AgencyName}",
+                request.AdminEmail, request.AgencyName);
+
+            if (string.IsNullOrWhiteSpace(request.AgencyName) || string.IsNullOrWhiteSpace(request.AdminEmail) || string.IsNullOrWhiteSpace(request.AdminFullName))
+            {
+                _logger.LogWarning("Trial onboarding rejected: missing required fields");
+                return BadRequest(new { message = "Company name, admin full name, and admin email are required." });
+            }
+
+            // Check for duplicate email
+            var existingUser = await _context.UserAccounts.AnyAsync(u => u.Email == request.AdminEmail);
+            if (existingUser)
+            {
+                _logger.LogWarning("Trial onboarding: email already registered: {Email}", request.AdminEmail);
+                return BadRequest(new { message = "An account with this email already exists. Please log in." });
+            }
+
+            // Generate a unique tenant ID for the new trial agency
+            var tenantId = "TEN-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
+            var activationToken = Guid.NewGuid().ToString("N");
+            var trialStartDate = DateTime.UtcNow;
+            var trialEndDate = trialStartDate.AddDays(14);
+
+            // Create TenantAgency record (Identity DB)
+            var tenant = new TenantAgency
+            {
+                TenantId = tenantId,
+                AgencyName = request.AgencyName,
+                ContactEmail = request.AdminEmail,
+                HeadquartersAddress = request.HeadquartersAddress,
+                OperationalStatus = "TrialPending",
+                IsTrial = true,
+                TrialStartDate = trialStartDate,
+                TrialEndDate = trialEndDate,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.TenantAgencies.Add(tenant);
+
+            // Create the pending admin user account
+            var adminUser = new UserAccount
+            {
+                UserId = "USR-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper(),
+                TenantId = tenantId,
+                FullName = request.AdminFullName,
+                Email = request.AdminEmail,
+                PasswordHash = string.Empty, // No password until activation
+                SystemRole = "PlatformAdmin", // Agency admin gets PlatformAdmin since it's a trial agency
+                AccountStatus = "PendingActivation", // Cannot log in until password is set
+                IsTrial = true,
+                TrialStartDate = trialStartDate,
+                TrialEndDate = trialEndDate,
+                ActivationToken = activationToken,
+                ActivationTokenExpiry = trialStartDate.AddHours(48),
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.UserAccounts.Add(adminUser);
+            _context.UserAccessClaims.Add(new UserAccessClaim
+            {
+                UserId = adminUser.UserId,
+                CanDeleteProperties = false,
+                CanExportFinancialReports = true,
+                CanBypassValuationStages = false
+            });
+
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Trial onboarding complete: TenantId={TenantId} UserId={UserId} Email={Email} TrialEnds={TrialEndDate}",
+                tenantId, adminUser.UserId, request.AdminEmail, trialEndDate);
+
+            // Send activation email with secure link
+            var frontendUrl = _configuration.GetSection("Urls:FrontendClient").Get<string>() ?? $"{Request.Scheme}://{Request.Host}";
+            var activationLink = $"{frontendUrl}/set-password?token={activationToken}";
+            await _emailService.SendPasswordSetupEmailAsync(
+                request.AdminEmail, request.AdminFullName, activationLink, request.AgencyName);
+
+            return Ok(new
+            {
+                message = "Trial agency created. Check your email to set your password and activate your account.",
+                tenantId = tenantId,
+                trialEndDate = trialEndDate,
+                adminEmail = request.AdminEmail
+            });
+        }
+
+         // --- 🔐 ENDPOINT: SET PASSWORD via activation token — activates user and agency ---
+         [HttpPost("trial/set-password")]
+        [AllowAnonymous]
+        public async Task<IActionResult> SetPassword([FromBody] SetPasswordRequest request)
+        {
+            _logger.LogInformation("SetPassword requested for token: {TokenPrefix}***",
+                request.ActivationToken?.Substring(0, Math.Min(8, request.ActivationToken.Length)) ?? "null");
+
+            if (string.IsNullOrWhiteSpace(request.ActivationToken))
+            {
+                return BadRequest(new { message = "Activation token is required." });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 6)
+            {
+                return BadRequest(new { message = "Password must be at least 6 characters." });
+            }
+
+            if (request.NewPassword != request.ConfirmPassword)
+            {
+                return BadRequest(new { message = "Passwords do not match." });
+            }
+
+            var user = await _context.UserAccounts
+                .FirstOrDefaultAsync(u => u.ActivationToken == request.ActivationToken);
+
+            if (user == null)
+            {
+                _logger.LogWarning("SetPassword: invalid activation token");
+                return BadRequest(new { message = "Invalid or expired activation token." });
+            }
+
+            if (user.ActivationTokenExpiry.HasValue && DateTime.UtcNow > user.ActivationTokenExpiry.Value)
+            {
+                _logger.LogWarning("SetPassword: token expired for user: {UserId}", user.UserId);
+                return BadRequest(new { message = "This activation link has expired. Please contact support." });
+            }
+
+            // Set the password and activate the account
+            user.PasswordHash = request.NewPassword;
+            user.AccountStatus = "Active";
+            user.ActivationToken = string.Empty;
+            await _context.SaveChangesAsync();
+
+            // Activate the tenant agency
+            var tenant = await _context.TenantAgencies.FirstOrDefaultAsync(t => t.TenantId == user.TenantId);
+            if (tenant != null)
+            {
+                tenant.OperationalStatus = "Active";
+                await _context.SaveChangesAsync();
+            }
+
+            _logger.LogInformation("Password set and account activated: UserId={UserId} Email={Email} Tenant={TenantId}",
+                user.UserId, user.Email, user.TenantId);
+
+            return Ok(new
+            {
+                message = "Password set successfully. Your account is now active.",
+                userId = user.UserId,
+                tenantId = user.TenantId,
+                role = user.SystemRole
+            });
         }
 
         // 🛡️ Resolve the caller's canonical role, normalizing the legacy seed aliases

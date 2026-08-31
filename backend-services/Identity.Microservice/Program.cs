@@ -35,6 +35,10 @@ builder.Services.AddDbContext<IdentityDbContext>(options =>
 
 // 3. Inject our Secure Token Lifecycle Services
 builder.Services.AddScoped<TokenService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
+
+// 🎯 Email configuration binding
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 
 // 4. Configure Application Cryptographic JWT Verification Parameters
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "SuperSecretRealEstateEnterpriseCryptographicSigningKey123!";

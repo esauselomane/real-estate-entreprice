@@ -843,6 +843,22 @@ namespace Property.Microservice.Controllers
                 return NotFound(new { message = "Target property record not found." });
             }
 
+            // 🎯 TRIAL RESTRICTION: AgencyAdmin and Broker roles on trial agencies cannot compile brochures
+            var canonicalRole = GetCurrentCanonicalRole();
+            var isTrialClaim = User.FindFirst("IsTrial")?.Value;
+            var trialEndDateClaim = User.FindFirst("TrialEndDate")?.Value;
+
+            if (isTrialClaim == "true" && (canonicalRole == "AgencyAdmin" || canonicalRole == "Broker"))
+            {
+                _logger.LogWarning("GenerateBrochure: blocked — trial restriction for Role={Role} PropertyId={PropertyId} DealId={DealId}",
+                    canonicalRole, payload.PropertyId, payload.DealId);
+                return Forbid(new
+                {
+                    message = "Brochure compilation is restricted during the trial period.",
+                    trialEndDate = trialEndDateClaim
+                }.ToString());
+            }
+
             await _kafkaPublisher.PublishMessageAsync(
                 "brochure-generation-requests",
                 payload.DealId.ToString(),

@@ -58,14 +58,15 @@ export default function Hero() {
                 <ArrowRight className="h-5 w-5" />
               </button>
             </Link>
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-6 py-3 text-base font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-              onClick={() => setShowVideo(true)}
-            >
-              <Play className="h-4 w-4" />
-              Watch overview
-            </button>
+             <Link href="/onboarding">
+               <button
+                 type="button"
+                 className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-6 py-3 text-base font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+               >
+                 <Play className="h-4 w-4" />
+                 Start Trial
+               </button>
+             </Link>
           </div>
         </div>
 

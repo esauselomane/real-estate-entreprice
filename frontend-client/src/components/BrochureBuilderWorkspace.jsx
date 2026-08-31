@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Sparkles, Printer, Image, CheckCircle2, User, Phone, Mail, Building2, MapPin, Layers, Loader2, ArrowLeft } from 'lucide-react';
+import { Sparkles, Printer, Image, CheckCircle2, User, Phone, Mail, Building2, MapPin, Layers, Loader2, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import { crmService } from '../services/crmService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { isTrialUser, getTrialExpiry } from '../services/authService.js';
 
 export default function BrochureBuilderWorkspace({ dealData, onBack }) {
   const { activeProfile } = useAuth();
@@ -29,6 +30,17 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
     phoneNumber: activeProfile.phone || 'No phone on file',
     companyReferenceNumber: `PROP-REF-${dealData?.dealId || '991'}`,
     companyName: activeProfile.tenantId || 'Agency workspace'
+  };
+
+  const isOnTrial = isTrialUser();
+  const trialExpiresAt = getTrialExpiry();
+  const isTrialExpired = isOnTrial && trialExpiresAt && new Date(trialExpiresAt) < new Date();
+
+  const formatTrialExpiry = (expiry) => {
+    if (!expiry) return '';
+    try {
+      return new Date(expiry).toLocaleDateString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch { return ''; }
   };
 
   // --- 📡 RESUME an existing brochure card when the builder is re-opened on a deal ---
@@ -105,9 +117,15 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
   };
 
   // --- 📨 PERSIST CARD -> DISPATCH KAFKA -> POLL FOR WORKER COMPLETION ---
-  const handleTriggerKafkaGeneration = async (e) => {
-    e.preventDefault();
-    if (!selectedUnits.length) {
+   const handleTriggerKafkaGeneration = async (e) => {
+     e.preventDefault();
+
+     if (isTrialExpired) {
+       setFeedbackMessage('Your trial has expired. Upgrade to a paid plan to generate brochures.');
+       return;
+     }
+
+     if (!selectedUnits.length) {
       setFeedbackMessage('Select at least one property unit to present to the client.');
       return;
     }
@@ -223,6 +241,30 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
   return (
     <div className="space-y-6 animate-fade-in pb-12">
 
+      {isOnTrial && !isTrialExpired && (
+        <div className="flex items-start gap-3 rounded-2xl bg-amber-950/50 border border-amber-900 p-4">
+          <AlertTriangle size={20} className="text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-bold text-amber-300 uppercase tracking-wider">Trial Period Active</p>
+            <p className="text-xs text-amber-200 mt-0.5">
+              Your 14-day free trial expires on {formatTrialExpiry(trialExpiresAt)}.
+              Upgrade to a paid plan to continue generating brochures after expiry.
+            </p>
+          </div>
+        </div>
+      )}
+      {isTrialExpired && (
+        <div className="flex items-start gap-3 rounded-2xl bg-red-950/50 border border-red-900 p-4">
+          <AlertTriangle size={20} className="text-red-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-bold text-red-300 uppercase tracking-wider">Trial Expired</p>
+            <p className="text-xs text-red-200 mt-0.5">
+              Your trial period has ended. Please upgrade to a paid plan to continue using this feature.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* 🧭 CONTROL NAVIGATION ACTION PANEL BAR ROW */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-4">
         <div className="flex items-center gap-3">
@@ -251,7 +293,7 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
 
         <button
           onClick={handleTriggerKafkaGeneration}
-          disabled={isCompilingPdf || cardStatus === 'generated'}
+          disabled={isCompilingPdf || cardStatus === 'generated' || isTrialExpired}
           className="bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-lg transition-colors cursor-pointer flex items-center gap-2"
         >
           {isCompilingPdf ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}

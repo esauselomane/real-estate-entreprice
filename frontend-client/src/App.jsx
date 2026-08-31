@@ -10,6 +10,7 @@ import ReportsWorkspace from './components/ReportsWorkspace.jsx';
 import SystemAdminWorkspace from './components/SystemAdminWorkspace.jsx';
 import BrochureBuilderWorkspace from './components/BrochureBuilderWorkspace.jsx';
 import RoleDashboard from './components/RoleDashboard.jsx';
+import SetPassword from './components/SetPassword.jsx';
 
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useAppUi } from './contexts/AppUiContext.jsx';
@@ -40,6 +41,12 @@ export default function App() {
 
   const { currentAgency } = useAgency();
 
+  const activationToken = !isLoggedIn ? new URLSearchParams(window.location.search).get('token') : null;
+
+  const handlePasswordSet = () => {
+    window.location.href = window.location.pathname;
+  };
+
   // --- Login form local bindings (form-specific, not shared app state) ---
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -63,6 +70,11 @@ export default function App() {
       await register(registerName, registerEmail, registerPassword, registerRole);
     } catch { /* error handled in AuthContext */ }
   };
+
+  // 0. ACTIVATION GATE: If not logged in but a token query param is present, show set-password
+  if (!isLoggedIn && activationToken) {
+    return <SetPassword activationToken={activationToken} onPasswordSet={handlePasswordSet} />;
+  }
 
   // 1. GATEWAY SCREEN VIEW: Render security login card layout if unauthenticated
   if (!isLoggedIn) {

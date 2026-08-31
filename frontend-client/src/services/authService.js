@@ -66,13 +66,23 @@ export const authService = {
     }
   },
 
+  // --- 📝 TRIAL ACCOUNT: Set password from activation token ---
+  setTrialPassword: async (token, password) => {
+    try {
+      const response = await apiClient.post('/auth/trial/set-password', { token, password });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Failed to set trial password.';
+    }
+  },
+
     // --- 👤 LOCAL ACCOUNT STATUS CLEARING ---
     logout: () => {
      localStorage.removeItem('user_session_jwt');
      localStorage.removeItem('user_profile_data');
      window.location.reload(); // Instantly hard resets the active canvas back to the login screen gate
-   }
- };
+    }
+  };
 
 // 🛡️ Resolve the caller's canonical role from the persisted profile for UI gating.
 // Mirrors the backend normalization (SuperAdmin->PlatformAdmin, etc.) so the shell
@@ -90,3 +100,18 @@ export const isReadOnlyRole = () => {
 };
 
 export const canManageUnits = () => !isReadOnlyRole();
+
+// 🔍 Check trial status from the persisted profile (set during login JWT decode).
+export const isTrialUser = () => {
+  try {
+    const profile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
+    return profile.isTrialActive === true;
+  } catch { return false; }
+};
+
+export const getTrialExpiry = () => {
+  try {
+    const profile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
+    return profile.trialExpiresAt || null;
+  } catch { return null; }
+};

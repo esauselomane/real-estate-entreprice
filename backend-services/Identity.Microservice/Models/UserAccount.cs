@@ -30,6 +30,14 @@ namespace Identity.Microservice.Models
         public string AccountStatus { get; set; } = "Active"; // Active, De-registered
         
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        // 🎯 TRIAL ONBOARDING FIELDS
+        public string ActivationToken { get; set; } = string.Empty;
+        public DateTime? ActivationTokenExpiry { get; set; }
+        public bool IsTrial { get; set; } = false;
+        public DateTime? TrialStartDate { get; set; }
+        public DateTime? TrialEndDate { get; set; }
+
         // Dynamic relational reference linking back to our target onboarding agency profile records
         [ForeignKey("TenantId")]
         public TenantAgency? AgencyDetails { get; set; }
