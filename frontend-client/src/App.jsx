@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import LeftSidebar from './components/LeftSidebar.jsx';
 import PropertySearch from './components/PropertySearch.jsx';
 import PropertyDetails from './components/PropertyDetails.jsx';
@@ -11,145 +11,59 @@ import SystemAdminWorkspace from './components/SystemAdminWorkspace.jsx';
 import BrochureBuilderWorkspace from './components/BrochureBuilderWorkspace.jsx';
 import RoleDashboard from './components/RoleDashboard.jsx';
 
-
-// 🔌 Import our clean encapsulated API microservices client wrappers
-import { authService } from './services/authService.js';
-import { crmService } from './services/crmService.js';
+import { useAuth } from './contexts/AuthContext.jsx';
+import { useAppUi } from './contexts/AppUiContext.jsx';
+import { useAgency } from './contexts/AgencyContext.jsx';
 
 export default function App() {
-  const normalizeRole = (role) => ({ SuperAdmin: 'PlatformAdmin', Manager: 'AgencyAdmin', Agent: 'Broker', Admin: 'AgencyAdmin' }[role] || role || 'Broker');
-  // Authentication session parameters
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userRole, setUserRole] = useState('Agent'); 
-  const [activeProfile, setActiveProfile] = useState(null);
-  const [isRegistering, setIsRegistering] = useState(false);
-  
-  // Login input states
+  const {
+    isLoggedIn,
+    userRole,
+    isRegistering,
+    errorMessage,
+    isConnecting,
+    login,
+    register,
+    setRegistering,
+  } = useAuth();
+
+  const {
+    currentView,
+    selectedPropertyId,
+    selectedClientData,
+    activeBrochureDealTarget,
+    navigateTo,
+    selectProperty,
+    navigateToClient,
+    clearBrochureDealTarget,
+  } = useAppUi();
+
+  const { currentAgency } = useAgency();
+
+  // --- Login form local bindings (form-specific, not shared app state) ---
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
+  // --- Register form local bindings ---
   const [registerName, setRegisterName] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerRole, setRegisterRole] = useState('Broker');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [isConnecting, setIsConnecting] = useState(false);
-
-  // 🧭 System central sub-view workspace routing state parameters
-  const [currentView, setCurrentView] = useState('dashboard');
-  const [selectedPropertyId, setSelectedPropertyId] = useState(null);
-  const [selectedClientData, setSelectedClientData] = useState({ id: null, type: '', name: '' });
-  const [selectedWorkspace, setSelectedWorkspace] = useState('properties');
-
-  // Multi-tenant profile configurations synchronized from response envelopes
-  const [currentAgency, setCurrentAgency] = useState({
-    name: "Resolving Workspace...",
-    logoInitials: ".."
-  });
-
-  const [activeBrochureDealTarget, setActiveBrochureDealTarget] = useState(null);
-
-
-  // 🔄 LIFECYCLE RECOVERY: Restores user login session records upon browser tab reloads
-  useEffect(() => {
-    const rawSavedProfile = localStorage.getItem('user_profile_data');
-    const storedToken = localStorage.getItem('user_session_jwt');
-    
-    if (rawSavedProfile && storedToken) {
-      const parsedProfile = JSON.parse(rawSavedProfile);
-      setActiveProfile(parsedProfile);
-      setUserRole(normalizeRole(parsedProfile.role));
-      setActiveProfile({ ...parsedProfile, role: normalizeRole(parsedProfile.role) });
-      setIsLoggedIn(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!activeProfile?.tenantId) return;
-    crmService.getAgencies().then((agencies) => {
-      const agency = (agencies || []).find((item) => item.agencyId === activeProfile.tenantId) || agencies?.[0];
-      if (agency) setCurrentAgency({
-        name: agency.name,
-        logoInitials: agency.name.split(/\s+/).map((word) => word[0]).join('').slice(0, 3).toUpperCase()
-      });
-    }).catch(() => setCurrentAgency({ name: activeProfile.tenantId, logoInitials: activeProfile.tenantId.slice(-3) }));
-  }, [activeProfile]);
-
-  const handleSelectProperty = (propertyId) => {
-    setSelectedPropertyId(propertyId);
-    setCurrentView('details');
-  };
-
-  const handleNavigateToClient = (clientOrId, type, name) => {
-    if (clientOrId && typeof clientOrId === 'object') {
-      setSelectedClientData({
-        id: clientOrId.id || '',
-        type: clientOrId.type || 'Client',
-        name: clientOrId.name || 'Client Profile'
-      });
-    } else {
-      setSelectedClientData({
-        id: clientOrId || '',
-        type: type || 'Client',
-        name: name || 'Client Profile'
-      });
-    }
-    setCurrentView('client');
-  };
-
-  const userRoleProfile = userRole;
-
-  const navigateTo = (view) => {
-    setActiveBrochureDealTarget(null);
-    setCurrentView(view);
-  };
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    setErrorMessage('');
-    setIsConnecting(true);
-
     try {
-      const loginPayload = await authService.login(email, password);
-      const normalizedProfile = { ...loginPayload.profile, role: normalizeRole(loginPayload.profile.role) };
-      setActiveProfile(normalizedProfile);
-      setUserRole(normalizedProfile.role);
-      
-      setIsLoggedIn(true);
-    } catch (err) {
-      setErrorMessage(err || 'Connection timed out. Ensure your Ocelot gateway service container is active.');
-    } finally {
-      setIsConnecting(false);
-    }
+      await login(email, password);
+    } catch { /* error handled in AuthContext */ }
   };
 
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
-    setErrorMessage('');
-    setIsConnecting(true);
-
     try {
-      await authService.registerUser({
-        fullName: registerName,
-        email: registerEmail,
-        passwordHash: registerPassword,
-        systemRole: registerRole,
-        tenantId: 'TEN-001'
-      });
-
-      setIsRegistering(false);
-      setEmail(registerEmail);
-      setPassword(registerPassword);
-      setErrorMessage('Registration successful. You can now sign in.');
-      setRegisterName('');
-      setRegisterEmail('');
-      setRegisterPassword('');
-      setRegisterRole('Broker');
-    } catch (err) {
-      setErrorMessage(err || 'Registration failed. Please try again.');
-    } finally {
-      setIsConnecting(false);
-    }
+      await register(registerName, registerEmail, registerPassword, registerRole);
+    } catch { /* error handled in AuthContext */ }
   };
+
   // 1. GATEWAY SCREEN VIEW: Render security login card layout if unauthenticated
   if (!isLoggedIn) {
     return (
@@ -176,14 +90,14 @@ export default function App() {
           <div className="flex rounded-xl border border-slate-700 bg-slate-950/50 p-1 mb-6">
             <button
               type="button"
-              onClick={() => setIsRegistering(false)}
+              onClick={() => setRegistering(false)}
               className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${!isRegistering ? 'bg-blue-600 text-white' : 'text-slate-300'}`}
             >
               Sign In
             </button>
             <button
               type="button"
-              onClick={() => setIsRegistering(true)}
+              onClick={() => setRegistering(true)}
               className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${isRegistering ? 'bg-blue-600 text-white' : 'text-slate-300'}`}
             >
               Register
@@ -267,12 +181,13 @@ export default function App() {
       </div>
     );
   }
+
   // 2. MAIN SYSTEM DASHBOARD VIEW: Render workspace layers after successful authentication
   return (
     <div className="flex bg-slate-950 min-h-screen text-slate-100">
       
       {/* 🧭 Collapsible Side Navigation Drawer Shell */}
-      <LeftSidebar userRole={userRole} currentAgency={currentAgency} activeProfile={activeProfile} onLogout={authService.logout} currentView={currentView} onNavigate={navigateTo} />
+      <LeftSidebar />
 
       {/* 📊 Main Dynamic Workspace Content Window Canvas */}
       <div className="flex-1 p-8 overflow-y-auto max-h-screen">
@@ -294,21 +209,19 @@ export default function App() {
         </header>
 
         {/* ⚙️ Dynamic UI view routing execution conditional dispatcher matrices */}
-        {currentView === 'dashboard' && <RoleDashboard profile={activeProfile} onNavigate={navigateTo} />}
+        {currentView === 'dashboard' && <RoleDashboard />}
+
         {currentView === 'search' && (
-          <PropertySearch onSelectProperty={handleSelectProperty} />
+          <PropertySearch onSelectProperty={selectProperty} />
         )}
 
         {currentView === 'crm' && activeBrochureDealTarget ? (
           <BrochureBuilderWorkspace 
             dealData={activeBrochureDealTarget} 
-            onBack={() => setActiveBrochureDealTarget(null)} 
+            onBack={clearBrochureDealTarget} 
           />
         ) : currentView === 'crm' ? (
-          <CRMWorkspace 
-            currentUserRole={userRoleProfile}
-            onOpenBrochureBuilder={(deal) => setActiveBrochureDealTarget(deal)} 
-          />
+          <CRMWorkspace />
         ) : null}
 
         {currentView === 'owners-tenants' && (
@@ -320,14 +233,14 @@ export default function App() {
         )}
 
         {currentView === 'map' && (
-          <PropertyMapWorkspace onSelectProperty={handleSelectProperty} />
+          <PropertyMapWorkspace onSelectProperty={selectProperty} />
         )}
 
         {currentView === 'details' && (
           <PropertyDetails 
             propertyId={selectedPropertyId} 
-            onBack={() => setCurrentView('search')} 
-            onNavigateToClient={handleNavigateToClient}
+            onBack={() => navigateTo('search')} 
+            onNavigateToClient={navigateToClient}
           />
         )}
 
@@ -336,12 +249,12 @@ export default function App() {
             clientId={selectedClientData.id}
             clientType={selectedClientData.type}
             clientName={selectedClientData.name}
-            onBack={() => setCurrentView('details')}
+            onBack={() => navigateTo('details')}
           />
         )}
 
         {currentView === 'admin' && (userRole === 'PlatformAdmin' || userRole === 'AgencyAdmin') && (
-          <SystemAdminWorkspace currentUserRole={userRole} />
+          <SystemAdminWorkspace />
         )}
       </div>
 

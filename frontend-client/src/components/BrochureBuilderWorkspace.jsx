@@ -2,8 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { Sparkles, Printer, Image, CheckCircle2, User, Phone, Mail, Building2, MapPin, Layers, Loader2, ArrowLeft } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import { crmService } from '../services/crmService.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 export default function BrochureBuilderWorkspace({ dealData, onBack }) {
+  const { activeProfile } = useAuth();
   // Master asset tracking state grids
   const [propertyDetails, setPropertyDetails] = useState(null);
   const [selectedImageFiles, setSelectedImageFiles] = useState([]);
@@ -21,7 +23,6 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
 
   const pollRef = useRef(null);
 
-  const activeProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
   const brokerProfile = {
     fullName: activeProfile.name || 'Unassigned broker',
     emailAddress: activeProfile.email || 'No email on file',

@@ -65,41 +65,51 @@ namespace Identity.Microservice.Controllers
             });
         }
 
-        // 🔐 SuperAdmin — list leads, optionally filtered by status.
-        [HttpGet]
-        [Authorize(Roles = "SuperAdmin")]
-        public async Task<IActionResult> GetLeads([FromQuery] string? status = null)
-        {
-            IQueryable<LeadCaptureRequest> query = _context.LeadCaptureRequests.AsNoTracking().OrderByDescending(l => l.CreatedAt);
-            if (!string.IsNullOrWhiteSpace(status) && status != "all")
-                query = query.Where(l => l.Status == Enum.Parse<LeadStatus>(status, true));
+         private const int PAGE_SIZE = 20;
 
-            var list = await query
-                .Select(l => new
-                {
-                    l.Id,
-                    l.FullName,
-                    l.Email,
-                    l.Phone,
-                    l.Company,
-                    userType = l.UserType.ToString(),
-                    package = l.Package.HasValue ? l.Package.Value.ToString() : null,
-                    l.DemoRequested,
-                    l.Message,
-                    l.Source,
-                    status = l.Status.ToString(),
-                    l.HandledBy,
-                    l.CreatedAt,
-                    l.UpdatedAt
-                })
-                .ToListAsync();
+         private async Task<(List<T> Items, int Total)> PageAsync<T>(IQueryable<T> query, int page)
+         {
+             var total = await query.CountAsync();
+             var items = await query.Skip((page - 1) * PAGE_SIZE).Take(PAGE_SIZE).ToListAsync();
+             return (items, total);
+         }
 
-            return Ok(list);
-        }
+         // 🔐 SuperAdmin — list leads, optionally filtered by status.
+         // Returns X-Total-Count header for client-side infinite scroll pagination.
+         [HttpGet]
+         [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
+         public async Task<IActionResult> GetLeads([FromQuery] string? status = null, [FromQuery] int page = 1)
+         {
+             IQueryable<LeadCaptureRequest> query = _context.LeadCaptureRequests.AsNoTracking().OrderByDescending(l => l.CreatedAt);
+             if (!string.IsNullOrWhiteSpace(status) && status != "all")
+                 query = query.Where(l => l.Status == Enum.Parse<LeadStatus>(status, true));
+
+             var projection = query.Select(l => new
+             {
+                 l.Id,
+                 l.FullName,
+                 l.Email,
+                 l.Phone,
+                 l.Company,
+                 userType = l.UserType.ToString(),
+                 package = l.Package.HasValue ? l.Package.Value.ToString() : null,
+                 l.DemoRequested,
+                 l.Message,
+                 l.Source,
+                 status = l.Status.ToString(),
+                 l.HandledBy,
+                 l.CreatedAt,
+                 l.UpdatedAt
+             });
+
+             var (items, total) = await PageAsync(projection, page);
+             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+             return Ok(items);
+         }
 
         // 🔐 SuperAdmin — advance a lead through the funnel.
         [HttpPut("{id:int}/status")]
-        [Authorize(Roles = "SuperAdmin")]
+        [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
         public async Task<IActionResult> UpdateStatus(int id, [FromBody] LeadStatusUpdateDto dto)
         {
             var lead = await _context.LeadCaptureRequests.FirstOrDefaultAsync(l => l.Id == id);
@@ -122,7 +132,46 @@ namespace Identity.Microservice.Controllers
             });
         }
 
-        // 🟢 PUBLIC — list active pricing packages for the marketing website.
+        // 🔐 SuperAdmin — update editable lead details (name, email, phone, company, package, etc.).
+        [HttpPut("{id:int}")]
+        [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
+        public async Task<IActionResult> UpdateLead(int id, [FromBody] LeadCaptureRequestDto dto)
+        {
+            var lead = await _context.LeadCaptureRequests.FirstOrDefaultAsync(l => l.Id == id);
+            if (lead == null) return NotFound(new { message = "Lead not found." });
+
+            if (dto == null || string.IsNullOrWhiteSpace(dto.FullName) || string.IsNullOrWhiteSpace(dto.Email))
+                return BadRequest(new { message = "Full name and email are required." });
+            if (!dto.Email.Contains("@") || !dto.Email.Contains(".", StringComparison.Ordinal))
+                return BadRequest(new { message = "A valid email is required." });
+
+            Enum.TryParse<LeadUserType>(dto.UserType, true, out var userType);
+            LeadPackage? pkg = null;
+            if (!string.IsNullOrWhiteSpace(dto.Package) &&
+                Enum.TryParse<LeadPackage>(dto.Package, true, out var parsedPkg))
+            {
+                pkg = parsedPkg;
+            }
+
+            lead.FullName = dto.FullName;
+            lead.Email = dto.Email;
+            lead.Phone = dto.Phone;
+            lead.Company = dto.Company;
+            lead.UserType = userType;
+            lead.Package = pkg;
+            lead.DemoRequested = dto.DemoRequested;
+            lead.Message = dto.Message;
+            lead.Source = dto.Source ?? lead.Source;
+            lead.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Lead details updated.",
+                leadId = lead.Id
+            });
+        }
         [HttpGet("pricing-packages")]
         [AllowAnonymous]
         public async Task<IActionResult> GetPricingPackages()
@@ -157,7 +206,7 @@ namespace Identity.Microservice.Controllers
 
         // 🔐 SuperAdmin — get workflow history for a lead.
         [HttpGet("{id:int}/workflow")]
-        [Authorize(Roles = "SuperAdmin")]
+        [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
         public async Task<IActionResult> GetWorkflow(int id)
         {
             var history = await _context.LeadWorkflows
@@ -183,7 +232,7 @@ namespace Identity.Microservice.Controllers
 
         // 🔐 SuperAdmin — add a workflow action to a lead.
         [HttpPost("{id:int}/workflow")]
-        [Authorize(Roles = "SuperAdmin")]
+        [Authorize(Roles = "SuperAdmin,PlatformAdmin")]
         public async Task<IActionResult> AddWorkflowAction(int id, [FromBody] LeadWorkflowActionDto dto)
         {
             var lead = await _context.LeadCaptureRequests.FirstOrDefaultAsync(l => l.Id == id);

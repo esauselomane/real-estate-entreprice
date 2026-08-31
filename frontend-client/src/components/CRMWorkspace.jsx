@@ -1,8 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Briefcase, DollarSign, TrendingUp, UserPlus, Filter, User, CheckCircle, Loader2, Layers, Sparkles, Building2, Edit2, Search } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAppUi } from '../contexts/AppUiContext.jsx';
 
-export default function CRMWorkspace({ currentUserRole, onOpenBrochureBuilder }) {
+export default function CRMWorkspace() {
+  const { userRole: currentUserRole } = useAuth();
+  const { setBrochureDealTarget: onOpenBrochureBuilder } = useAppUi();
   // Navigation active control dashboard sub-tabs
   const [activeTab, setActiveTab] = useState('leads'); // leads, deals, companies, legalEntities, contacts
 

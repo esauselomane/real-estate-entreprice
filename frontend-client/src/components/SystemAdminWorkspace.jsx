@@ -1,10 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { Building2, UserPlus, Users, Plus, Pencil, Trash2, ShieldCheck, Tag, ChevronRight, X, Settings, Save, CircleX } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { Building2, UserPlus, Users, Pencil, Trash2, ShieldCheck, Tag, ChevronRight, X, Settings, CircleX, Mail, RefreshCw, AlertCircle, BarChart3, TrendingUp, DollarSign, Trophy } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { systemRolesService } from '../services/systemRolesService.js';
 import { authService } from '../services/authService.js';
+import { leadCaptureService } from '../services/leadCaptureService.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
-export default function SystemAdminWorkspace({ currentUserRole }) {
+export default function SystemAdminWorkspace() {
+  const { userRole: currentUserRole } = useAuth();
   const [activeTab, setActiveTab] = useState('agencies');
   const [agencies, setAgencies] = useState([]);
   const [brokers, setBrokers] = useState([]);
@@ -25,6 +29,28 @@ export default function SystemAdminWorkspace({ currentUserRole }) {
   const [editingBroker, setEditingBroker] = useState(null);
   const [editingContact, setEditingContact] = useState(null);
   const [expandedAgency, setExpandedAgency] = useState(null);
+
+  // 📋 CAPTURED LEADS (from LeadCaptureController — distinct from CRM leads)
+  const [leads, setLeads] = useState([]);
+  const [leadsTotal, setLeadsTotal] = useState(0);
+  const [leadsPage, setLeadsPage] = useState(1);
+  const [leadsHasMore, setLeadsHasMore] = useState(true);
+  const [leadsLoading, setLeadsLoading] = useState(false);
+  const [leadsError, setLeadsError] = useState('');
+  const [editingLead, setEditingLead] = useState(null);
+  const [leadForm, setLeadForm] = useState({
+    fullName: '', email: '', phone: '', company: '',
+    userType: 'Individual', package: '', demoRequested: false, message: '', source: 'website'
+  });
+  const leadsSentinelRef = useRef(null);
+
+  // 📊 REPORTS & ANALYTICS — tenant-scoped pipeline / commission / broker metrics
+  const [pipelineSummary, setPipelineSummary] = useState(null);
+  const [reportOverview, setReportOverview] = useState(null);
+  const [commissionByStage, setCommissionByStage] = useState([]);
+  const [brokerLeaderboard, setBrokerLeaderboard] = useState([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportsError, setReportsError] = useState('');
 
   const loadAgencies = async () => {
     try {
@@ -60,10 +86,12 @@ export default function SystemAdminWorkspace({ currentUserRole }) {
     catch (err) { setError(err || 'Unable to load user directory.'); }
   };
 
+  const isSuperAdmin = currentUserRole === 'PlatformAdmin';
+
   useEffect(() => { loadData(); }, []);
+
   const loadData = async () => { await Promise.all([loadAgencies(), loadBrokers(), loadUsers(), isSuperAdmin && loadRoles()]); };
 
-  const isSuperAdmin = currentUserRole === 'PlatformAdmin';
   // Roles an admin may assign: PlatformAdmin gets the full palette; AgencyAdmin only agency-scoped roles.
   const assignableRoles = isSuperAdmin ? ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] : ['Broker', 'Owner', 'Tenant'];
 
@@ -167,6 +195,131 @@ export default function SystemAdminWorkspace({ currentUserRole }) {
     reader.readAsDataURL(file);
   };
 
+  // 📋 — Captured leads data loading + infinite scroll
+
+  const LEAD_PAGE_SIZE = 20;
+
+  const loadLeads = async (page = 1, reset = true) => {
+    if (reset) {
+      setLeads([]);
+      setLeadsPage(1);
+      setLeadsHasMore(true);
+    }
+    setLeadsLoading(true);
+    setLeadsError('');
+    try {
+      const result = await leadCaptureService.getLeads(page, 'New');
+      if (reset) {
+        setLeads(result.data);
+      } else {
+        setLeads((prev) => [...prev, ...result.data]);
+      }
+      setLeadsTotal(result.totalCount);
+      setLeadsHasMore(result.data.length === LEAD_PAGE_SIZE && (result.data.length + (reset ? 0 : (page - 1) * LEAD_PAGE_SIZE)) < result.totalCount);
+    } catch (err) {
+      setLeadsError(err || 'Unable to load captured leads.');
+    } finally {
+      setLeadsLoading(false);
+    }
+  };
+
+  const resetLead = (lead) => {
+    setEditingLead(lead);
+    setLeadForm({
+      fullName: lead.fullName || '',
+      email: lead.email || '',
+      phone: lead.phone || '',
+      company: lead.company || '',
+      userType: lead.userType || 'Individual',
+      package: lead.package || '',
+      demoRequested: lead.demoRequested || false,
+      message: lead.message || '',
+      source: lead.source || 'website',
+    });
+  };
+
+  const handleLeadSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingLead) {
+        await leadCaptureService.updateLead(editingLead.id, leadForm);
+      } else {
+        await leadCaptureService.createLead(leadForm);
+      }
+      setLeadForm({ fullName: '', email: '', phone: '', company: '', userType: 'Individual', package: '', demoRequested: false, message: '', source: 'website' });
+      setEditingLead(null);
+      loadLeads(1, true);
+    } catch (err) {
+      alert(err || 'Lead save failed.');
+    }
+  };
+
+  const handleLeadStatusChange = async (leadId, status) => {
+    try {
+      await leadCaptureService.updateLeadStatus(leadId, status);
+      setLeads((prev) => prev.filter((l) => l.id !== leadId));
+    } catch (err) {
+      alert(err || 'Lead status update failed.');
+    }
+  };
+
+  const LEAD_STATUSES = ['Contacted', 'QuoteSent', 'Paid', 'AgencyCreated'];
+
+  useEffect(() => {
+    if (activeTab !== 'captured-leads' || !isSuperAdmin || leads.length > 0 || leadsLoading) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadLeads(1, true);
+  }, [activeTab, isSuperAdmin, leads.length, leadsLoading]);
+
+  useEffect(() => {
+    const el = leadsSentinelRef.current;
+    if (!el || activeTab !== 'captured-leads') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && leadsHasMore && !leadsLoading) {
+          const nextPage = leadsPage + 1;
+          setLeadsPage(nextPage);
+          loadLeads(nextPage, false);
+        }
+      },
+      { threshold: 1.0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+   }, [activeTab, leadsHasMore, leadsLoading, leadsPage]);
+
+  // 📊 Load all report datasets when the reports tab is activated (PlatformAdmin only)
+  const loadReports = async () => {
+    if (!isSuperAdmin) return;
+    setReportsLoading(true);
+    setReportsError('');
+    try {
+      const [summary, overview, commission, leaderboard] = await Promise.all([
+        crmService.getPipelineReportSummary().catch(() => null),
+        crmService.getCRMReportOverview().catch(() => null),
+        crmService.getCommissionByStage().catch(() => []),
+        crmService.getBrokerLeaderboard().catch(() => [])
+      ]);
+      setPipelineSummary(summary);
+      setReportOverview(overview);
+      setCommissionByStage(commission || []);
+      setBrokerLeaderboard(leaderboard || []);
+      if (!summary && !overview) setReportsError('Some report data could not be loaded.');
+    } catch {
+      setReportsError('Unable to load report data.');
+    } finally {
+      setReportsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'reports') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      loadReports();
+    }
+  }, [activeTab, isSuperAdmin]);
+
+
   return (
     <div className="space-y-6 animate-fade-in">
       {error && <div className="p-3 rounded-xl border border-red-900 bg-red-950/40 text-red-300 text-xs">{error}</div>}
@@ -207,8 +360,30 @@ export default function SystemAdminWorkspace({ currentUserRole }) {
             activeTab === 'roles' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
           }`}
         >
-          <Settings size={12} className="inline mr-1.5" /> System Roles
-        </button>
+           <Settings size={12} className="inline mr-1.5" /> System Roles
+         </button>
+         {isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('reports')}
+            type="button"
+            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'reports' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <BarChart3 size={12} className="inline mr-1.5" /> Reports & Analytics
+          </button>
+        )}
+        {isSuperAdmin && (
+          <button
+            onClick={() => setActiveTab('captured-leads')}
+            type="button"
+            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'captured-leads' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <Mail size={12} className="inline mr-1.5" /> Captured Leads
+          </button>
+        )}
       </div>
 
       {activeTab === 'agencies' && (
@@ -476,6 +651,350 @@ export default function SystemAdminWorkspace({ currentUserRole }) {
                 </div>
               ))}
               {roles.length === 0 && <div className="text-[11px] text-slate-500">No role definitions loaded.</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'reports' && isSuperAdmin && (
+        <div className="space-y-6">
+          {reportsError && <div className="p-3 rounded-xl border border-red-900 bg-red-950/40 text-red-300 text-xs">{reportsError}</div>}
+
+          {reportsLoading && (
+            <div className="text-center py-8 text-slate-500 text-xs">
+              <RefreshCw size={16} className="animate-spin inline mb-1" />
+              <p>Loading report data…</p>
+            </div>
+          )}
+
+          {/* 📊 PIPELINE SUMMARY CARDS */}
+          {pipelineSummary && (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-blue-400">{pipelineSummary.activeLeadsCount}</div>
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider">Active Leads</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-amber-400">{pipelineSummary.valuationsInProcessCount}</div>
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider">Valuations In Process</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-violet-400">{pipelineSummary.conveyancingAtDeedsCount}</div>
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider">Conveyancing</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-emerald-400">{pipelineSummary.finalizedClosedCount}</div>
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider">Closed Won</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+                <div className="text-sm font-bold text-white">${Number(pipelineSummary.totalPipelineEstimatedValue || 0).toLocaleString()}</div>
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider">Pipeline Value</div>
+              </div>
+            </div>
+          )}
+
+          {/* 📈 MONTHLY TRENDS + COMMISSION BY STAGE (side by side on desktop) */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            {reportOverview && (
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4">
+                  <TrendingUp size={14} className="text-blue-400" /> Monthly Trends
+                </div>
+                <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+                  <div><div className="text-xl font-bold text-white">{reportOverview.totalLeads}</div><div className="text-[10px] text-slate-500">Leads</div></div>
+                  <div><div className="text-xl font-bold text-white">{reportOverview.totalDeals}</div><div className="text-[10px] text-slate-500">Deals</div></div>
+                  <div><div className="text-sm font-bold text-emerald-400">${Number(reportOverview.totalRevenue || 0).toLocaleString()}</div><div className="text-[10px] text-slate-500">Revenue</div></div>
+                </div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={reportOverview.monthlyBreakdown || []}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                    <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3a8' }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3a8' }} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }} />
+                    <Legend wrapperStyle={{ fontSize: '10px', color: '#94a3a8' }} />
+                    <Line type="monotone" dataKey="leads" stroke="#38bdf8" strokeWidth={2} name="Leads" />
+                    <Line type="monotone" dataKey="deals" stroke="#a78bfa" strokeWidth={2} name="Deals" />
+                    <Line type="monotone" dataKey="revenue" stroke="#4ade80" strokeWidth={2} name="Revenue" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {commissionByStage.length > 0 && (
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4">
+                  <DollarSign size={14} className="text-emerald-400" /> Commission by Stage
+                </div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={commissionByStage} layout="vertical" margin={{ top: 5, right: 20, left: 80, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3a8' }} />
+                    <YAxis type="category" dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3a8' }} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }} />
+                    <Bar dataKey="revenue" fill="#4ade80" name="Commission" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+
+          {/* 🏆 BROKER LEADERBOARD */}
+          {brokerLeaderboard.length > 0 && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+              <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4">
+                <Trophy size={14} className="text-amber-400" /> Broker Leaderboard
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="text-slate-500 uppercase text-[9px]">
+                      <th className="text-left py-1">#</th>
+                      <th className="text-left py-1">Broker</th>
+                      <th className="text-right py-1">Deals</th>
+                      <th className="text-right py-1">Pipeline Value</th>
+                      <th className="text-right py-1">Commission</th>
+                      <th className="text-right py-1">Won</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {brokerLeaderboard.map((b, idx) => (
+                      <tr key={b.agent || idx} className="border-t border-slate-800">
+                        <td className="py-1 text-slate-400">{idx + 1}</td>
+                        <td className="py-1 text-white">{b.agent}</td>
+                        <td className="py-1 text-right text-slate-300">{b.deals}</td>
+                        <td className="py-1 text-right text-slate-300">${Number(b.totalValue || 0).toLocaleString()}</td>
+                        <td className="py-1 text-right text-emerald-400">${Number(b.totalCommission || 0).toLocaleString()}</td>
+                        <td className="py-1 text-right text-slate-300">{b.won}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'captured-leads' && isSuperAdmin && (
+        <div className="grid gap-6 xl:grid-cols-3">
+          {/* 📝 LEAD FORM (add / edit) */}
+          <div className="xl:col-span-1">
+            <form onSubmit={handleLeadSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 sticky top-6 h-fit">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px]">
+                  <Mail size={14} className="text-emerald-400" />
+                  {editingLead ? 'Edit Captured Lead' : 'Add Manual Lead'}
+                </div>
+                {editingLead && (
+                  <button
+                    type="button"
+                    onClick={() => { setEditingLead(null); setLeadForm({ fullName: '', email: '', phone: '', company: '', userType: 'Individual', package: '', demoRequested: false, message: '', source: 'website' }); }}
+                    className="text-slate-400 hover:text-white"
+                    title="Cancel edit"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-slate-400 text-[10px] uppercase tracking-wider mb-1.5">Full Name *</label>
+                <input
+                  type="text" required
+                  value={leadForm.fullName}
+                  onChange={(e) => setLeadForm({ ...leadForm, fullName: e.target.value })}
+                  placeholder="Jane Smith"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 text-[10px] uppercase tracking-wider mb-1.5">Email *</label>
+                <input
+                  type="email" required
+                  value={leadForm.email}
+                  onChange={(e) => setLeadForm({ ...leadForm, email: e.target.value })}
+                  placeholder="jane@example.com"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 text-[10px] uppercase tracking-wider mb-1.5">Phone</label>
+                <input
+                  type="tel"
+                  value={leadForm.phone}
+                  onChange={(e) => setLeadForm({ ...leadForm, phone: e.target.value })}
+                  placeholder="+27 82 123 4567"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 text-[10px] uppercase tracking-wider mb-1.5">Company</label>
+                <input
+                  type="text"
+                  value={leadForm.company}
+                  onChange={(e) => setLeadForm({ ...leadForm, company: e.target.value })}
+                  placeholder="Company name"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 text-[10px] uppercase tracking-wider mb-1.5">User Type</label>
+                <select
+                  value={leadForm.userType}
+                  onChange={(e) => setLeadForm({ ...leadForm, userType: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="Individual">Individual</option>
+                  <option value="Agency">Agency</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 text-[10px] uppercase tracking-wider mb-1.5">Package</label>
+                <select
+                  value={leadForm.package}
+                  onChange={(e) => setLeadForm({ ...leadForm, package: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="">None</option>
+                  <option value="SMEAgency">SME Agency</option>
+                  <option value="Private">Private</option>
+                  <option value="Enterprise">Enterprise</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 text-[10px] uppercase tracking-wider mb-1.5">Source</label>
+                <input
+                  type="text"
+                  value={leadForm.source}
+                  onChange={(e) => setLeadForm({ ...leadForm, source: e.target.value })}
+                  placeholder="website"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 text-[10px] uppercase tracking-wider mb-1.5">Message</label>
+                <textarea
+                  rows={3}
+                  value={leadForm.message}
+                  onChange={(e) => setLeadForm({ ...leadForm, message: e.target.value })}
+                  placeholder="Additional notes or requirements"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 text-[10px] text-slate-300">
+                <input
+                  type="checkbox"
+                  id="demoRequested"
+                  checked={leadForm.demoRequested}
+                  onChange={(e) => setLeadForm({ ...leadForm, demoRequested: e.target.checked })}
+                  className="rounded bg-slate-800 border-slate-600 text-emerald-500"
+                />
+                <label htmlFor="demoRequested" className="cursor-pointer">Demo requested</label>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 transition-colors"
+              >
+                {editingLead ? 'Update Lead' : 'Create Lead'}
+              </button>
+            </form>
+          </div>
+
+          {/* 📋 LEADS LIST with infinite scroll */}
+          <div className="xl:col-span-2">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px]">
+                <Mail size={14} className="text-emerald-400" />
+                New Lead Queue ({leadsTotal})
+              </div>
+              <button
+                type="button"
+                onClick={() => loadLeads(1, true)}
+                disabled={leadsLoading}
+                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white disabled:opacity-50"
+                title="Refresh"
+              >
+                <RefreshCw size={14} className={leadsLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+
+            {leadsError && (
+              <div className="p-3 rounded-xl border border-red-900 bg-red-950/40 text-red-300 text-xs mb-3">{leadsError}</div>
+            )}
+
+            <div className="space-y-2">
+              {leads.map((lead) => (
+                <div
+                    key={lead.id}
+                    className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 flex justify-between items-start gap-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-semibold text-sm">{lead.fullName}</span>
+                        {lead.demoRequested && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-900">Demo</span>}
+                      </div>
+                      <p className="text-xs text-slate-400">{lead.email}</p>
+                      {lead.phone && <p className="text-xs text-slate-500">{lead.phone}</p>}
+                      {lead.company && <p className="text-xs text-slate-500">{lead.company}</p>}
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700">{lead.userType}</span>
+                        {lead.package && <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-violet-950 text-violet-300 border border-violet-900">{lead.package}</span>}
+                        <span className="text-[10px] text-slate-500">via {lead.source || 'website'}</span>
+                      </div>
+                      {lead.message && <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{lead.message}</p>}
+                      <p className="text-[10px] text-slate-500 mt-1">{new Date(lead.createdAt).toLocaleString()}</p>
+                    </div>
+
+                    <div className="flex flex-col gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => resetLead(lead)}
+                        className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
+                        title="Edit lead"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                      <select
+                        onChange={(e) => handleLeadStatusChange(lead.id, e.target.value)}
+                        defaultValue=""
+                        className="text-[10px] bg-slate-800 border border-slate-700 rounded-lg px-1.5 py-0.5 text-slate-300 focus:outline-none focus:border-emerald-500"
+                        title="Advance lead status"
+                      >
+                        <option value="" disabled>Status →</option>
+                        {LEAD_STATUSES.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+              ))}
+
+              {leadsLoading && (
+                <div className="text-center py-6 text-slate-500 text-xs">
+                  <RefreshCw size={16} className="animate-spin inline mb-1" />
+                  <p>Loading leads…</p>
+                </div>
+              )}
+
+              {!leadsLoading && leads.length === 0 && (
+                <div className="text-center py-10 text-slate-500 text-xs">
+                  <AlertCircle size={16} className="inline mb-1" />
+                  <p>No new leads in the queue.</p>
+                </div>
+              )}
+
+              {leadsHasMore && !leadsLoading && (
+                <div ref={leadsSentinelRef} className="h-1" />
+              )}
             </div>
           </div>
         </div>

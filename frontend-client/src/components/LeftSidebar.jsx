@@ -1,8 +1,15 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Home, Search, Users, Briefcase, BarChart3, ChevronLeft, ChevronRight, LogOut, Shield, Map } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAppUi } from '../contexts/AppUiContext.jsx';
+import { useAgency } from '../contexts/AgencyContext.jsx';
 
-export default function LeftSidebar({ userRole, currentAgency, activeProfile, onLogout, currentView, onNavigate }) {
+export default function LeftSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const { userRole, activeProfile, logout } = useAuth();
+  const { currentView, navigateTo } = useAppUi();
+  const { currentAgency } = useAgency();
+
 
   // Base structural links mapped directly to permissions
   const navItems = [
@@ -54,7 +61,7 @@ export default function LeftSidebar({ userRole, currentAgency, activeProfile, on
               <button
                 key={index}
                 type="button"
-                onClick={() => onNavigate(item.view)}
+                onClick={() => navigateTo(item.view)}
                 aria-current={currentView === item.view ? 'page' : undefined}
                 className={`w-full flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 group cursor-pointer text-left ${currentView === item.view ? 'bg-blue-600/20 text-white border border-blue-900/70' : 'hover:bg-slate-800/60 hover:text-white border border-transparent'}`}
               >
@@ -84,7 +91,7 @@ export default function LeftSidebar({ userRole, currentAgency, activeProfile, on
         </div>
 
         {/* Minimal logout row button container */}
-        <button onClick={onLogout} className="w-full mt-3 flex items-center gap-4 px-3 py-2 rounded-lg hover:bg-red-950/20 hover:text-red-400 text-slate-400 transition-colors cursor-pointer text-left text-xs font-medium">
+        <button onClick={logout} className="w-full mt-3 flex items-center gap-4 px-3 py-2 rounded-lg hover:bg-red-950/20 hover:text-red-400 text-slate-400 transition-colors cursor-pointer text-left text-xs font-medium">
           <LogOut size={16} />
           {!isCollapsed && <span>Sign Out</span>}
         </button>

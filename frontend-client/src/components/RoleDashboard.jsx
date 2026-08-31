@@ -1,4 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { Building2, Users, Briefcase, Home, Bell, ShieldCheck, Layers, BarChart2, DollarSign, TrendingUp, PieChart as PieIcon, Award } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { crmService } from '../services/crmService.js';
@@ -65,7 +67,9 @@ const renderChart = (chart) => {
   );
 };
 
-export default function RoleDashboard({ profile, onNavigate }) {
+export default function RoleDashboard() {
+  const { activeProfile: profile } = useAuth();
+  const { navigateTo: onNavigate } = useAppUi();
   const role = profile?.role || 'Broker';
   const [metrics, setMetrics] = useState([]);
   const [charts, setCharts] = useState([]);
