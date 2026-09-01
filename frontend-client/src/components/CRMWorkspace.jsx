@@ -12,7 +12,9 @@ export default function CRMWorkspace() {
 
   // Data array storage grids
   const [unverifiedLeads, setUnverifiedLeads] = useState([]);
+  const [leadTotalCount, setLeadTotalCount] = useState(0);
   const [verifiedDeals, setVerifiedDeals] = useState([]);
+  const [dealTotalCount, setDealTotalCount] = useState(0);
   const [companies, setCompanies] = useState([]);
   const [legalEntities, setLegalEntities] = useState([]);
   const [contacts, setContacts] = useState([]);
@@ -66,7 +68,9 @@ export default function CRMWorkspace() {
         ]);
         const boards = boardsRes || {};
         setUnverifiedLeads(boards.unverifiedLeads || []);
+        setLeadTotalCount(boards.leadCount || 0);
         setVerifiedDeals(boards.verifiedDeals || []);
+        setDealTotalCount(boards.dealCount || 0);
         setBrokers(brokersRes || []);
         setActiveCards(cardsRes || []);
       } else if (activeTab === 'companies') {
@@ -254,7 +258,7 @@ export default function CRMWorkspace() {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex items-center justify-between group">
           <div>
             <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Unverified Leads</span>
-            <span className="text-2xl font-black text-white mt-1 block">{summaryReport.activeLeadsCount} Active</span>
+             <span className="text-2xl font-black text-white mt-1 block">{summaryReport.activeLeadsCount} Active</span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-blue-950 border border-blue-900 flex items-center justify-center text-blue-400">
             <UserPlus size={18} />
@@ -264,7 +268,7 @@ export default function CRMWorkspace() {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex items-center justify-between group">
           <div>
             <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Active Deals</span>
-            <span className="text-2xl font-black text-amber-400 mt-1 block">{summaryReport.valuationsInProcessCount} Open</span>
+             <span className="text-2xl font-black text-amber-400 mt-1 block">{summaryReport.valuationsInProcessCount} Open</span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-amber-950/40 border border-amber-900 flex items-center justify-center text-amber-400">
             <TrendingUp size={18} />
@@ -274,7 +278,7 @@ export default function CRMWorkspace() {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex items-center justify-between group">
           <div>
             <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">In Negotiation</span>
-            <span className="text-2xl font-black text-purple-400 mt-1 block">{summaryReport.conveyancingAtDeedsCount} Reviewed</span>
+             <span className="text-2xl font-black text-purple-400 mt-1 block">{summaryReport.conveyancingAtDeedsCount} Reviewed</span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-purple-950/40 border border-purple-900 flex items-center justify-center text-purple-400">
             <Briefcase size={18} />
@@ -284,7 +288,7 @@ export default function CRMWorkspace() {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex items-center justify-between group">
           <div>
             <span className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider">Closed Won Value</span>
-            <span className="text-2xl font-black text-emerald-400 mt-1 block">R {summaryReport.totalPipelineEstimatedValue.toLocaleString()}</span>
+             <span className="text-2xl font-black text-emerald-400 mt-1 block">R {summaryReport.totalPipelineEstimatedValue.toLocaleString()}</span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-emerald-950/40 border border-emerald-900 flex items-center justify-center text-emerald-400">
             <DollarSign size={18} />
@@ -295,8 +299,8 @@ export default function CRMWorkspace() {
       {/* 🎛️ ENTERPRISE FIVE-WAY NAVIGATIONAL WORKSPACE SWITCHER */}
       <div className="flex bg-slate-900 border border-slate-800 p-1.5 rounded-2xl gap-1.5 max-w-4xl shadow-xl overflow-x-auto scrollbar-none">
         {[
-          { id: 'leads', label: 'Unverified Leads', count: unverifiedLeads.length },
-          { id: 'deals', label: 'Corporate Deals', count: verifiedDeals.length },
+          { id: 'leads', label: 'Unverified Leads', count: leadTotalCount },
+          { id: 'deals', label: 'Corporate Deals', count: dealTotalCount },
           { id: 'companies', label: 'Companies Directory', count: companies.length },
           { id: 'legalEntities', label: 'Legal Entities', count: legalEntities.length },
           { id: 'contacts', label: 'Human Contacts', count: contacts.length }

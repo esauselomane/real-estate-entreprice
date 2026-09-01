@@ -40,6 +40,18 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 // 🎯 Email configuration binding
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 
+// 📧 HTTP client for Mailpit API-based email delivery
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("Mailpit", client =>
+{
+    var mailpitUrl = builder.Configuration.GetSection("Email:ApiUrl").Get<string>();
+    if (!string.IsNullOrEmpty(mailpitUrl))
+    {
+        client.BaseAddress = new Uri(mailpitUrl);
+    }
+});
+
 // 4. Configure Application Cryptographic JWT Verification Parameters
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "SuperSecretRealEstateEnterpriseCryptographicSigningKey123!";
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "Identity.Microservice";

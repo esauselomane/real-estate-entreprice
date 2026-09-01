@@ -2,7 +2,7 @@
 
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Mail } from "lucide-react";
 import Link from "next/link";
 
 type FormState = "idle" | "submitting" | "success" | "error";
@@ -62,144 +62,159 @@ export default function OnboardingPage() {
           </p>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="space-y-6 rounded-2xl border border-slate-200/70 bg-white p-8 shadow-card"
-        >
-          {state === "success" && (
-            <div className="flex items-center gap-2 rounded-lg bg-emerald-50 p-4 text-sm font-medium text-emerald-800">
-              <Check className="h-5 w-5" />
-              <span>Onboarding submitted — check your email to set your password.</span>
-            </div>
-          )}
-          {state === "error" && (
-            <div className="rounded-lg bg-red-50 p-4 text-sm font-medium text-red-800">
-              {error}
-            </div>
-          )}
-
-          <div className="grid gap-6 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-medium text-slate-600">
-                Company / Agency Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                required
-                name="companyName"
-                type="text"
-                placeholder="Your company name"
-                disabled={state === "submitting"}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-
-            <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-medium text-slate-600">
-                Trading Name
-              </label>
-              <input
-                name="tradingName"
-                type="text"
-                placeholder="Trading / doing-business-as name"
-                disabled={state === "submitting"}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">
-                Registration Number
-              </label>
-              <input
-                name="registrationNumber"
-                type="text"
-                placeholder="e.g. 2016/123456"
-                disabled={state === "submitting"}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">
-                Contact Email <span className="text-red-500">*</span>
-              </label>
-              <input
-                required
-                name="contactEmail"
-                type="email"
-                placeholder="admin@yourcompany.com"
-                disabled={state === "submitting"}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-
-            <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-medium text-slate-600">
-                Headquarters Address
-              </label>
-              <textarea
-                name="headquartersAddress"
-                rows={3}
-                placeholder="123 Main Street, City, Country"
-                disabled={state === "submitting"}
-                className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-
-            <div className="sm:col-span-2 border-t border-slate-200 pt-4">
-              <h3 className="text-sm font-semibold text-slate-900 mb-3">
-                Primary Admin
-              </h3>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">
-                Full Name
-              </label>
-              <input
-                name="adminFullName"
-                type="text"
-                placeholder="Jane Doe"
-                disabled={state === "submitting"}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-600">
-                Email <span className="text-red-500">*</span>
-              </label>
-              <input
-                required
-                name="adminEmail"
-                type="email"
-                placeholder="jane@yourcompany.com"
-                disabled={state === "submitting"}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={state === "submitting" || state === "success"}
-            className="w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50"
+        <div className="relative">
+          <form
+            onSubmit={handleSubmit}
+            className={`space-y-6 rounded-2xl border border-slate-200/70 bg-white p-8 shadow-card transition-opacity duration-300 ${
+              state === "success" ? "pointer-events-none opacity-30" : ""
+            }`}
           >
-            {state === "submitting" ? (
-              <span className="flex items-center justify-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Submitting...
-              </span>
-            ) : (
-              "Submit Onboarding"
+            {state === "error" && (
+              <div className="rounded-lg bg-red-50 p-4 text-sm font-medium text-red-800">
+                {error}
+              </div>
             )}
-          </button>
-        </form>
+
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Company / Agency Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  required
+                  name="companyName"
+                  type="text"
+                  placeholder="Your company name"
+                  disabled={state === "submitting" || state === "success"}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Trading Name
+                </label>
+                <input
+                  name="tradingName"
+                  type="text"
+                  placeholder="Trading / doing-business-as name"
+                  disabled={state === "submitting" || state === "success"}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Registration Number
+                </label>
+                <input
+                  name="registrationNumber"
+                  type="text"
+                  placeholder="e.g. 2016/123456"
+                  disabled={state === "submitting" || state === "success"}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Contact Email <span className="text-red-500">*</span>
+                </label>
+                <input
+                  required
+                  name="contactEmail"
+                  type="email"
+                  placeholder="admin@yourcompany.com"
+                  disabled={state === "submitting" || state === "success"}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Headquarters Address
+                </label>
+                <textarea
+                  name="headquartersAddress"
+                  rows={3}
+                  placeholder="123 Main Street, City, Country"
+                  disabled={state === "submitting" || state === "success"}
+                  className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+
+              <div className="sm:col-span-2 border-t border-slate-200 pt-4">
+                <h3 className="text-sm font-semibold text-slate-900 mb-3">
+                  Primary Admin
+                </h3>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Full Name
+                </label>
+                <input
+                  name="adminFullName"
+                  type="text"
+                  placeholder="Jane Doe"
+                  disabled={state === "submitting" || state === "success"}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Email <span className="text-red-500">*</span>
+                </label>
+                <input
+                  required
+                  name="adminEmail"
+                  type="email"
+                  placeholder="jane@yourcompany.com"
+                  disabled={state === "submitting" || state === "success"}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={state === "submitting" || state === "success"}
+              className="w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50"
+            >
+              {state === "submitting" ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Submitting...
+                </span>
+              ) : (
+                "Submit Onboarding"
+              )}
+            </button>
+          </form>
+
+          {state === "success" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl bg-white/95 backdrop-blur-sm">
+              <div className="relative flex h-24 w-24 items-center justify-center rounded-full border-4 border-slate-200 bg-slate-50">
+                <Mail className="h-10 w-10 text-slate-400" />
+                <div className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-white">
+                  <Check className="h-4 w-4" />
+                </div>
+              </div>
+              <p className="mt-4 text-center text-sm font-medium text-slate-700">
+                Your onboarding has been submitted successfully.
+              </p>
+              <p className="mt-1 text-center text-xs text-slate-500">
+                Check your email to set your password and activate your account.
+              </p>
+            </div>
+          )}
+        </div>
 
         <div className="mt-6 text-center text-sm text-slate-600">
           Already have access?{" "}
           <Link href="/" className="text-blue-600 hover:underline">
-            Back to home
+            Go to Login
           </Link>
         </div>
       </div>

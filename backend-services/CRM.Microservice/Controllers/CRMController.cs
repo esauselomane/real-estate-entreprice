@@ -374,7 +374,7 @@ namespace CRM.Microservice.Controllers
         {
             var tenantId = GetCurrentTenant();
             var query = _context.BrokerRecords
-                .Where(b => string.IsNullOrWhiteSpace(tenantId) || b.TenantId == tenantId)
+                .Where(b => b.TenantId == tenantId)
                 .OrderBy(b => b.AgencyId).ThenBy(b => b.FullName);
             var (items, total) = await PageAsync(query, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
@@ -886,23 +886,25 @@ namespace CRM.Microservice.Controllers
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
 
-            var tenantLeads = await _context.LeadRecords
+            var baseLeadQuery = _context.LeadRecords
                 .Where(l => l.TenantId == tenantId && !l.IsConvertedToDeal)
-                .Where(l => !isBroker || l.AllocatedToAgent == callerName)
-                .ToListAsync();
-            var tenantDeals = await _context.DealRecords
+                .Where(l => !isBroker || l.AllocatedToAgent == callerName);
+
+            var baseDealQuery = _context.DealRecords
                 .Where(d => d.TenantId == tenantId)
-                .Where(d => !isBroker || d.AllocatedToAgent == callerName)
-                .ToListAsync();
+                .Where(d => !isBroker || d.AllocatedToAgent == callerName);
 
             var summaryReport = new PipelineSummaryReport
             {
-                ActiveLeadsCount = tenantLeads.Count,
-                ValuationsInProcessCount = tenantDeals.Count(d => d.DealStage != DealWorkflowStage.ClosedWon && d.DealStage != DealWorkflowStage.ClosedLost),
-                ConveyancingAtDeedsCount = tenantDeals.Count(d => d.DealStage == DealWorkflowStage.ProposalQuoteSent || d.DealStage == DealWorkflowStage.Negotiation),
-                FinalizedClosedCount = tenantDeals.Count(d => d.DealStage == DealWorkflowStage.ClosedWon),
-                TotalPipelineEstimatedValue = tenantDeals.Where(d => d.DealStage != DealWorkflowStage.ClosedWon && d.DealStage != DealWorkflowStage.ClosedLost).Sum(d => d.TransactionValue)
+                ActiveLeadsCount = await baseLeadQuery.Where(l => l.LeadStage == LeadWorkflowStage.Contacted).CountAsync(),
+                ValuationsInProcessCount = await baseDealQuery.Where(d => d.DealStage != DealWorkflowStage.ClosedWon && d.DealStage != DealWorkflowStage.ClosedLost).CountAsync(),
+                ConveyancingAtDeedsCount = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.ProposalQuoteSent || d.DealStage == DealWorkflowStage.Negotiation).CountAsync(),
+                FinalizedClosedCount = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.ClosedWon).CountAsync(),
+                TotalPipelineEstimatedValue = await baseDealQuery.Where(d => d.DealStage != DealWorkflowStage.ClosedWon && d.DealStage != DealWorkflowStage.ClosedLost).SumAsync(d => d.TransactionValue)
             };
+
+            _logger.LogInformation("GetPipelineReportSummary: tenant={Tenant} | ActiveLeads={Active} Valuations={Valuations} Conveyancing={Conveyancing} ClosedWon={ClosedWon} PipelineValue={PipelineValue}",
+                tenantId, summaryReport.ActiveLeadsCount, summaryReport.ValuationsInProcessCount, summaryReport.ConveyancingAtDeedsCount, summaryReport.FinalizedClosedCount, summaryReport.TotalPipelineEstimatedValue);
 
             return Ok(summaryReport);
         }

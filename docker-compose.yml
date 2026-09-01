@@ -44,6 +44,16 @@ services:
     networks:
       - realestate-mesh-network
 
+  # 📧 4. EMAIL CATCHER: Mailpit for local email testing
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: realestate-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - realestate-mesh-network
+
 # 💾 PERSISTENT DATA STORAGE INFRASTRUCTURE STORAGE MATRIX
 volumes:
   sqlserver-data-vault:

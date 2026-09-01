@@ -122,6 +122,7 @@ export const crmService = {
       const response = await apiClient.get('/crm/agencies', { params: { page } });
       return response.data;
     } catch (error) {
+      debugger;
       throw error.response?.data?.message || 'Agency list sync failed.';
     }
   },

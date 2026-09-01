@@ -9,7 +9,6 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 
 export default function SystemAdminWorkspace() {
   const { userRole: currentUserRole } = useAuth();
-  const [activeTab, setActiveTab] = useState('agencies');
   const [agencies, setAgencies] = useState([]);
   const [brokers, setBrokers] = useState([]);
   const [systemUsers, setSystemUsers] = useState([]);
@@ -87,6 +86,8 @@ export default function SystemAdminWorkspace() {
   };
 
   const isSuperAdmin = currentUserRole === 'PlatformAdmin';
+
+  const [activeTab, setActiveTab] = useState(isSuperAdmin ? 'agencies' : 'users');
 
   useEffect(() => { loadData(); }, []);
 
@@ -326,6 +327,7 @@ export default function SystemAdminWorkspace() {
 
       {/* 🎛️ DRILL-NAVIGATION MENU */}
       <div className="flex gap-2 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl shadow-xl overflow-x-auto">
+        {isSuperAdmin && (
         <button
           onClick={() => setActiveTab('agencies')}
           type="button"
@@ -335,6 +337,7 @@ export default function SystemAdminWorkspace() {
         >
           <Building2 size={12} className="inline mr-1.5" /> Agency Admin
         </button>
+        )}
         <button
           onClick={() => setActiveTab('users')}
           type="button"
@@ -353,15 +356,17 @@ export default function SystemAdminWorkspace() {
         >
           <ShieldCheck size={12} className="inline mr-1.5" /> User Access
         </button>
-        <button
-          onClick={() => setActiveTab('roles')}
-          type="button"
-          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
-            activeTab === 'roles' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-          }`}
-        >
-           <Settings size={12} className="inline mr-1.5" /> System Roles
-         </button>
+         {isSuperAdmin && (
+           <button
+             onClick={() => setActiveTab('roles')}
+             type="button"
+             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
+               activeTab === 'roles' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+             }`}
+           >
+            <Settings size={12} className="inline mr-1.5" /> System Roles
+          </button>
+         )}
          {isSuperAdmin && (
           <button
             onClick={() => setActiveTab('reports')}
@@ -575,6 +580,8 @@ export default function SystemAdminWorkspace() {
                     <th className="text-left py-1">Email</th>
                     <th className="text-left py-1">Tenant</th>
                     <th className="text-left py-1">Role</th>
+                    <th className="text-left py-1">Status</th>
+                    <th className="text-left py-1">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -593,10 +600,35 @@ export default function SystemAdminWorkspace() {
                               setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, systemRole: newRole } : x)));
                             } catch (err) { alert(err || 'Role reassignment failed.'); }
                           }}
-                          className="bg-slate-950 border border-slate-700 rounded-md px-1.5 py-0.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                          disabled={u.accountStatus === 'Disabled' || u.systemRole === 'PlatformAdmin'}
+                          className="bg-slate-950 border border-slate-700 rounded-md px-1.5 py-0.5 text-xs text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
                         >
                           {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
                         </select>
+                      </td>
+                      <td className="py-1">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-md border ${
+                          u.accountStatus === 'Active'
+                            ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300'
+                            : 'border-red-900 bg-red-950/40 text-red-300'
+                        }`}>{u.accountStatus || '—'}</span>
+                      </td>
+                      <td className="py-1">
+                        {u.accountStatus !== 'Disabled' && u.systemRole !== 'PlatformAdmin' && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!confirm(`Deactivate user "${u.fullName}"? They will be unable to sign in.`)) return;
+                              try {
+                                await authService.disableUser(u.userId);
+                                setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, accountStatus: 'Disabled' } : x)));
+                              } catch (err) { alert(err || 'Deactivation failed.'); }
+                            }}
+                            className="px-2 py-1 rounded bg-red-950/30 text-red-300 border border-red-900 hover:bg-red-950/50 text-xs"
+                          >
+                            Deactivate
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -604,7 +636,7 @@ export default function SystemAdminWorkspace() {
               </table>
             </div>
           )}
-          <p className="text-[10px] text-slate-500 mt-3">Assign or remove a role by selecting it above. Agency admins may only assign agency-scoped roles (Broker/Owner/Tenant) and only within their own tenant.</p>
+          <p className="text-[10px] text-slate-500 mt-3">Both PlatformAdmin and AgencyAdmin can assign roles and deactivate users. Agency admins are tenant-scoped. PlatformAdmin accounts cannot be disabled or have their role changed.</p>
         </div>
       )}
 

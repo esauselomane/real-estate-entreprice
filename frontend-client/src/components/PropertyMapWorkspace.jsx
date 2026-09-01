@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { MapPin, Building2, SlidersHorizontal, Loader2, Layers, ListCollapse, Search } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { MapPin, Building2, SlidersHorizontal, Loader2, Layers, ListCollapse, Search, Plus, X, Save } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { propertyService } from '../services/propertyService.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 // 🗺️ Vite + Leaflet default-marker icon patch — the bundler can't resolve the PNG
 // asset URLs otherwise, which leaves markers invisible. Resolved once per load.
@@ -38,12 +39,38 @@ const coloredMarkerIcon = (color) => L.divIcon({
 const DEFAULT_CENTER = [-33.9249, 18.4207]; // Cape Town fallback
 
 export default function PropertyMapWorkspace({ onSelectProperty }) {
+  const { userRole } = useAuth();
   const [properties, setProperties] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [selectedMapMarkerId, setSelectedMapMarkerId] = useState(null);
   const [activeTypeFilter, setActiveTypeFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const canCreate = userRole === 'PlatformAdmin' || userRole === 'AgencyAdmin' || userRole === 'Broker';
+
+  const [propertyForm, setPropertyForm] = useState({
+    completeAddress: '',
+    erfSpatialSize: '',
+    titleDeedType: 'Freehold',
+    portfolioZoning: 'Commercial Zone',
+    marketClass: 'Sale',
+    propertyTypeId: 1,
+    valuationPrice: '',
+    salePrice: '',
+    baseRentalRate: '',
+    rentEscalationPercentage: '',
+    leaseTermMonths: '',
+    tenantInstallationAllowance: 0,
+    latitude: -33.9249,
+    longitude: 18.4241,
+    linkedOwnerId: 'OT-0001',
+    subUnits: []
+  });
 
   useEffect(() => {
     const fetchSpatialAssetsForMapping = async () => {
@@ -107,6 +134,56 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
     onSelectProperty && onSelectProperty(propertyId);
   };
 
+  const handleOpenAddModal = () => {
+    setPropertyForm({
+      completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold',
+      portfolioZoning: 'Commercial Zone', marketClass: 'Sale', propertyTypeId: 1,
+      valuationPrice: '', salePrice: '', baseRentalRate: '', rentEscalationPercentage: '',
+      leaseTermMonths: '', tenantInstallationAllowance: 0,
+      latitude: -33.9249, longitude: 18.4241, linkedOwnerId: 'OT-0001', subUnits: []
+    });
+    setSaveError('');
+    setSaveSuccess(false);
+    setShowAddModal(true);
+  };
+
+  const handleFormChange = (field, value) => {
+    setPropertyForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveProperty = async (e) => {
+    e.preventDefault();
+    setSaveError('');
+    setSaveSuccess(false);
+    if (!propertyForm.completeAddress.trim()) {
+      setSaveError('Property address is required.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await propertyService.createProperty({
+        ...propertyForm,
+        valuationPrice: Number(propertyForm.valuationPrice) || 0,
+        salePrice: propertyForm.salePrice ? Number(propertyForm.salePrice) : null,
+        baseRentalRate: propertyForm.baseRentalRate ? Number(propertyForm.baseRentalRate) : null,
+        rentEscalationPercentage: propertyForm.rentEscalationPercentage ? Number(propertyForm.rentEscalationPercentage) : null,
+        leaseTermMonths: propertyForm.leaseTermMonths ? Number(propertyForm.leaseTermMonths) : null,
+        tenantInstallationAllowance: Number(propertyForm.tenantInstallationAllowance) || 0,
+        latitude: Number(propertyForm.latitude) || -33.9249,
+        longitude: Number(propertyForm.longitude) || 18.4241,
+        propertyTypeId: Number(propertyForm.propertyTypeId) || 1
+      });
+      setSaveSuccess(true);
+      setShowAddModal(false);
+      const assets = await propertyService.searchProperties([], 'All', null, null);
+      setProperties(assets || []);
+    } catch (err) {
+      setSaveError(err || 'Failed to create property.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   function MapClickHandler() {
     useMapEvents({ click: () => setSelectedMapMarkerId(null) });
     return null;
@@ -141,8 +218,8 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
           </div>
         </div>
 
-        {/* Address / id search */}
-        <div className="relative">
+        {/* Address / id search + Add Property button */}
+        <div className="relative flex items-center gap-2">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input
             type="text"
@@ -151,6 +228,15 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
           />
+          {canCreate && (
+            <button
+              type="button"
+              onClick={handleOpenAddModal}
+              className="shrink-0 px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-bold text-white flex items-center gap-1"
+            >
+              <Plus size={14} /> Add Property
+            </button>
+          )}
         </div>
 
         {/* Dynamic Asset Record Cards Scrollbox */}
@@ -275,6 +361,205 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
           </MapContainer>
         )}
       </div>
+
+      {/* 🏗️ ADD PROPERTY MODAL */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-3xl max-h-[85vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-bold uppercase tracking-[0.1em] text-[11px] flex items-center gap-2">
+                <Plus size={14} className="text-blue-500" /> Add Property
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {saveError && <div className="mb-3 p-2 bg-red-950/30 border border-red-900 rounded-lg text-red-300 text-xs">{saveError}</div>}
+            {saveSuccess && <div className="mb-3 p-2 bg-emerald-950/30 border border-emerald-900 rounded-lg text-emerald-300 text-xs">Property created successfully!</div>}
+
+            <form onSubmit={handleSaveProperty} className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Complete Address *</label>
+                <input
+                  type="text" required
+                  value={propertyForm.completeAddress}
+                  onChange={(e) => handleFormChange('completeAddress', e.target.value)}
+                  placeholder="123 Main Street, City, Country"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Erf / Spatial Size</label>
+                <input
+                  type="text"
+                  value={propertyForm.erfSpatialSize}
+                  onChange={(e) => handleFormChange('erfSpatialSize', e.target.value)}
+                  placeholder="e.g. 850 sqm"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Valuation Price</label>
+                <input
+                  type="number" step="0.01"
+                  value={propertyForm.valuationPrice}
+                  onChange={(e) => handleFormChange('valuationPrice', e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Title Deed Type</label>
+                <select
+                  value={propertyForm.titleDeedType}
+                  onChange={(e) => handleFormChange('titleDeedType', e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                >
+                  <option value="Freehold">Freehold</option>
+                  <option value="Leasehold">Leasehold</option>
+                  <option value="Sectional Title">Sectional Title</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Portfolio Zoning</label>
+                <input
+                  type="text"
+                  value={propertyForm.portfolioZoning}
+                  onChange={(e) => handleFormChange('portfolioZoning', e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Market Class</label>
+                <select
+                  value={propertyForm.marketClass}
+                  onChange={(e) => handleFormChange('marketClass', e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                >
+                  <option value="Sale">Sale</option>
+                  <option value="Rental">Rental</option>
+                  <option value="Auction">Auction</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Property Type ID</label>
+                <input
+                  type="number"
+                  value={propertyForm.propertyTypeId}
+                  onChange={(e) => handleFormChange('propertyTypeId', e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Sale Price</label>
+                <input
+                  type="number" step="0.01"
+                  value={propertyForm.salePrice}
+                  onChange={(e) => handleFormChange('salePrice', e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Base Rental Rate</label>
+                <input
+                  type="number" step="0.01"
+                  value={propertyForm.baseRentalRate}
+                  onChange={(e) => handleFormChange('baseRentalRate', e.target.value)}
+                  placeholder="0.00 / month"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Rent Escalation %</label>
+                <input
+                  type="number" step="0.01"
+                  value={propertyForm.rentEscalationPercentage}
+                  onChange={(e) => handleFormChange('rentEscalationPercentage', e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Lease Term (months)</label>
+                <input
+                  type="number"
+                  value={propertyForm.leaseTermMonths}
+                  onChange={(e) => handleFormChange('leaseTermMonths', e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Tenant Install Allowance</label>
+                <input
+                  type="number" step="0.01"
+                  value={propertyForm.tenantInstallationAllowance}
+                  onChange={(e) => handleFormChange('tenantInstallationAllowance', e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] text-slate-400 uppercase mb-1">Latitude</label>
+                  <input
+                    type="number" step="0.000001"
+                    value={propertyForm.latitude}
+                    onChange={(e) => handleFormChange('latitude', e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 uppercase mb-1">Longitude</label>
+                  <input
+                    type="number" step="0.000001"
+                    value={propertyForm.longitude}
+                    onChange={(e) => handleFormChange('longitude', e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                  />
+                </div>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[10px] text-slate-400 uppercase mb-1">Linked Owner ID</label>
+                <input
+                  type="text"
+                  value={propertyForm.linkedOwnerId}
+                  onChange={(e) => handleFormChange('linkedOwnerId', e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+
+              <div className="col-span-2 flex justify-end gap-2 mt-4 pt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-500 disabled:opacity-50 flex items-center gap-1"
+                >
+                  {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  {isSaving ? 'Saving...' : 'Create Property'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

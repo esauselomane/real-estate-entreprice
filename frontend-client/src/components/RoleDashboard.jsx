@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { Building2, Users, Briefcase, Home, Bell, ShieldCheck, Layers, BarChart2, DollarSign, TrendingUp, PieChart as PieIcon, Award } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { propertyService } from '../services/propertyService.js';
 
@@ -52,6 +52,22 @@ const renderChart = (chart) => {
       </ResponsiveContainer>
     );
   }
+  if (kind === 'line') {
+    const lines = chart.lines || [{ dataKey: 'value', color: '#38bdf8', name: 'Value' }];
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+          <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+          <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#cbd5e1', fontSize: 11 }} />
+          <Legend wrapperStyle={{ fontSize: 10, color: '#94a3b8' }} />
+          {lines.map((l, i) => (
+            <Line key={i} type="monotone" dataKey={l.dataKey} stroke={l.color} strokeWidth={2} name={l.name} dot={{ r: 2 }} />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    );
+  }
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
@@ -74,6 +90,7 @@ export default function RoleDashboard() {
   const [metrics, setMetrics] = useState([]);
   const [charts, setCharts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [pipelineSummary, setPipelineSummary] = useState(null);
 
   useEffect(() => {
     const load = async () => {
@@ -97,13 +114,28 @@ export default function RoleDashboard() {
             { title: 'Monthly platform revenue', icon: TrendingUp, kind: 'bar', data: (overview.monthlyBreakdown || []).map((m) => ({ name: m.period, value: Number(m.revenue || 0) })), colors: { default: '#3b82f6' } },
             { title: 'Commission realised by stage', icon: BarChart2, kind: 'bar', data: commissionStages, colors: DEAL_COLORS }
           ]);
-        } else if (role === 'AgencyAdmin') {
-          const [brokers, boards, summary] = await Promise.all([crmService.getBrokers(), crmService.getCRMBoards(), crmService.getPipelineReportSummary()]);
+         } else if (role === 'AgencyAdmin') {
+          // 🎯 AgencyAdmin gets tenant-scoped pipeline summary, monthly trends, and commission data
+          const [brokers, boards, summary, overview, commissionStages] = await Promise.all([
+            crmService.getBrokers(),
+            crmService.getCRMBoards(),
+            crmService.getPipelineReportSummary(),
+            crmService.getCRMReportOverview(),
+            crmService.getCommissionByStage()
+          ]);
+          debugger;
           setMetrics([
             { label: 'Brokers', value: brokers.length, icon: Users },
             { label: 'Agency deals', value: boards.verifiedDeals?.length || 0, icon: Briefcase },
             { label: 'Finalised closed', value: summary.finalizedClosedCount || 0, icon: Award }
           ]);
+          setPipelineSummary({
+            activeLeadsCount: summary.activeLeadsCount,
+            valuationsInProcessCount: summary.valuationsInProcessCount,
+            conveyancingAtDeedsCount: summary.conveyancingAtDeedsCount,
+            finalizedClosedCount: summary.finalizedClosedCount,
+            totalPipelineEstimatedValue: summary.totalPipelineEstimatedValue
+          });
           setCharts([
             { title: 'Broker role distribution', icon: Users, kind: 'pie', data: Object.entries((brokers || []).reduce((a, b) => { const k = b.role || 'Broker'; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([name, value]) => ({ name, value })), colors: ROLE_COLORS },
             { title: 'Broker leaderboard (pipeline value)', icon: Award, kind: 'bar', data: (await crmService.getBrokerLeaderboard()).map((b) => ({ name: b.agent, value: Number(b.totalValue) })), colors: { default: '#3b82f6' } },
@@ -112,7 +144,10 @@ export default function RoleDashboard() {
               { name: 'Valuations In Process', value: summary.valuationsInProcessCount },
               { name: 'Conveyancing At Deeds', value: summary.conveyancingAtDeedsCount },
               { name: 'Finalised Closed', value: summary.finalizedClosedCount }
-            ], colors: { default: '#10b981' } }
+            ], colors: { default: '#10b981' } },
+            { title: 'Monthly trends', icon: TrendingUp, kind: 'line', data: (overview?.monthlyBreakdown || []).map((m) => ({ name: m.period, value: Number(m.leads || 0) })), lines: [{ dataKey: 'value', color: '#38bdf8', name: 'Leads' }] },
+            { title: 'Revenue by month', icon: TrendingUp, kind: 'line', data: (overview?.monthlyBreakdown || []).map((m) => ({ name: m.period, value: Number(m.revenue || 0) })), lines: [{ dataKey: 'value', color: '#4ade80', name: 'Revenue' }] },
+            { title: 'Commission by stage', icon: BarChart2, kind: 'bar', data: (commissionStages || []).map((c) => ({ name: formatTitle(c.period), value: Number(c.revenue || 0) })), colors: DEAL_COLORS }
           ]);
         } else if (role === 'Broker') {
           const [boards, properties, commissionStages] = await Promise.all([
@@ -177,7 +212,35 @@ export default function RoleDashboard() {
         ))}
       </div>
 
-      {isLoading ? (
+       {pipelineSummary && (
+        <div>
+          <h4 className="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-3">Pipeline Summary</h4>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+              <div className="text-2xl font-bold text-blue-400">{pipelineSummary.activeLeadsCount || 0}</div>
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">Active Leads</div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+              <div className="text-2xl font-bold text-amber-400">{pipelineSummary.valuationsInProcessCount || 0}</div>
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">Valuations In Process</div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+              <div className="text-2xl font-bold text-violet-400">{pipelineSummary.conveyancingAtDeedsCount || 0}</div>
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">Conveyancing</div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+              <div className="text-2xl font-bold text-emerald-400">{pipelineSummary.finalizedClosedCount || 0}</div>
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">Closed Won</div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+              <div className="text-sm font-black text-white">R {Number(pipelineSummary.totalPipelineEstimatedValue || 0).toLocaleString()}</div>
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">Pipeline Value</div>
+            </div>
+          </div>
+        </div>
+       )}
+
+       {isLoading ? (
         <div className="py-16 text-center text-slate-500 text-sm">Loading role-specific analytics...</div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

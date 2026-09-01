@@ -55,6 +55,27 @@ using (var serviceScope = app.Services.CreateScope())
     // [OperationalRecords]/[GeographyRecords]/[ContactPersons] scripts below. CRMContacts
     // supports nullable company/legal-entity links so leads can be auto-promoted to deals
     // with buyer/seller contacts that are not bound to a company.
+
+    // 🎯 Fix: Drop LeadRecords table if LeadStage column is int (pre-HasConversion<string> schema).
+    // HasConversion<string>() requires an nvarchar column so EF Core generates WHERE [LeadStage] = N'Contacted'.
+    // On databases created before the string conversion was added, the column remains int and CountAsync
+    // with an enum filter returns the entire table instead of the filtered subset.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[LeadRecords]', N'U') IS NOT NULL
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM sys.columns c
+                JOIN sys.types ty ON c.user_type_id = ty.user_type_id
+                WHERE c.object_id = OBJECT_ID(N'[LeadRecords]')
+                AND c.name = N'LeadStage'
+                AND ty.name = N'int'
+            )
+            BEGIN
+                DROP TABLE [LeadRecords]
+            END
+        END
+    ");
+    databaseContext.Database.EnsureCreated();
     databaseContext.Database.ExecuteSqlRaw(@"
         IF OBJECT_ID(N'[CRMContacts]', N'U') IS NULL
         BEGIN

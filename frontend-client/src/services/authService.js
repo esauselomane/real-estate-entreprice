@@ -57,7 +57,7 @@ export const authService = {
       throw error.response?.data?.message || 'User directory sync failed.';
     }
   },
-  updateUserRole: async (userId, systemRole) => {
+   updateUserRole: async (userId, systemRole) => {
     try {
       const response = await apiClient.put(`/auth/users/${userId}/role`, { systemRole });
       return response.data;
@@ -65,6 +65,16 @@ export const authService = {
       throw error.response?.data?.message || 'Role reassignment failed.';
     }
   },
+
+   // --- 🚫 DEACTIVATE / disable a user account ( AgencyAdmin: own-tenant only ) ---
+   disableUser: async (userId) => {
+     try {
+       const response = await apiClient.put(`/auth/users/${userId}/disable`);
+       return response.data;
+     } catch (error) {
+       throw error.response?.data?.message || 'User deactivation failed.';
+     }
+   },
 
   // --- 📝 TRIAL ACCOUNT: Set password from activation token ---
   setTrialPassword: async (token, password) => {
