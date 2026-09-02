@@ -22,12 +22,13 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
 
   const pollRef = useRef(null);
 
+  const profile = activeProfile || {};
   const brokerProfile = {
-    fullName: activeProfile.name || 'Unassigned broker',
-    emailAddress: activeProfile.email || 'No email on file',
-    phoneNumber: activeProfile.phone || 'No phone on file',
+    fullName: profile.name || 'Unassigned broker',
+    emailAddress: profile.email || 'No email on file',
+    phoneNumber: profile.phone || 'No phone on file',
     companyReferenceNumber: `PROP-REF-${dealData?.dealId || '991'}`,
-    companyName: activeProfile.tenantId || 'Agency workspace'
+    companyName: profile.tenantId || 'Agency workspace'
   };
 
   const isOnTrial = isTrialUser();
