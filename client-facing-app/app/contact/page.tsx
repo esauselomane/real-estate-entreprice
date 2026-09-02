@@ -2,9 +2,9 @@ import { Mail, MapPin, Phone } from "lucide-react";
 import ContactForm from "@/components/contact/ContactForm";
 
 const contactDetails = {
-  email: process.env.NEXT_PUBLIC_CONTACT_EMAIL || "hello@realestate.example",
-  phone: "+27 21 555 0199",
-  address: "12th Floor, FoundryCourt, 16 Epping Crescent, Cape Town, South Africa",
+  email: process.env.NEXT_PUBLIC_CONTACT_EMAIL || "esauselo@gmail.com",
+  phone: "+27 75 0422 197",
+  address: "8 Upper Mountain Road, Walmer Estate, Cape Town, 7925",
 };
 
 export const metadata = {

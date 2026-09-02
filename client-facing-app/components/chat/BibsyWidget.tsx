@@ -268,7 +268,7 @@ export default function BibsyWidget() {
         );
       }
     } catch {
-      addBot(`Sorry, something went wrong saving your details. Please try again or email us at ${process.env.NEXT_PUBLIC_CONTACT_EMAIL || "hello@realestate.example"}.`);
+      addBot(`Sorry, something went wrong saving your details. Please try again or email us at ${process.env.NEXT_PUBLIC_CONTACT_EMAIL || "esauselo@gmail.com"}.`);
     } finally {
       setSubmitting(false);
     }

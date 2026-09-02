@@ -1,46 +1,22 @@
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
-
 scrape_configs:
-  - job_name: 'identity'
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx_or_404]
     static_configs:
-      - targets: ['identity-service:5001']
-    metrics_path: '/health'
-    scheme: 'http'
-
-  - job_name: 'property'
-    static_configs:
-      - targets: ['property-service:5002']
-    metrics_path: '/health'
-    scheme: 'http'
-
-  - job_name: 'crm'
-    static_configs:
-      - targets: ['crm-service:5003']
-    metrics_path: '/health'
-    scheme: 'http'
-
-  - job_name: 'developer-api'
-    static_configs:
-      - targets: ['developer-api:5006']
-    metrics_path: '/health'
-    scheme: 'http'
-
-  - job_name: 'gateway'
-    static_configs:
-      - targets: ['gateway:5000']
-    metrics_path: '/health'
-    scheme: 'http'
-
-  - job_name: 'client-facing'
-    static_configs:
-      - targets: ['client-facing:80']
-    metrics_path: '/health'
-    scheme: 'http'
-
-  - job_name: 'frontend-client'
-    static_configs:
-      - targets: ['frontend-client:80']
-    metrics_path: '/health'
-    scheme: 'http'
+      - targets:
+        - http://identity-service:5001/health
+        - http://property-service:5002/health
+        - http://crm-service:5003/health
+        - http://developer-api:5006/health
+        - http://gateway:5000/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

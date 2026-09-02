@@ -55,7 +55,7 @@ export default function ValueProp() {
               type="button"
               className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-6 py-3 text-base font-semibold text-slate-900 transition-all duration-200 ease-in-out hover:scale-105 hover:bg-emerald-400 hover:shadow-lg active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
             >
-              Start the demo
+              Login
               <ArrowRight className="h-5 w-5" />
             </button>
           </Link>

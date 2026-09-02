@@ -15,7 +15,7 @@ namespace Identity.Microservice.Data
                 throw new ArgumentNullException(nameof(context));
             }
 
-            var supportEmail = configuration["Email:SupportAddress"] ?? "hello@realestate.example";
+            var supportEmail = configuration["Email:SupportAddress"] ?? "esauselo@gmail.com";
             var adminEmail = configuration["Email:AdminEmail"] ?? "admin@agency.local";
             var platformAdminEmail = configuration["Email:PlatformAdminEmail"] ?? "platform.admin@agency.local";
             var agencyAdminEmail = configuration["Email:AgencyAdminEmail"] ?? "agency.admin@agency.local";
