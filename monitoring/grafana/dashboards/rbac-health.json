@@ -5,63 +5,80 @@
   "panels": [
     {
       "type": "stat",
-      "title": "Identity",
+      "title": "Identity (5001)",
       "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
       "targets": [
-        { "expr": "up{job=\"identity\"}", "refId": "A" }
+        { "expr": "probe_success{instance=~\".*5001.*\"}", "refId": "A" }
       ],
       "fieldConfig": {
         "defaults": {
           "mappings": [
             { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
-          ]
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": 0 }, { "color": "green", "value": 1 } ] }
         }
-      }
+      },
+      "options": { "colorMode": "background" }
     },
     {
       "type": "stat",
-      "title": "Property",
+      "title": "Property (5002)",
       "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
       "targets": [
-        { "expr": "up{job=\"property\"}", "refId": "A" }
+        { "expr": "probe_success{instance=~\".*5002.*\"}", "refId": "A" }
       ],
       "fieldConfig": {
         "defaults": {
           "mappings": [
             { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
-          ]
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": 0 }, { "color": "green", "value": 1 } ] }
         }
-      }
+      },
+      "options": { "colorMode": "background" }
     },
     {
       "type": "stat",
-      "title": "CRM",
+      "title": "CRM (5003)",
       "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
       "targets": [
-        { "expr": "up{job=\"crm\"}", "refId": "A" }
+        { "expr": "probe_success{instance=~\".*5003.*\"}", "refId": "A" }
       ],
       "fieldConfig": {
         "defaults": {
           "mappings": [
             { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
-          ]
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": 0 }, { "color": "green", "value": 1 } ] }
         }
-      }
+      },
+      "options": { "colorMode": "background" }
     },
     {
       "type": "stat",
-      "title": "Gateway",
+      "title": "Gateway (5000)",
       "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
       "targets": [
-        { "expr": "up{job=\"gateway\"}", "refId": "A" }
+        { "expr": "probe_success{instance=~\".*5000.*\"}", "refId": "A" }
       ],
       "fieldConfig": {
         "defaults": {
           "mappings": [
             { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
-          ]
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": 0 }, { "color": "green", "value": 1 } ] }
         }
-      }
+      },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "type": "timeseries",
+      "title": "Probe Latency (HTTP Duration)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "targets": [
+        { "expr": "probe_duration_seconds{job=\"blackbox\"}", "refId": "A", "legendFormat": "{{instance}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
     }
   ],
   "refresh": "10s",
