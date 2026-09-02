@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Search, MapPin, X, SlidersHorizontal, Building2, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Search, MapPin, X, SlidersHorizontal, Building2, Loader2, Pencil } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 
 export default function PropertySearch({ onSelectProperty }) {
@@ -15,6 +15,13 @@ export default function PropertySearch({ onSelectProperty }) {
   const [properties, setProperties] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [editingProperty, setEditingProperty] = useState(null);
+  const [propertyForm, setPropertyForm] = useState({ completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold', portfolioZoning: '', marketClass: 'Sale', propertyTypeId: '', valuationPrice: '', salePrice: '', latitude: '', longitude: '', linkedOwnerId: '' });
+  const [addressQuery, setAddressQuery] = useState('');
+  const [addressResults, setAddressResults] = useState([]);
+  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
+  const [showAddressDropdown, setShowAddressDropdown] = useState(false);
+  const addressDebounceRef = useRef(null);
 
   // 🔄 LIVE BACKEND SYNCHRONIZATION PIPELINE: Fetches filtered rows directly from SQL Server
   useEffect(() => {
@@ -40,6 +47,8 @@ export default function PropertySearch({ onSelectProperty }) {
     fetchLiveProperties();
     }, [selectedLocations, propertyType, minSize, maxSize, listingType]); // Re-fires instantly on layout modifications
 
+  useEffect(() => () => { if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current); }, []);
+
 
   const handleAddLocation = (e) => {
     e.preventDefault();
@@ -52,6 +61,75 @@ export default function PropertySearch({ onSelectProperty }) {
   const handleRemoveLocation = (locToRemove) => {
     setSelectedLocations(selectedLocations.filter(loc => loc !== locToRemove));
   };
+
+  const searchAddress = async (query) => {
+    setAddressQuery(query);
+    if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
+    if (query.trim().length < 3) { setAddressResults([]); setShowAddressDropdown(false); return; }
+    addressDebounceRef.current = setTimeout(async () => {
+      setIsSearchingAddress(true);
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`);
+        if (!res.ok) throw new Error(`Geocoding failed: ${res.status}`);
+        const data = await res.json();
+        setAddressResults(data || []);
+        setShowAddressDropdown(true);
+      } catch {
+        setAddressResults([]);
+      } finally {
+        setIsSearchingAddress(false);
+      }
+    }, 350);
+  };
+
+  const selectAddress = (result) => {
+    setPropertyForm((prev) => ({ ...prev, completeAddress: result.display_name, latitude: result.lat, longitude: result.lon }));
+    setAddressQuery(result.display_name);
+    setShowAddressDropdown(false);
+    setAddressResults([]);
+  };
+
+  const openEditProperty = async (propertyId) => {
+    try {
+      const prop = await propertyService.getPropertyById(propertyId);
+      setEditingProperty(prop);
+      setPropertyForm({
+        completeAddress: prop.completeAddress || '',
+        erfSpatialSize: prop.erfSpatialSize || '',
+        titleDeedType: prop.titleDeedType || 'Freehold',
+        portfolioZoning: prop.portfolioZoning || '',
+        marketClass: prop.marketClass || 'Sale',
+        propertyTypeId: String(prop.propertyTypeId || ''),
+        valuationPrice: String(prop.valuationPrice || ''),
+        salePrice: String(prop.salePrice || ''),
+        latitude: String(prop.latitude || ''),
+        longitude: String(prop.longitude || ''),
+        linkedOwnerId: prop.linkedOwnerId || ''
+      });
+      setAddressQuery(prop.completeAddress || '');
+    } catch (err) { alert(err || 'Failed to load property.'); }
+  };
+
+  const handleUpdateProperty = async (e) => {
+    e.preventDefault();
+    if (!editingProperty) return;
+    try {
+      await propertyService.updateProperty(editingProperty.propertyId, {
+        ...propertyForm,
+        propertyTypeId: parseInt(propertyForm.propertyTypeId) || 0,
+        valuationPrice: parseFloat(propertyForm.valuationPrice) || 0,
+        salePrice: parseFloat(propertyForm.salePrice) || 0,
+        latitude: parseFloat(propertyForm.latitude) || 0,
+        longitude: parseFloat(propertyForm.longitude) || 0,
+        linkedOwnerId: propertyForm.linkedOwnerId
+      });
+      setEditingProperty(null);
+      setAddressQuery('');
+      setAddressResults([]);
+      setShowAddressDropdown(false);
+    } catch (err) { alert(err || 'Failed to update property.'); }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       
@@ -186,7 +264,10 @@ export default function PropertySearch({ onSelectProperty }) {
                      <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
                        {prop.isForSale && prop.isForRent ? 'SALE + RENT' : prop.isForSale ? 'FOR SALE' : prop.isForRent ? 'FOR RENT' : 'OFF MARKET'}
                      </span>
-                     <span className="text-sm font-bold text-slate-300">{prop.erfSpatialSize}</span>
+                     <div className="flex items-center gap-2">
+                       <button type="button" onClick={(e) => { e.stopPropagation(); openEditProperty(prop.propertyId); }} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-colors" title="Edit property"><Pencil size={14} /></button>
+                       <span className="text-sm font-bold text-slate-300">{prop.erfSpatialSize}</span>
+                     </div>
                    </div>
 
                   
@@ -203,15 +284,15 @@ export default function PropertySearch({ onSelectProperty }) {
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
-                  <div>
-                    <span className="block text-[10px] text-slate-500 uppercase font-bold tracking-wider">Valuation Cost Structure</span>
-                    <span className="text-lg font-black text-white">
-                      {prop.isForRent ? `R${prop.baseRentalRate?.toLocaleString() || prop.valuationPrice.toLocaleString()}/mo` : `R${prop.salePrice?.toLocaleString() || prop.valuationPrice.toLocaleString()}`}
-                    </span>
-                  </div>
-                  <span className="text-xs text-blue-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity">Drill Down &rarr;</span>
-                </div>
+                    <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
+                      <div>
+                        <span className="block text-[10px] text-slate-500 uppercase font-bold tracking-wider">Valuation Cost Structure</span>
+                        <span className="text-lg font-black text-white">
+                          {prop.isForRent ? `R${(prop.subUnits?.[0]?.rentalRate || prop.valuationPrice).toLocaleString()}/mo` : `R${prop.salePrice?.toLocaleString() || prop.valuationPrice.toLocaleString()}`}
+                        </span>
+                      </div>
+                      <span className="text-xs text-blue-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity">Drill Down &rarr;</span>
+                    </div>
               </div>
             ))}
 
@@ -224,6 +305,50 @@ export default function PropertySearch({ onSelectProperty }) {
         )}
       </div>
 
+      {/* Edit Property Modal */}
+      {editingProperty && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-white uppercase tracking-wider">Edit Property</h3>
+              <button type="button" onClick={() => { setEditingProperty(null); setAddressQuery(''); setAddressResults([]); }} className="text-slate-400 hover:text-white"><X size={14} /></button>
+            </div>
+            <form onSubmit={handleUpdateProperty} className="space-y-3">
+              <div className="space-y-1 relative">
+                <label className="text-[10px] text-slate-400 uppercase">Address Search</label>
+                <input type="text" value={addressQuery} onChange={(e) => searchAddress(e.target.value)} onFocus={() => addressResults.length > 0 && setShowAddressDropdown(true)} placeholder="Search address..." className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" />
+                {isSearchingAddress && <Loader2 className="absolute right-3 top-7 text-blue-500 animate-spin" size={14} />}
+                {showAddressDropdown && addressResults.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl shadow-xl max-h-48 overflow-y-auto">
+                    {addressResults.map((r) => (
+                      <button key={r.place_id} type="button" onClick={() => selectAddress(r)} className="w-full text-left px-3 py-2 hover:bg-slate-800 text-xs text-white">
+                        {r.display_name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1 md:col-span-2"><label className="text-[10px] text-slate-400 uppercase">Complete Address</label><input required type="text" value={propertyForm.completeAddress} onChange={(e) => setPropertyForm({ ...propertyForm, completeAddress: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">ERF Size</label><input type="text" value={propertyForm.erfSpatialSize} onChange={(e) => setPropertyForm({ ...propertyForm, erfSpatialSize: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Title Deed Type</label><select value={propertyForm.titleDeedType} onChange={(e) => setPropertyForm({ ...propertyForm, titleDeedType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"><option>Freehold</option><option>Sectional Title</option><option>Leasehold</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Zoning</label><input type="text" value={propertyForm.portfolioZoning} onChange={(e) => setPropertyForm({ ...propertyForm, portfolioZoning: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Market Class</label><select value={propertyForm.marketClass} onChange={(e) => setPropertyForm({ ...propertyForm, marketClass: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"><option>Sale</option><option>Rent</option><option>Both</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Property Type ID</label><input type="number" value={propertyForm.propertyTypeId} onChange={(e) => setPropertyForm({ ...propertyForm, propertyTypeId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Valuation Price (R)</label><input type="number" value={propertyForm.valuationPrice} onChange={(e) => setPropertyForm({ ...propertyForm, valuationPrice: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Sale Price (R)</label><input type="number" value={propertyForm.salePrice} onChange={(e) => setPropertyForm({ ...propertyForm, salePrice: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Latitude</label><input type="number" step="any" value={propertyForm.latitude} onChange={(e) => setPropertyForm({ ...propertyForm, latitude: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Longitude</label><input type="number" step="any" value={propertyForm.longitude} onChange={(e) => setPropertyForm({ ...propertyForm, longitude: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1 md:col-span-2"><label className="text-[10px] text-slate-400 uppercase">Linked Owner ID</label><input type="text" value={propertyForm.linkedOwnerId} onChange={(e) => setPropertyForm({ ...propertyForm, linkedOwnerId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold">Save Changes</button>
+                <button type="button" onClick={() => { setEditingProperty(null); setAddressQuery(''); setAddressResults([]); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

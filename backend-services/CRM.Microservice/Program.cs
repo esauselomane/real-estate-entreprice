@@ -75,7 +75,37 @@ using (var serviceScope = app.Services.CreateScope())
             END
         END
     ");
+
+    // 🎯 Fix: Drop DealRecords table if DealStage column is int (pre-HasConversion<string> schema).
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[DealRecords]', N'U') IS NOT NULL
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM sys.columns c
+                JOIN sys.types ty ON c.user_type_id = ty.user_type_id
+                WHERE c.object_id = OBJECT_ID(N'[DealRecords]')
+                AND c.name = N'DealStage'
+                AND ty.name = N'int'
+            )
+            BEGIN
+                DROP TABLE [DealRecords]
+            END
+        END
+    ");
     databaseContext.Database.EnsureCreated();
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[LeadRecords]', N'U') IS NOT NULL
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns c
+                WHERE c.object_id = OBJECT_ID(N'[LeadRecords]')
+                AND c.name = N'LeadType'
+            )
+            BEGIN
+                ALTER TABLE [LeadRecords] ADD [LeadType] nvarchar(50) NOT NULL CONSTRAINT DF_LeadRecords_LeadType DEFAULT N'ForSale'
+            END
+        END
+    ");
     databaseContext.Database.ExecuteSqlRaw(@"
         IF OBJECT_ID(N'[CRMContacts]', N'U') IS NULL
         BEGIN

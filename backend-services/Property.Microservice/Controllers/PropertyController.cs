@@ -247,6 +247,9 @@ namespace Property.Microservice.Controllers
                 NetRentableAreaSqM = payload.NetRentableAreaSqM,
                 SpecificUnitRentalPrice = payload.SpecificUnitRentalPrice,
                 SpecificUnitSalePrice = payload.SpecificUnitSalePrice,
+                RentalRate = payload.RentalRate,
+                RentEscalationPercentage = payload.RentEscalationPercentage,
+                LeaseTermMonths = payload.LeaseTermMonths,
                 IsCurrentlyVacant = payload.IsCurrentlyVacant,
                 UnitImagesJson = "[]",
                 CreatedAt = DateTime.UtcNow
@@ -299,6 +302,9 @@ namespace Property.Microservice.Controllers
             unit.NetRentableAreaSqM = payload.NetRentableAreaSqM;
             unit.SpecificUnitRentalPrice = payload.SpecificUnitRentalPrice;
             unit.SpecificUnitSalePrice = payload.SpecificUnitSalePrice;
+            unit.RentalRate = payload.RentalRate;
+            unit.RentEscalationPercentage = payload.RentEscalationPercentage;
+            unit.LeaseTermMonths = payload.LeaseTermMonths;
             unit.IsCurrentlyVacant = payload.IsCurrentlyVacant;
 
             await _context.SaveChangesAsync();
@@ -564,9 +570,6 @@ namespace Property.Microservice.Controllers
                 PropertyTypeId = payload.PropertyTypeId > 0 ? payload.PropertyTypeId : 1,
                 ValuationPrice = payload.ValuationPrice,
                 SalePrice = payload.SalePrice,
-                BaseRentalRate = payload.BaseRentalRate,
-                RentEscalationPercentage = payload.RentEscalationPercentage,
-                LeaseTermMonths = payload.LeaseTermMonths,
                 TenantInstallationAllowance = payload.TenantInstallationAllowance,
                 Latitude = payload.Latitude != 0 ? payload.Latitude : -33.9249m,
                 Longitude = payload.Longitude != 0 ? payload.Longitude : 18.4241m,
@@ -586,6 +589,9 @@ namespace Property.Microservice.Controllers
                         NetRentableAreaSqM = unitPayload.NetRentableAreaSqM,
                         SpecificUnitRentalPrice = unitPayload.SpecificUnitRentalPrice,
                         SpecificUnitSalePrice = unitPayload.SpecificUnitSalePrice,
+                        RentalRate = unitPayload.RentalRate,
+                        RentEscalationPercentage = unitPayload.RentEscalationPercentage,
+                        LeaseTermMonths = unitPayload.LeaseTermMonths,
                         IsCurrentlyVacant = unitPayload.IsCurrentlyVacant,
                         UnitImagesJson = "[]",
                         CreatedAt = DateTime.UtcNow
@@ -645,9 +651,6 @@ namespace Property.Microservice.Controllers
             property.PropertyTypeId = payload.PropertyTypeId > 0 ? payload.PropertyTypeId : property.PropertyTypeId;
             property.ValuationPrice = payload.ValuationPrice;
             property.SalePrice = payload.SalePrice;
-            property.BaseRentalRate = payload.BaseRentalRate;
-            property.RentEscalationPercentage = payload.RentEscalationPercentage;
-            property.LeaseTermMonths = payload.LeaseTermMonths;
             property.TenantInstallationAllowance = payload.TenantInstallationAllowance;
             property.Latitude = payload.Latitude;
             property.Longitude = payload.Longitude;
@@ -710,11 +713,11 @@ namespace Property.Microservice.Controllers
                     query = query.Where(p => p.IsForRent);
             }
 
-            // Price range filter (uses the active listing price; sale→SalePrice, rent→BaseRentalRate)
+            // Price range filter (uses the active listing price; sale→SalePrice, rent→unit RentalRate)
             if (criteria.MinPrice.HasValue)
-                query = query.Where(p => (criteria.ListingType == "Rent" ? p.BaseRentalRate : p.SalePrice) >= criteria.MinPrice.Value);
+                query = query.Where(p => (criteria.ListingType == "Rent" ? p.SubUnits.Any(u => u.RentalRate >= criteria.MinPrice.Value) : p.SalePrice >= criteria.MinPrice.Value));
             if (criteria.MaxPrice.HasValue)
-                query = query.Where(p => (criteria.ListingType == "Rent" ? p.BaseRentalRate : p.SalePrice) <= criteria.MaxPrice.Value);
+                query = query.Where(p => (criteria.ListingType == "Rent" ? p.SubUnits.Any(u => u.RentalRate <= criteria.MaxPrice.Value) : p.SalePrice <= criteria.MaxPrice.Value));
 
             // The UI submits area bounds in square metres.  Use linked unit area
             // where available, falling back to the text field only for display.

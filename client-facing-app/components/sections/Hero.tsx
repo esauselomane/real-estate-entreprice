@@ -34,16 +34,16 @@ export default function Hero() {
       <div className="container relative z-10 grid items-center gap-12 lg:grid-cols-2 lg:py-8">
         <div>
           {hero.badge && (
-            <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-extrabold text-emerald-700 ring-1 ring-emerald-200">
+            <span className="inline-flex rounded-full bg-emerald-900/40 px-3 py-1 text-xs font-extrabold text-emerald-300 ring-1 ring-emerald-700">
               {hero.badge}
             </span>
           )}
-          <h1 className="mt-4 text-4xl font-display font-extrabold tracking-tight text-slate-900 sm:text-5xl">
+          <h1 className="mt-4 text-4xl font-display font-extrabold tracking-tight text-white sm:text-5xl">
             {hero.headline}
           </h1>
-          <p className="mt-5 text-lg text-slate-600">{hero.subhead}</p>
+          <p className="mt-5 text-lg text-slate-300">{hero.subhead}</p>
           {hero.punchline && (
-            <p className="mt-2 text-base font-medium italic text-blue-700">
+            <p className="mt-2 text-base font-medium italic text-blue-400">
               {hero.punchline}
             </p>
           )}
@@ -52,7 +52,7 @@ export default function Hero() {
             <Link href="/login">
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-base font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-base font-semibold text-white transition-all duration-200 ease-in-out hover:scale-105 hover:bg-blue-500 hover:shadow-lg active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
               >
                 Login
                 <ArrowRight className="h-5 w-5" />
@@ -61,7 +61,7 @@ export default function Hero() {
              <Link href="/onboarding">
                <button
                  type="button"
-                 className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-6 py-3 text-base font-semibold text-slate-700 transition-colors hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+                 className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/60 px-6 py-3 text-base font-semibold text-slate-200 transition-all duration-200 ease-in-out hover:scale-105 hover:bg-slate-800 hover:shadow-lg active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
                >
                  <Play className="h-4 w-4" />
                  Start Trial
@@ -72,7 +72,7 @@ export default function Hero() {
 
         <div
           aria-hidden="true"
-          className="esau-div relative isolate self-start rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/60 lg:sticky lg:top-8"
+          className="esau-div relative isolate self-start rounded-2xl bg-slate-800/60 p-4 shadow-lg shadow-black/20 ring-1 ring-slate-700 lg:sticky lg:top-8"
         >
           <div className="relative overflow-hidden rounded-xl">
             {heroSlides.map((slide, index) => (
@@ -105,7 +105,7 @@ export default function Hero() {
             <button
               type="button"
               onClick={prev}
-              className="absolute left-3 top-1/2 -translate-y-1/2 z-10 rounded-full bg-white/90 p-2 text-slate-700 shadow-lg transition-colors hover:bg-white"
+              className="absolute left-3 top-1/2 -translate-y-1/2 z-10 rounded-full bg-slate-800/90 p-2 text-slate-200 shadow-lg transition-colors hover:bg-slate-700"
               aria-label="Previous slide"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -113,7 +113,7 @@ export default function Hero() {
             <button
               type="button"
               onClick={next}
-              className="absolute right-3 top-1/2 -translate-y-1/2 z-10 rounded-full bg-white/90 p-2 text-slate-700 shadow-lg transition-colors hover:bg-white"
+              className="absolute right-3 top-1/2 -translate-y-1/2 z-10 rounded-full bg-slate-800/90 p-2 text-slate-200 shadow-lg transition-colors hover:bg-slate-700"
               aria-label="Next slide"
             >
               <ChevronRight className="h-4 w-4" />
@@ -127,7 +127,7 @@ export default function Hero() {
                 type="button"
                 onClick={() => setCurrent(index)}
                 className={`h-2 rounded-full transition-all ${
-                  index === current ? "w-6 bg-blue-600" : "w-2 bg-slate-300 hover:bg-slate-400"
+                  index === current ? "w-6 bg-blue-500" : "w-2 bg-slate-600 hover:bg-slate-500"
                 }`}
                 aria-label={`Go to slide ${index + 1}`}
               />

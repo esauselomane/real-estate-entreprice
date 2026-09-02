@@ -6,15 +6,16 @@ export const propertyService = {
   searchProperties: async (locationsArray, propertyType, minSize, maxSize, listingType = 'All', page = 1) => {
     try {
       const criteriaPayload = {
-        locations: locationsArray, // E.g., ['Green Point', 'Sandton']
-        propertyType: propertyType, // E.g., 'Residential', 'Commercial', 'Retail', 'All'
+        locations: locationsArray,
+        propertyType: propertyType,
         minSize: minSize ? parseInt(minSize, 10) : null,
         maxSize: maxSize ? parseInt(maxSize, 10) : null,
-        listingType: listingType     // All | Sale | Rent — filters IsForSale/IsForRent flags
+        listingType: listingType
       };
 
       const response = await apiClient.post('/properties/search?page=' + page, criteriaPayload);
-      return response.data;
+      const data = response.data;
+      return Object.assign(data, { totalCount: Number(response.headers['x-total-count'] || 0) });
     } catch (error) {
       throw error.response?.data?.message || 'Search execution failed on the database engine.';
     }
@@ -241,6 +242,15 @@ export const propertyService = {
       return response.data;
     } catch (error) {
       throw error.response?.data?.message || 'Brochure generation request failed.';
+    }
+  },
+
+  updateProperty: async (propertyId, payload) => {
+    try {
+      const response = await apiClient.put(`/properties/${propertyId}`, payload);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Failed to update property.';
     }
   }
 };

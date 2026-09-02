@@ -10,7 +10,6 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 export default function SystemAdminWorkspace() {
   const { userRole: currentUserRole } = useAuth();
   const [agencies, setAgencies] = useState([]);
-  const [brokers, setBrokers] = useState([]);
   const [systemUsers, setSystemUsers] = useState([]);
   const [agencyContacts, setAgencyContacts] = useState({});
   const [roles, setRoles] = useState([]);
@@ -21,11 +20,11 @@ export default function SystemAdminWorkspace() {
     contactEmail: '', headquartersAddress: '',
     adminFullName: '', adminEmail: '', adminPassword: ''
   });
-  const [brokerForm, setBrokerForm] = useState({ fullName: '', email: '', phone: '', agencyId: '', role: 'Broker' });
+  const [userForm, setUserForm] = useState({ fullName: '', email: '', password: '', systemRole: 'Broker' });
+  const [editingUser, setEditingUser] = useState(null);
   const [contactForm, setContactForm] = useState({ fullName: '', email: '', phone: '', position: '', role: 'Owner', isAgencyAdmin: false });
   const [error, setError] = useState('');
   const [editingAgency, setEditingAgency] = useState(null);
-  const [editingBroker, setEditingBroker] = useState(null);
   const [editingContact, setEditingContact] = useState(null);
   const [expandedAgency, setExpandedAgency] = useState(null);
 
@@ -55,22 +54,19 @@ export default function SystemAdminWorkspace() {
     try {
       const rows = await crmService.getAgencies();
       setAgencies(rows || []);
-      if (!agencyForm.agencyId && (rows || []).length) {
-        setBrokerForm((prev) => ({ ...prev, agencyId: rows[0].agencyId || rows[0].tenantId || '' }));
-      }
     } catch (err) { setError(err || 'Unable to load agency records.'); }
   };
 
   const loadBrokers = async () => {
-    try { setBrokers(await crmService.getBrokers() || []); }
-    catch (err) { setError(err || 'Unable to load broker roster.'); }
+    try { return await crmService.getBrokers() || []; }
+    catch { return []; }
   };
 
   const loadContacts = async (agencyId) => {
     try {
       const contacts = await crmService.getAgencyContacts(agencyId);
       setAgencyContacts((prev) => ({ ...prev, [agencyId]: contacts || [] }));
-    } catch (err) {
+    } catch {
       setAgencyContacts((prev) => ({ ...prev, [agencyId]: [] }));
     }
   };
@@ -89,9 +85,9 @@ export default function SystemAdminWorkspace() {
 
   const [activeTab, setActiveTab] = useState(isSuperAdmin ? 'agencies' : 'users');
 
-  useEffect(() => { loadData(); }, []);
-
   const loadData = async () => { await Promise.all([loadAgencies(), loadBrokers(), loadUsers(), isSuperAdmin && loadRoles()]); };
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   // Roles an admin may assign: PlatformAdmin gets the full palette; AgencyAdmin only agency-scoped roles.
   const assignableRoles = isSuperAdmin ? ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] : ['Broker', 'Owner', 'Tenant'];
@@ -122,7 +118,7 @@ export default function SystemAdminWorkspace() {
 
   const handleRoleDelete = async (role) => {
     if (!isSuperAdmin) return;
-    if (!window.confirm(`Deactivate role "${role.name}"? This is non-destructive.`)) return;
+    if (!window.confirm(`Deactivate role "R{role.name}"? This is non-destructive.`)) return;
     try {
       await systemRolesService.deleteSystemRole(role.roleDefId);
       await loadRoles();
@@ -145,8 +141,8 @@ export default function SystemAdminWorkspace() {
               systemRole: 'AgencyAdmin',
               passwordHash: agencyForm.adminPassword || 'ChangeMeNow!'
             });
-          } catch (err) {
-            alert(`Agency created, but the linked admin user could not be provisioned: ${err || 'registration failed'}`);
+          } catch {
+            alert(`Agency created, but the linked admin user could not be provisioned: registration failed`);
           }
         }
       }
@@ -154,17 +150,6 @@ export default function SystemAdminWorkspace() {
       setEditingAgency(null);
       await loadAgencies();
     } catch (err) { alert(err || 'Agency creation failed.'); }
-  };
-
-  const handleBrokerSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      if (editingBroker) await crmService.updateBroker(editingBroker.brokerId, { ...editingBroker, ...brokerForm });
-      else await crmService.createBroker(brokerForm);
-      setBrokerForm((prev) => ({ ...prev, fullName: '', email: '', phone: '', role: 'Broker' }));
-      setEditingBroker(null);
-      await loadBrokers();
-    } catch (err) { alert(err || 'Broker onboarding failed.'); }
   };
 
   const handleContactSubmit = async (e) => {
@@ -331,7 +316,7 @@ export default function SystemAdminWorkspace() {
         <button
           onClick={() => setActiveTab('agencies')}
           type="button"
-          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
+          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
             activeTab === 'agencies' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
           }`}
         >
@@ -341,7 +326,7 @@ export default function SystemAdminWorkspace() {
         <button
           onClick={() => setActiveTab('users')}
           type="button"
-          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
+          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
             activeTab === 'users' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
           }`}
         >
@@ -350,7 +335,7 @@ export default function SystemAdminWorkspace() {
         <button
           onClick={() => setActiveTab('access')}
           type="button"
-          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
+          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
             activeTab === 'access' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
           }`}
         >
@@ -360,7 +345,7 @@ export default function SystemAdminWorkspace() {
            <button
              onClick={() => setActiveTab('roles')}
              type="button"
-             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
+             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
                activeTab === 'roles' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
              }`}
            >
@@ -371,7 +356,7 @@ export default function SystemAdminWorkspace() {
           <button
             onClick={() => setActiveTab('reports')}
             type="button"
-            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
+            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
               activeTab === 'reports' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
             }`}
           >
@@ -382,7 +367,7 @@ export default function SystemAdminWorkspace() {
           <button
             onClick={() => setActiveTab('captured-leads')}
             type="button"
-            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
+            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
               activeTab === 'captured-leads' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
             }`}
           >
@@ -408,7 +393,7 @@ export default function SystemAdminWorkspace() {
                   {/* 🖼️ LOGO: either paste a URL or upload a file (stored as a data-URI on the agency record) */}
                   <div className="flex items-center gap-1">
                     <label className="text-[10px] text-slate-400">Logo</label>
-                    <label className={`text-[10px] px-2 py-1 rounded-md border ${agencyForm.companyLogoUrl ? 'bg-slate-950 text-blue-400 border-blue-900' : 'bg-slate-950 text-slate-500 border-slate-700 cursor-pointer hover:text-white'}`}>
+                    <label className={`text-[10px] px-2 py-1 rounded-md border R{agencyForm.companyLogoUrl ? 'bg-slate-950 text-blue-400 border-blue-900' : 'bg-slate-950 text-slate-500 border-slate-700 cursor-pointer hover:text-white'}`}>
                       {agencyForm.companyLogoUrl ? <span>Change</span> : <span>Upload</span>}
                       <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
                     </label>
@@ -473,7 +458,7 @@ export default function SystemAdminWorkspace() {
                         <span className="text-white font-bold">{agency.tradingName || agency.name}</span>
                       </div>
                       <span className="text-[10px] text-slate-500 font-mono">#{agency.agencyId}</span>
-                      <span className={`text-[10px] px-2 py-1 rounded-md border ${agency.operationalStatus === 'Active' ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300' : 'border-amber-900 bg-amber-950/40 text-amber-300'}`}>{agency.operationalStatus || 'Active'}</span>
+                      <span className={`text-[10px] px-2 py-1 rounded-md border R{agency.operationalStatus === 'Active' ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300' : 'border-amber-900 bg-amber-950/40 text-amber-300'}`}>{agency.operationalStatus || 'Active'}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-500">{agency.registrationNumber || 'Reg: —'}</span>
@@ -493,7 +478,7 @@ export default function SystemAdminWorkspace() {
                           </div>
                           <div className="flex gap-1.5">
                             <button type="button" onClick={async () => {
-                              if (window.confirm(`Promote ${c.fullName} to a broker profile?`)) {
+                              if (window.confirm(`Promote R{c.fullName} to a broker profile?`)) {
                                 try { await crmService.promoteContactToBroker(c.contactPersonId); await loadBrokers(); await loadAgencies(); await loadContacts(agency.agencyId); }
                                 catch (err) { alert(err || 'Promotion failed.'); }
                               }
@@ -523,39 +508,69 @@ export default function SystemAdminWorkspace() {
 
       {activeTab === 'users' && (
         <div className="grid gap-6 xl:grid-cols-2">
-          {/* 👤 BROKER FORM */}
-          <form onSubmit={handleBrokerSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px]"><UserPlus size={14} className="text-emerald-500" /> {editingBroker ? 'Edit Broker' : 'Add Broker'}</div>
-            <input value={brokerForm.fullName} onChange={(e) => setBrokerForm({ ...brokerForm, fullName: e.target.value })} placeholder="Broker full name" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
+          {/* 👤 USER FORM — SuperAdmin and AgencyAdmin can create/edit users with assignable roles */}
+          {(isSuperAdmin || currentUserRole === 'AgencyAdmin') && (
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              if (editingUser && editingUser.userId) {
+                await authService.updateUserRole(editingUser.userId, userForm.systemRole);
+              } else {
+                await authService.registerUser({
+                  fullName: userForm.fullName,
+                  email: userForm.email,
+                  systemRole: userForm.systemRole,
+                  passwordHash: userForm.password || 'ChangeMeNow!'
+                });
+              }
+              setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker' });
+              setEditingUser(null);
+              await loadUsers();
+            } catch (err) { alert(err || 'User save failed.'); }
+          }} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px]"><UserPlus size={14} className="text-emerald-500" /> {editingUser ? 'Edit User' : 'Add User'}</div>
+            <input value={userForm.fullName} onChange={(e) => setUserForm({ ...userForm, fullName: e.target.value })} placeholder="Full name" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
             <div className="grid grid-cols-2 gap-3">
-              <input value={brokerForm.email} onChange={(e) => setBrokerForm({ ...brokerForm, email: e.target.value })} type="email" placeholder="Email" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
-              <input value={brokerForm.phone} onChange={(e) => setBrokerForm({ ...brokerForm, phone: e.target.value })} placeholder="Phone" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+              <input value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} type="email" placeholder="Email" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
+              <input value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} type="text" placeholder={editingUser ? 'Leave blank to keep' : 'Password'} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
             </div>
-            <select value={brokerForm.agencyId} onChange={(e) => setBrokerForm({ ...brokerForm, agencyId: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
-              {agencies.map((agency) => <option key={agency.agencyId || agency.tenantId} value={agency.agencyId || agency.tenantId}>{agency.tradingName || agency.name}</option>)}
+            <select value={userForm.systemRole} onChange={(e) => setUserForm({ ...userForm, systemRole: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+              {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
-            <select value={brokerForm.role} onChange={(e) => setBrokerForm({ ...brokerForm, role: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
-              <option value="Broker">Broker</option>
-              <option value="Manager">AgencyAdmin</option>
-              <option value="Agent">Agent</option>
-            </select>
-            <button type="submit" className="w-full py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold">{editingBroker ? 'Save broker' : 'Create broker profile'}</button>
+            <div className="flex gap-2">
+              <button type="submit" className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold">{editingUser ? 'Save user' : 'Create user'}</button>
+              {editingUser && <button type="button" onClick={() => { setEditingUser(null); setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker' }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
+            </div>
           </form>
+          )}
 
-          {/* 🕵️ BROKER ROSTER */}
+          {/* 🕵️ USER ROSTER */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4"><Users size={14} className="text-violet-500" /> Broker roster ({currentUserRole === 'PlatformAdmin' ? 'All agencies' : 'Your agency'})</div>
+            <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4"><Users size={14} className="text-violet-500" /> User roster ({currentUserRole === 'PlatformAdmin' ? 'All tenants' : 'Your tenant'})</div>
             <div className="space-y-3">
-              {brokers.map((broker) => (
-                <div key={broker.brokerId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 flex justify-between items-center">
+              {systemUsers.map((u) => (
+                <div key={u.userId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 flex justify-between items-center">
                   <div>
-                    <h4 className="text-white font-bold text-sm">{broker.fullName}</h4>
-                    <p className="text-xs text-slate-400">{broker.email} • {broker.phone || 'No phone'}</p>
-                    <p className="text-[11px] text-slate-500">Agency: {broker.agencyId}</p>
+                    <h4 className="text-white font-bold text-sm">{u.fullName}</h4>
+                    <p className="text-xs text-slate-400">{u.email} • {u.phone || 'No phone'}</p>
+                    <p className="text-[11px] text-slate-500">Tenant: {u.tenantId}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] px-2 py-1 rounded-md bg-violet-950 text-violet-300 border border-violet-900">{broker.role}</span>
-                    <button type="button" onClick={() => { setEditingBroker(broker); setBrokerForm({ fullName: broker.fullName || '', email: broker.email || '', phone: broker.phone || '', agencyId: broker.agencyId || '', role: broker.role || 'Broker' }); }} className="p-2 text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                    <span className="text-[10px] px-2 py-1 rounded-md bg-violet-950 text-violet-300 border border-violet-900">{u.systemRole}</span>
+                     {(isSuperAdmin || currentUserRole === 'AgencyAdmin') && u.systemRole !== 'PlatformAdmin' && (
+                      <>
+                        <button type="button" onClick={() => { setEditingUser(u); setUserForm({ fullName: u.fullName || '', email: u.email || '', password: '', systemRole: u.systemRole || 'Broker' }); }} className="p-2 text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                        {u.accountStatus !== 'Disabled' && (
+                          <button type="button" onClick={async () => {
+                            if (!confirm(`Deactivate user "R{u.fullName}"? They will be unable to sign in.`)) return;
+                            try {
+                              await authService.disableUser(u.userId);
+                              setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, accountStatus: 'Disabled' } : x)));
+                            } catch (err) { alert(err || 'Deactivation failed.'); }
+                          }} className="p-2 text-red-400 hover:text-red-300"><CircleX size={13} /></button>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -579,7 +594,6 @@ export default function SystemAdminWorkspace() {
                     <th className="text-left py-1">User</th>
                     <th className="text-left py-1">Email</th>
                     <th className="text-left py-1">Tenant</th>
-                    <th className="text-left py-1">Role</th>
                     <th className="text-left py-1">Status</th>
                     <th className="text-left py-1">Actions</th>
                   </tr>
@@ -591,23 +605,7 @@ export default function SystemAdminWorkspace() {
                       <td className="py-1 text-slate-400">{u.email}</td>
                       <td className="py-1 text-slate-500 font-mono">{u.tenantId}</td>
                       <td className="py-1">
-                        <select
-                          value={u.systemRole}
-                          onChange={async (e) => {
-                            const newRole = e.target.value;
-                            try {
-                              await authService.updateUserRole(u.userId, newRole);
-                              setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, systemRole: newRole } : x)));
-                            } catch (err) { alert(err || 'Role reassignment failed.'); }
-                          }}
-                          disabled={u.accountStatus === 'Disabled' || u.systemRole === 'PlatformAdmin'}
-                          className="bg-slate-950 border border-slate-700 rounded-md px-1.5 py-0.5 text-xs text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
-                        >
-                          {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                      </td>
-                      <td className="py-1">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-md border ${
+                        <span className={`text-[10px] px-2 py-0.5 rounded-md border R{
                           u.accountStatus === 'Active'
                             ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300'
                             : 'border-red-900 bg-red-950/40 text-red-300'
@@ -618,7 +616,7 @@ export default function SystemAdminWorkspace() {
                           <button
                             type="button"
                             onClick={async () => {
-                              if (!confirm(`Deactivate user "${u.fullName}"? They will be unable to sign in.`)) return;
+                              if (!confirm(`Deactivate user "R{u.fullName}"? They will be unable to sign in.`)) return;
                               try {
                                 await authService.disableUser(u.userId);
                                 setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, accountStatus: 'Disabled' } : x)));
@@ -636,7 +634,7 @@ export default function SystemAdminWorkspace() {
               </table>
             </div>
           )}
-          <p className="text-[10px] text-slate-500 mt-3">Both PlatformAdmin and AgencyAdmin can assign roles and deactivate users. Agency admins are tenant-scoped. PlatformAdmin accounts cannot be disabled or have their role changed.</p>
+          <p className="text-[10px] text-slate-500 mt-3">Role management and deactivation are handled in the User Admin tab. PlatformAdmin accounts cannot be disabled.</p>
         </div>
       )}
 
@@ -656,7 +654,7 @@ export default function SystemAdminWorkspace() {
               <input value={roleForm.permissionsJson} onChange={(e) => setRoleForm({ ...roleForm, permissionsJson: e.target.value })} placeholder='Permissions JSON array, e.g. ["CanDeleteProperties"]' className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
             </div>
             <div className="flex gap-2">
-              <button type="submit" disabled={!isSuperAdmin} className={`py-2.5 rounded-xl text-xs font-bold ${isSuperAdmin ? 'bg-violet-600 text-white' : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}>{editingRole ? 'Save role' : 'Create role definition'}</button>
+              <button type="submit" disabled={!isSuperAdmin} className={`py-2.5 rounded-xl text-xs font-bold R{isSuperAdmin ? 'bg-violet-600 text-white' : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}>{editingRole ? 'Save role' : 'Create role definition'}</button>
               {editingRole && <button type="button" onClick={() => { setEditingRole(null); setRoleForm({ name: '', description: '', isPlatformScoped: false, isAgencyScoped: false, permissionsJson: '[]', isActive: true }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
             </div>
           </form>
@@ -673,12 +671,12 @@ export default function SystemAdminWorkspace() {
                     <div className="flex items-center gap-2 mt-1">
                       {role.isPlatformScoped && <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-950 text-blue-300 border border-blue-900">Platform admin</span>}
                       {role.isAgencyScoped && <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-950 text-emerald-300 border border-emerald-900">Agency admin</span>}
-                      <span className={`text-[10px] px-2 py-0.5 rounded-md border ${role.isActive ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300' : 'border-slate-700 bg-slate-800 text-slate-400'}`}>{role.isActive ? 'Active' : 'Inactive'}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-md border R{role.isActive ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300' : 'border-slate-700 bg-slate-800 text-slate-400'}`}>{role.isActive ? 'Active' : 'Inactive'}</span>
                     </div>
                   </div>
                   <div className="flex gap-1.5">
-                    <button type="button" onClick={() => resetRole(role)} disabled={!isSuperAdmin} className={`p-2 rounded ${isSuperAdmin ? 'bg-slate-800 text-slate-300 hover:text-white' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`} title="Edit"><Pencil size={13} /></button>
-                    <button type="button" onClick={() => handleRoleDelete(role)} disabled={!isSuperAdmin} className={`p-2 rounded ${isSuperAdmin ? 'bg-red-950/30 text-red-300 border border-red-900 hover:text-white' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`} title="Deactivate"><Trash2 size={13} /></button>
+                    <button type="button" onClick={() => resetRole(role)} disabled={!isSuperAdmin} className={`p-2 rounded R{isSuperAdmin ? 'bg-slate-800 text-slate-300 hover:text-white' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`} title="Edit"><Pencil size={13} /></button>
+                    <button type="button" onClick={() => handleRoleDelete(role)} disabled={!isSuperAdmin} className={`p-2 rounded R{isSuperAdmin ? 'bg-red-950/30 text-red-300 border border-red-900 hover:text-white' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`} title="Deactivate"><Trash2 size={13} /></button>
                   </div>
                 </div>
               ))}
@@ -719,7 +717,7 @@ export default function SystemAdminWorkspace() {
                 <div className="text-[10px] text-slate-500 uppercase tracking-wider">Closed Won</div>
               </div>
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-                <div className="text-sm font-bold text-white">${Number(pipelineSummary.totalPipelineEstimatedValue || 0).toLocaleString()}</div>
+                <div className="text-sm font-bold text-white">R {Number(pipelineSummary.totalPipelineEstimatedValue || 0).toLocaleString()}</div>
                 <div className="text-[10px] text-slate-500 uppercase tracking-wider">Pipeline Value</div>
               </div>
             </div>
@@ -735,7 +733,7 @@ export default function SystemAdminWorkspace() {
                 <div className="grid grid-cols-3 gap-3 mb-4 text-center">
                   <div><div className="text-xl font-bold text-white">{reportOverview.totalLeads}</div><div className="text-[10px] text-slate-500">Leads</div></div>
                   <div><div className="text-xl font-bold text-white">{reportOverview.totalDeals}</div><div className="text-[10px] text-slate-500">Deals</div></div>
-                  <div><div className="text-sm font-bold text-emerald-400">${Number(reportOverview.totalRevenue || 0).toLocaleString()}</div><div className="text-[10px] text-slate-500">Revenue</div></div>
+                  <div><div className="text-sm font-bold text-emerald-400">R{Number(reportOverview.totalRevenue || 0).toLocaleString()}</div><div className="text-[10px] text-slate-500">Revenue</div></div>
                 </div>
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={reportOverview.monthlyBreakdown || []}>
@@ -794,8 +792,8 @@ export default function SystemAdminWorkspace() {
                         <td className="py-1 text-slate-400">{idx + 1}</td>
                         <td className="py-1 text-white">{b.agent}</td>
                         <td className="py-1 text-right text-slate-300">{b.deals}</td>
-                        <td className="py-1 text-right text-slate-300">${Number(b.totalValue || 0).toLocaleString()}</td>
-                        <td className="py-1 text-right text-emerald-400">${Number(b.totalCommission || 0).toLocaleString()}</td>
+                        <td className="py-1 text-right text-slate-300">R{Number(b.totalValue || 0).toLocaleString()}</td>
+                        <td className="py-1 text-right text-emerald-400">R{Number(b.totalCommission || 0).toLocaleString()}</td>
                         <td className="py-1 text-right text-slate-300">{b.won}</td>
                       </tr>
                     ))}

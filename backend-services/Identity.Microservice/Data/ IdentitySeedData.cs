@@ -143,25 +143,52 @@ namespace Identity.Microservice.Data
                     });
                 }
 
-                context.TenantAgencies.AddRange(tenantItems);
-            }
+                 context.TenantAgencies.AddRange(tenantItems);
+             }
 
-            var adminUser = context.UserAccounts.FirstOrDefault(u => u.Email == adminEmail);
-            if (adminUser == null)
-            {
-                context.UserAccounts.Add(new UserAccount
-                {
-                    UserId = "USR-ADMIN",
-                    TenantId = "TEN-001",
-                    FullName = "Agency Administrator",
-                    Email = adminEmail,
-                    PasswordHash = "Password123!",
-                    SystemRole = "SuperAdmin",
-                    AvatarUrl = string.Empty,
-                    AccountStatus = "Active",
-                    CreatedAt = DateTime.UtcNow
-                });
-            }
+             var trialTenant = context.TenantAgencies.FirstOrDefault(t => t.TenantId == "TEN-001");
+             if (trialTenant == null)
+             {
+                 trialTenant = new TenantAgency
+                 {
+                     TenantId = "TEN-001",
+                     AgencyName = "Agency 1",
+                     LogoInitials = "A1",
+                     ContactEmail = "ops1@agency1.local",
+                     HeadquartersAddress = "1 Commercial Avenue, Cape Town, South Africa",
+                     OperationalStatus = "TrialPending",
+                     CreatedAt = DateTime.UtcNow.AddDays(-1)
+                 };
+                 context.TenantAgencies.Add(trialTenant);
+             }
+             trialTenant.IsTrial = true;
+             trialTenant.TrialStartDate = DateTime.UtcNow;
+             trialTenant.TrialEndDate = DateTime.UtcNow.AddDays(14);
+             trialTenant.OperationalStatus = "TrialPending";
+
+              var adminUser = context.UserAccounts.FirstOrDefault(u => u.Email == adminEmail);
+             if (adminUser == null)
+             {
+                 context.UserAccounts.Add(new UserAccount
+                 {
+                     UserId = "USR-ADMIN",
+                     TenantId = "TEN-001",
+                     FullName = "Agency Administrator",
+                     Email = adminEmail,
+                     PasswordHash = "Password123!",
+                     SystemRole = "SuperAdmin",
+                     AvatarUrl = string.Empty,
+                     AccountStatus = "Active",
+                     IsTrial = true,
+                     TrialEndDate = DateTime.UtcNow.AddDays(14),
+                     CreatedAt = DateTime.UtcNow
+                 });
+             }
+             else
+             {
+                 adminUser.IsTrial = true;
+                 adminUser.TrialEndDate = DateTime.UtcNow.AddDays(14);
+             }
 
             // 🌐 Canonical role accounts: one seeded user per role in the role contract
             // (PlatformAdmin, AgencyAdmin, Broker, Owner, Tenant). Each is an idempotent
@@ -177,35 +204,36 @@ namespace Identity.Microservice.Data
                 new { Email = "owner@agency.local",           UserId = "USR-OWNER-01",   FullName = "Property Owner",          SystemRole = "Owner",          TenantId = "TEN-001" },
                 new { Email = "tenant@agency.local",          UserId = "USR-TENANT-01",  FullName = "Rental Tenant",           SystemRole = "Tenant",         TenantId = "TEN-001" }
             };
-            foreach (var seedUser in roleSeedUsers)
-            {
-                var existing = context.UserAccounts.FirstOrDefault(u => u.Email == seedUser.Email);
-                if (existing == null)
-                {
-                    context.UserAccounts.Add(new UserAccount
-                    {
-                        UserId = seedUser.UserId,
-                        TenantId = seedUser.TenantId,
-                        FullName = seedUser.FullName,
-                        Email = seedUser.Email,
-                        PasswordHash = "Password123!",
-                        SystemRole = seedUser.SystemRole,
-                        AvatarUrl = string.Empty,
-                        AccountStatus = "Active",
-                        CreatedAt = DateTime.UtcNow
-                    });
-                }
-                else
-                {
-                    // Normalize contract identity. UserId is NOT reassigned here
-                    // (it is a stable string primary key and may be referenced by
-                    // UserAccessClaims rows); only non-key columns are corrected.
-                    existing.TenantId = seedUser.TenantId;
-                    existing.SystemRole = seedUser.SystemRole;
-                    existing.AccountStatus = "Active";
-                    existing.PasswordHash = "Password123!";
-                }
-            }
+             foreach (var seedUser in roleSeedUsers)
+             {
+                 var existing = context.UserAccounts.FirstOrDefault(u => u.Email == seedUser.Email);
+                 if (existing == null)
+                 {
+                     context.UserAccounts.Add(new UserAccount
+                     {
+                         UserId = seedUser.UserId,
+                         TenantId = seedUser.TenantId,
+                         FullName = seedUser.FullName,
+                         Email = seedUser.Email,
+                         PasswordHash = "Password123!",
+                         SystemRole = seedUser.SystemRole,
+                         AvatarUrl = string.Empty,
+                         AccountStatus = "Active",
+                         IsTrial = seedUser.TenantId == "TEN-001",
+                         TrialEndDate = seedUser.TenantId == "TEN-001" ? DateTime.UtcNow.AddDays(14) : null,
+                         CreatedAt = DateTime.UtcNow
+                     });
+                 }
+                 else
+                 {
+                     existing.TenantId = seedUser.TenantId;
+                     existing.SystemRole = seedUser.SystemRole;
+                     existing.AccountStatus = "Active";
+                     existing.PasswordHash = "Password123!";
+                     existing.IsTrial = seedUser.TenantId == "TEN-001";
+                     existing.TrialEndDate = seedUser.TenantId == "TEN-001" ? DateTime.UtcNow.AddDays(14) : null;
+                 }
+             }
 
             if (context.UserAccounts.Count() < 1000)
             {

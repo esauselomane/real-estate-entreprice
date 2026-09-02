@@ -83,6 +83,8 @@ const renderChart = (chart) => {
   );
 };
 
+const PROPERTY_TYPES = ['Residential', 'Commercial', 'Retail', 'Industrial'];
+
 export default function RoleDashboard() {
   const { activeProfile: profile } = useAuth();
   const { navigateTo: onNavigate } = useAppUi();
@@ -104,7 +106,7 @@ export default function RoleDashboard() {
             crmService.getCommissionByStage()
           ]);
           setMetrics([
-            { label: 'Agencies', value: agencies.length, icon: Building2 },
+            { label: 'Agencies', value: agencies.totalCount || agencies.length, icon: Building2 },
             { label: 'Platform controls', value: 'Active', icon: ShieldCheck },
             { label: 'Closed-won commission', value: `R ${Number(overview.totalRealisedCommission || 0).toLocaleString()}`, icon: DollarSign }
           ]);
@@ -116,17 +118,17 @@ export default function RoleDashboard() {
           ]);
          } else if (role === 'AgencyAdmin') {
           // 🎯 AgencyAdmin gets tenant-scoped pipeline summary, monthly trends, and commission data
-          const [brokers, boards, summary, overview, commissionStages] = await Promise.all([
+          const [brokers, boards, summary, overview, commissionStages, leaderboard] = await Promise.all([
             crmService.getBrokers(),
             crmService.getCRMBoards(),
             crmService.getPipelineReportSummary(),
             crmService.getCRMReportOverview(),
-            crmService.getCommissionByStage()
+            crmService.getCommissionByStage(),
+            crmService.getBrokerLeaderboard()
           ]);
-          debugger;
           setMetrics([
-            { label: 'Brokers', value: brokers.length, icon: Users },
-            { label: 'Agency deals', value: boards.verifiedDeals?.length || 0, icon: Briefcase },
+            { label: 'Brokers', value: brokers.totalCount || brokers.length, icon: Users },
+            { label: 'Agency deals', value: boards.dealCount || boards.verifiedDeals?.length || 0, icon: Briefcase },
             { label: 'Finalised closed', value: summary.finalizedClosedCount || 0, icon: Award }
           ]);
           setPipelineSummary({
@@ -138,7 +140,7 @@ export default function RoleDashboard() {
           });
           setCharts([
             { title: 'Broker role distribution', icon: Users, kind: 'pie', data: Object.entries((brokers || []).reduce((a, b) => { const k = b.role || 'Broker'; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([name, value]) => ({ name, value })), colors: ROLE_COLORS },
-            { title: 'Broker leaderboard (pipeline value)', icon: Award, kind: 'bar', data: (await crmService.getBrokerLeaderboard()).map((b) => ({ name: b.agent, value: Number(b.totalValue) })), colors: { default: '#3b82f6' } },
+            { title: 'Broker leaderboard (pipeline value)', icon: Award, kind: 'bar', data: (leaderboard || []).map((b) => ({ name: b.agent, value: Number(b.totalValue) })), colors: { default: '#3b82f6' } },
             { title: 'Pipeline funnel', icon: Layers, kind: 'bar', data: [
               { name: 'Active Leads', value: summary.activeLeadsCount },
               { name: 'Valuations In Process', value: summary.valuationsInProcessCount },
@@ -156,8 +158,8 @@ export default function RoleDashboard() {
             crmService.getCommissionByStage()
           ]);
           setMetrics([
-            { label: 'My deals', value: boards.verifiedDeals?.length || 0, icon: Briefcase },
-            { label: 'Available properties', value: properties.length, icon: Home },
+            { label: 'My deals', value: boards.dealCount || boards.verifiedDeals?.length || 0, icon: Briefcase },
+            { label: 'Available properties', value: properties.totalCount || properties.length, icon: Home },
             { label: 'Closed-won commission', value: `R ${Number((commissionStages || []).find((c) => c.period === 'ClosedWon')?.revenue || 0).toLocaleString()}`, icon: DollarSign }
           ]);
           setCharts([
@@ -172,14 +174,14 @@ export default function RoleDashboard() {
             const interests = o.propertyTypeInterests ? JSON.parse(o.propertyTypeInterests) : [];
             (Array.isArray(interests) ? interests : [interests]).forEach((t) => { if (t) typeCount[t] = (typeCount[t] || 0) + 1; });
           });
-          setMetrics([{ label: 'Interested parties', value: ots.length, icon: Users }, { label: 'Property operations', value: 'Active', icon: Home }]);
+          setMetrics([{ label: 'Interested parties', value: ots.totalCount || ots.length, icon: Users }, { label: 'Property operations', value: 'Active', icon: Home }]);
           setCharts([
             { title: 'Property type interests', icon: PieIcon, kind: 'pie', data: PROPERTY_TYPES.map((t) => ({ name: t, value: typeCount[t] || 0 })), colors: TYPE_COLORS },
             { title: 'Portfolio size by type', icon: Home, kind: 'bar', data: PROPERTY_TYPES.map((t) => ({ name: t, value: typeCount[t] || 0 })), colors: TYPE_COLORS }
           ]);
         } else {
           const ops = await crmService.getOperationalRecords('maintenance');
-          setMetrics([{ label: 'Lease access', value: 'Active', icon: Home }, { label: 'Requests', value: ops.length, icon: Bell }]);
+          setMetrics([{ label: 'Lease access', value: 'Active', icon: Home }, { label: 'Requests', value: ops.totalCount || ops.length, icon: Bell }]);
           setCharts([
             { title: 'Request status breakdown', icon: Bell, kind: 'pie', data: Object.entries(ops.reduce((a, o) => { const k = o.status || 'Open'; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([name, value]) => ({ name, value })), colors: STATUS_COLORS }
           ]);
@@ -192,8 +194,6 @@ export default function RoleDashboard() {
     };
     load();
   }, [role]);
-
-  const PROPERTY_TYPES = ['Residential', 'Commercial', 'Retail', 'Industrial'];
 
   return (
     <div className="space-y-6">

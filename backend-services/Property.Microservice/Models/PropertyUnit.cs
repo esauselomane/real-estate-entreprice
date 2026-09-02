@@ -30,6 +30,14 @@ namespace Property.Microservice.Models
         [Column(TypeName = "decimal(18,2)")]
         public decimal? SpecificUnitSalePrice { get; set; } // Override value if units sold individually
 
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal? RentalRate { get; set; } // Monthly rental rate for this unit
+
+        [Column(TypeName = "decimal(5,2)")]
+        public decimal? RentEscalationPercentage { get; set; } // Annual lease compound markup e.g. 7.50%
+
+        public int? LeaseTermMonths { get; set; } // Expected contract commitment length
+
         [Required]
         public string UnitImagesJson { get; set; } = "[]"; // Serialized string array tracking individual room pictures
 

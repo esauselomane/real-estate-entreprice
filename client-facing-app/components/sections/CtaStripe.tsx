@@ -30,7 +30,7 @@ export default function CtaStripe() {
             <Link href="/login">
               <button
                 type="button"
-                className="rounded-xl bg-white px-7 py-3 text-base font-semibold text-blue-600 shadow-lg transition-colors hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                className="rounded-xl bg-white px-7 py-3 text-base font-semibold text-blue-600 shadow-lg transition-all duration-200 ease-in-out hover:scale-105 hover:bg-slate-100 hover:shadow-lg active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
               >
                 Login
               </button>

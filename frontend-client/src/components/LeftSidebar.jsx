@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Home, Search, Users, Briefcase, BarChart3, ChevronLeft, ChevronRight, LogOut, Shield, Map } from 'lucide-react';
+import { Home, Search, Users, Briefcase, BarChart3, ChevronLeft, ChevronRight, LogOut, Shield, Map, UserPlus } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { useAgency } from '../contexts/AgencyContext.jsx';
@@ -16,7 +16,9 @@ export default function LeftSidebar() {
     { name: 'Dashboard', view: 'dashboard', icon: Home, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] },
     { name: 'Property Search', view: 'search', icon: Search, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
     { name: 'Property Map', view: 'map', icon: Map, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
-    { name: 'Leads & CRM', view: 'crm', icon: Briefcase, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker'] },
+    { name: 'Leads', view: 'leads', icon: UserPlus, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker'] },
+    { name: 'Deals', view: 'deals', icon: Briefcase, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker'] },
+    { name: 'CRM Directory', view: 'crm', icon: Briefcase, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker'] },
     { name: 'Clients (Tenants/Owners)', view: 'owners-tenants', icon: Users, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
     { name: 'Performance Reports', view: 'reports', icon: BarChart3, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
     { name: 'System Admin', view: 'admin', icon: Shield, roles: ['PlatformAdmin', 'AgencyAdmin'] },

@@ -175,15 +175,18 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
         SubUnits: selectedUnits.map(u => ({
           UnitNumber: u.unitNumber,
           UnitDescription: u.unitDescription,
-          NetRentableAreaSqM: u.netRentableAreaSqM
+          NetRentableAreaSqM: u.netRentableAreaSqM,
+          RentalRate: u.rentalRate,
+          RentEscalationPercentage: u.rentEscalationPercentage,
+          LeaseTermMonths: u.leaseTermMonths
         })),
         BrochureCardId: newCardId,
         ClientName: clientInfo.name,
         ClientEmail: clientInfo.email,
         ClientPhone: clientInfo.phone,
-        BaseRentalRate: propertyDetails?.baseRentalRate || 0,
-        RentEscalationPercentage: propertyDetails?.rentEscalationPercentage || 0,
-        LeaseTermMonths: propertyDetails?.leaseTermMonths || 12,
+        BaseRentalRate: (selectedUnits[0]?.rentalRate || propertyDetails?.subUnits?.[0]?.rentalRate || 0),
+        RentEscalationPercentage: (selectedUnits[0]?.rentEscalationPercentage || propertyDetails?.subUnits?.[0]?.rentEscalationPercentage || 0),
+        LeaseTermMonths: (selectedUnits[0]?.leaseTermMonths || propertyDetails?.subUnits?.[0]?.leaseTermMonths || 12),
         SalePrice: propertyDetails?.salePrice || 0
       };
 
@@ -423,15 +426,15 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <span className="block text-[10px] text-slate-500">Base Monthly Rent</span>
-                    <p className="font-bold text-amber-400 text-sm mt-0.5">R {propertyDetails?.baseRentalRate?.toLocaleString()} /mo</p>
+                    <p className="font-bold text-amber-400 text-sm mt-0.5">R {(selectedUnits[0]?.rentalRate || propertyDetails?.subUnits?.[0]?.rentalRate || 0)?.toLocaleString()} /mo</p>
                   </div>
                   <div>
                     <span className="block text-[10px] text-slate-500">Annual Escalation</span>
-                    <p className="font-bold text-white text-sm mt-0.5">{propertyDetails?.rentEscalationPercentage}% Compound</p>
+                    <p className="font-bold text-white text-sm mt-0.5">{selectedUnits[0]?.rentEscalationPercentage || propertyDetails?.subUnits?.[0]?.rentEscalationPercentage || 0}% Compound</p>
                   </div>
                   <div>
                     <span className="block text-[10px] text-slate-500">Lease Commitment</span>
-                    <p className="font-bold text-white text-sm mt-0.5">{propertyDetails?.leaseTermMonths} Months Minimum</p>
+                    <p className="font-bold text-white text-sm mt-0.5">{selectedUnits[0]?.leaseTermMonths || propertyDetails?.subUnits?.[0]?.leaseTermMonths || 12} Months Minimum</p>
                   </div>
                 </div>
               ) : (

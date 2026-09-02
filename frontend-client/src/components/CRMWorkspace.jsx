@@ -16,8 +16,11 @@ export default function CRMWorkspace() {
   const [verifiedDeals, setVerifiedDeals] = useState([]);
   const [dealTotalCount, setDealTotalCount] = useState(0);
   const [companies, setCompanies] = useState([]);
+  const [companiesTotalCount, setCompaniesTotalCount] = useState(0);
   const [legalEntities, setLegalEntities] = useState([]);
+  const [legalEntitiesTotalCount, setLegalEntitiesTotalCount] = useState(0);
   const [contacts, setContacts] = useState([]);
+  const [contactsTotalCount, setContactsTotalCount] = useState(0);
   const [brokers, setBrokers] = useState([]);
 
   // Broker brochure cards currently in flight — drives the notification badge deck.
@@ -75,13 +78,16 @@ export default function CRMWorkspace() {
         setActiveCards(cardsRes || []);
       } else if (activeTab === 'companies') {
         const res = await crmService.getCompanies();
-        setCompanies(res || []);
+        setCompanies((res || []).items || (res || []));
+        setCompaniesTotalCount((res || []).totalCount || 0);
       } else if (activeTab === 'legalEntities') {
         const res = await crmService.getLegalEntities();
-        setLegalEntities(res || []);
+        setLegalEntities((res || []).items || (res || []));
+        setLegalEntitiesTotalCount((res || []).totalCount || 0);
       } else if (activeTab === 'contacts') {
         const res = await crmService.getContacts();
-        setContacts(res || []);
+        setContacts((res || []).items || (res || []));
+        setContactsTotalCount((res || []).totalCount || 0);
       }
     } catch (err) {
       setErrorMessage(err || 'Failed to populate operational ledger streams.');
@@ -250,6 +256,16 @@ export default function CRMWorkspace() {
     if (!enumString) return '';
     return String(enumString || '').replace(/([A-Z])/g, " $1").replace(/^./, str => str.toUpperCase());
   };
+
+  const getStageValue = (item) => {
+    const stage = item?.leadStage || item?.dealStage;
+    if (typeof stage === 'string') return stage;
+    if (typeof stage === 'number') {
+      const stages = item?.leadStage ? ['Contacted', 'Qualified', 'Negotiation', 'ProposalSent', 'ClosedWon', 'ClosedLost'] : ['DiscoveryNeedsAnalysis', 'Presentation', 'ProposalQuoteSent', 'Negotiation', 'ClosedWon', 'ClosedLost'];
+      return stages[stage] || String(stage);
+    }
+    return String(stage || '');
+  };
   return (
     <div className="space-y-6 animate-fade-in">
       
@@ -301,9 +317,9 @@ export default function CRMWorkspace() {
         {[
           { id: 'leads', label: 'Unverified Leads', count: leadTotalCount },
           { id: 'deals', label: 'Corporate Deals', count: dealTotalCount },
-          { id: 'companies', label: 'Companies Directory', count: companies.length },
-          { id: 'legalEntities', label: 'Legal Entities', count: legalEntities.length },
-          { id: 'contacts', label: 'Human Contacts', count: contacts.length }
+          { id: 'companies', label: 'Companies Directory', count: companiesTotalCount },
+          { id: 'legalEntities', label: 'Legal Entities', count: legalEntitiesTotalCount },
+          { id: 'contacts', label: 'Human Contacts', count: contactsTotalCount }
         ].map((tab) => (
           <button
             key={tab.id}
@@ -404,7 +420,7 @@ export default function CRMWorkspace() {
                 </div>
               </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <button onClick={() => { setSelectedLeadForEdit(lead); setNextStageValue(lead.leadStage); }} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Update Stage</button>
+                  <button onClick={() => { setSelectedLeadForEdit(lead); setNextStageValue(getStageValue(lead)); }} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Update Stage</button>
                   <button onClick={() => handlePromoteLead(lead, true)} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Rent Deal 🚀</button>
                   <button onClick={() => handlePromoteLead(lead, false)} className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Sale Deal 🚀</button>
                 </div>
@@ -421,14 +437,14 @@ export default function CRMWorkspace() {
               <div className="space-y-2 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
-                    deal.dealStage === 'ClosedWon' ? 'bg-emerald-950 text-emerald-400 border-emerald-900' :
-                    deal.dealStage === 'ClosedLost' ? 'bg-red-950 text-red-400 border-red-900' :
+                    getStageValue(deal) === 'ClosedWon' ? 'bg-emerald-950 text-emerald-400 border-emerald-900' :
+                    getStageValue(deal) === 'ClosedLost' ? 'bg-red-950 text-red-400 border-red-900' :
                     'bg-amber-950 text-amber-400 border-amber-900'
                   }`}>
                     Deal: {formatEnumTitle(deal.dealStage)}
                   </span>
                    <span className="text-xs text-slate-500 font-mono">Reference: DL-{deal.dealId}</span>
-                   {deal.dealStage === 'Presentation' && activeCardDealIds.has(deal.dealId) && (
+                   {getStageValue(deal) === 'Presentation' && activeCardDealIds.has(deal.dealId) && (
                      <span title="Brochure card in progress" className="inline-flex items-center gap-1 text-[10px] font-bold font-mono text-blue-300 bg-blue-950/40 px-2 py-0.5 rounded border border-blue-900 animate-pulse">
                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block"></span> Card Active
                      </span>
@@ -438,13 +454,13 @@ export default function CRMWorkspace() {
                 {deal.commissionValue > 0 && (
                   <p className="text-[10px] text-slate-500 mt-1">
                     💰 Commission: {deal.commissionType === 'Percent' ? `${deal.commissionValue}%` : `R ${deal.commissionValue.toLocaleString()}`}
-                    {deal.dealStage === 'ClosedWon' && deal.realisedCommission !== null && deal.realisedCommission !== undefined && ` → realised R ${Number(deal.realisedCommission).toLocaleString()}`}
+                     {getStageValue(deal) === 'ClosedWon' && deal.realisedCommission !== null && deal.realisedCommission !== undefined && ` → realised R ${Number(deal.realisedCommission).toLocaleString()}`}
                   </p>
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => { setSelectedDealForEdit(deal); setNextStageValue(deal.dealStage); }} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Progress Deal</button>
-                {deal.dealStage === 'Presentation' && (
+                <button onClick={() => { setSelectedDealForEdit(deal); setNextStageValue(getStageValue(deal)); }} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Progress Deal</button>
+                {getStageValue(deal) === 'Presentation' && (
                   <button
                     onClick={() => onOpenBrochureBuilder && onOpenBrochureBuilder(deal)}
                     className="p-2 bg-indigo-950/40 hover:bg-indigo-800 text-indigo-400 rounded-xl border border-indigo-900 cursor-pointer"

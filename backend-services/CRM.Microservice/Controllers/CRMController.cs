@@ -498,6 +498,29 @@ namespace CRM.Microservice.Controllers
             return Ok(items);
         }
 
+        [HttpGet("contacts/search")]
+        public async Task<IActionResult> SearchContacts([FromQuery] string q, [FromQuery] int page = 1)
+        {
+            var tenantId = GetCurrentTenant();
+            var query = _context.CRMContacts
+                .Include(c => c.CompanyDetails)
+                .Include(c => c.LegalEntityDetails)
+                .Where(c => c.TenantId == tenantId);
+
+            var term = (q ?? string.Empty).Trim().ToLower();
+            if (!string.IsNullOrEmpty(term))
+            {
+                query = query.Where(c =>
+                    c.FullName.ToLower().Contains(term) ||
+                    c.EmailAddress.ToLower().Contains(term) ||
+                    (c.PhoneNumber ?? string.Empty).ToLower().Contains(term));
+            }
+
+            var (items, total) = await PageAsync(query.OrderBy(c => c.FullName), page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
+        }
+
         [HttpPost("contact/create")]
         public async Task<IActionResult> CreateContact([FromBody] CRMContact contact)
         {
@@ -594,8 +617,36 @@ namespace CRM.Microservice.Controllers
              _context.LeadRecords.Add(newLead);
              await _context.SaveChangesAsync();
 
-             return Ok(new { message = "Unverified lead record successfully catalogued.", leadId = newLead.LeadId, linkedContactId = newLead.LinkedContactId });
-         }
+              return Ok(new { message = "Unverified lead record successfully catalogued.", leadId = newLead.LeadId, linkedContactId = newLead.LinkedContactId });
+          }
+
+        [HttpPut("lead/{leadId:int}")]
+        public async Task<IActionResult> UpdateLead(int leadId, [FromBody] LeadRecord updatedLead)
+        {
+            var tenantId = GetCurrentTenant();
+            var lead = await _context.LeadRecords.FirstOrDefaultAsync(l => l.LeadId == leadId && l.TenantId == tenantId);
+            if (lead == null) return NotFound(new { message = "Lead record not found." });
+
+            if (GetCurrentCanonicalRole() == "Broker")
+                updatedLead.AllocatedToAgent = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? lead.AllocatedToAgent;
+
+            lead.ClientName = updatedLead.ClientName;
+            lead.ContactEmail = updatedLead.ContactEmail;
+            lead.ContactPhone = updatedLead.ContactPhone;
+            lead.LinkedContactId = updatedLead.LinkedContactId;
+            lead.AllocatedToAgent = updatedLead.AllocatedToAgent;
+            lead.LeadStage = updatedLead.LeadStage;
+            lead.PropertyInterestClass = updatedLead.PropertyInterestClass;
+            lead.PreferredArea = updatedLead.PreferredArea;
+            lead.LeadType = updatedLead.LeadType;
+            lead.EstimatedBudget = updatedLead.EstimatedBudget;
+            lead.LeadNotes = updatedLead.LeadNotes;
+            lead.CommissionType = updatedLead.CommissionType;
+            lead.CommissionValue = updatedLead.CommissionValue;
+
+            await _context.SaveChangesAsync();
+            return Ok(lead);
+        }
 
         // 🚀 Promote a lead to a deal with automatic property matching.
         [HttpPost("leads/{leadId:int}/promote")]
@@ -732,6 +783,32 @@ namespace CRM.Microservice.Controllers
             _context.DealRecords.Remove(deal);
             await _context.SaveChangesAsync();
             return Ok(new { message = "Deal record deleted." });
+        }
+
+        [HttpPut("deal/{dealId:int}")]
+        public async Task<IActionResult> UpdateDeal(int dealId, [FromBody] DealRecord updatedDeal)
+        {
+            var tenantId = GetCurrentTenant();
+            var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            if (deal == null) return NotFound(new { message = "Deal record not found." });
+
+            if (GetCurrentCanonicalRole() == "Broker")
+                updatedDeal.AllocatedToAgent = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? deal.AllocatedToAgent;
+
+            deal.BuyerClientId = updatedDeal.BuyerClientId;
+            deal.SellerClientId = updatedDeal.SellerClientId;
+            deal.DealStage = updatedDeal.DealStage;
+            deal.TransactionValue = updatedDeal.TransactionValue;
+            deal.DealNotes = updatedDeal.DealNotes;
+            deal.AllocatedToAgent = updatedDeal.AllocatedToAgent;
+            deal.CommissionType = updatedDeal.CommissionType;
+            deal.CommissionValue = updatedDeal.CommissionValue;
+            deal.RealisedCommission = updatedDeal.RealisedCommission;
+            deal.LinkedPropertyId = updatedDeal.LinkedPropertyId;
+            deal.LastStageUpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+            return Ok(deal);
         }
 
 
@@ -897,10 +974,10 @@ namespace CRM.Microservice.Controllers
             var summaryReport = new PipelineSummaryReport
             {
                 ActiveLeadsCount = await baseLeadQuery.Where(l => l.LeadStage == LeadWorkflowStage.Contacted).CountAsync(),
-                ValuationsInProcessCount = await baseDealQuery.Where(d => d.DealStage != DealWorkflowStage.ClosedWon && d.DealStage != DealWorkflowStage.ClosedLost).CountAsync(),
+                ValuationsInProcessCount = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.DiscoveryNeedsAnalysis || d.DealStage == DealWorkflowStage.Presentation).CountAsync(),
                 ConveyancingAtDeedsCount = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.ProposalQuoteSent || d.DealStage == DealWorkflowStage.Negotiation).CountAsync(),
                 FinalizedClosedCount = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.ClosedWon).CountAsync(),
-                TotalPipelineEstimatedValue = await baseDealQuery.Where(d => d.DealStage != DealWorkflowStage.ClosedWon && d.DealStage != DealWorkflowStage.ClosedLost).SumAsync(d => d.TransactionValue)
+                TotalPipelineEstimatedValue = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.DiscoveryNeedsAnalysis || d.DealStage == DealWorkflowStage.Presentation || d.DealStage == DealWorkflowStage.ProposalQuoteSent || d.DealStage == DealWorkflowStage.Negotiation).SumAsync(d => d.TransactionValue)
             };
 
             _logger.LogInformation("GetPipelineReportSummary: tenant={Tenant} | ActiveLeads={Active} Valuations={Valuations} Conveyancing={Conveyancing} ClosedWon={ClosedWon} PipelineValue={PipelineValue}",
@@ -918,12 +995,15 @@ namespace CRM.Microservice.Controllers
             var activeYear = year ?? DateTime.UtcNow.Year;
             _logger.LogInformation("GetReportOverview: Year={Year} Tenant={Tenant}", activeYear, tenantId);
 
+            var yearStart = new DateTime(activeYear, 1, 1);
+            var yearEnd = new DateTime(activeYear + 1, 1, 1);
+
             var tenantLeads = await _context.LeadRecords
-                .Where(l => l.TenantId == tenantId && l.CreatedAt.Year == activeYear)
+                .Where(l => l.TenantId == tenantId && l.CreatedAt >= yearStart && l.CreatedAt < yearEnd)
                 .Where(l => !isBroker || l.AllocatedToAgent == callerName)
                 .ToListAsync();
             var tenantDeals = await _context.DealRecords
-                .Where(d => d.TenantId == tenantId && d.CreatedAt.Year == activeYear)
+                .Where(d => d.TenantId == tenantId && d.CreatedAt >= yearStart && d.CreatedAt < yearEnd)
                 .Where(d => !isBroker || d.AllocatedToAgent == callerName)
                 .ToListAsync();
 
@@ -952,8 +1032,14 @@ namespace CRM.Microservice.Controllers
         public async Task<IActionResult> GetCommissionByStage()
         {
             var tenantId = GetCurrentTenant();
-            var rows = await _context.DealRecords
+            var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
+            var isBroker = GetCurrentCanonicalRole() == "Broker";
+
+            var query = _context.DealRecords
                 .Where(d => d.TenantId == tenantId)
+                .Where(d => !isBroker || d.AllocatedToAgent == callerName);
+
+            var rows = await query
                 .GroupBy(d => d.DealStage)
                 .Select(g => new ReportDrilldownRow
                 {

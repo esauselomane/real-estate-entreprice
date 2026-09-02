@@ -33,6 +33,9 @@ namespace CRM.Microservice.Models
         [Required]
         public string PreferredArea { get; set; } = string.Empty;
 
+        [Required]
+        public string LeadType { get; set; } = "ForSale";
+
         [Column(TypeName = "decimal(18,2)")]
         public decimal EstimatedBudget { get; set; }
 

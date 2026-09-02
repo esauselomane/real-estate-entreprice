@@ -42,7 +42,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const activeOpsTab = OPS_TABS.find(t => t.id === (unitModalUnit ? modalTab : 'leases')) || OPS_TABS[0];
 
   // Editable unit details form (pre-filled when the modal opens on a unit)
-  const [unitEditForm, setUnitEditForm] = useState({ unitNumber: '', unitDescription: '', netRentableAreaSqM: '', specificUnitRentalPrice: '', specificUnitSalePrice: '', isCurrentlyVacant: true });
+  const [unitEditForm, setUnitEditForm] = useState({ unitNumber: '', unitDescription: '', netRentableAreaSqM: '', specificUnitRentalPrice: '', specificUnitSalePrice: '', rentalRate: '', rentEscalationPercentage: '', leaseTermMonths: '', isCurrentlyVacant: true });
   const [unitEditError, setUnitEditError] = useState('');
   const [unitEditSuccess, setUnitEditSuccess] = useState('');
 
@@ -124,6 +124,9 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       netRentableAreaSqM: unit.netRentableAreaSqM || '',
       specificUnitRentalPrice: unit.specificUnitRentalPrice ?? '',
       specificUnitSalePrice: unit.specificUnitSalePrice ?? '',
+      rentalRate: unit.rentalRate ?? '',
+      rentEscalationPercentage: unit.rentEscalationPercentage ?? '',
+      leaseTermMonths: unit.leaseTermMonths ?? '',
       isCurrentlyVacant: !!unit.isCurrentlyVacant
     });
     setUnitEditError(''); setUnitEditSuccess('');
@@ -226,6 +229,9 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         netRentableAreaSqM: Number(unitEditForm.netRentableAreaSqM || 0),
         specificUnitRentalPrice: unitEditForm.specificUnitRentalPrice === '' ? null : Number(unitEditForm.specificUnitRentalPrice),
         specificUnitSalePrice: unitEditForm.specificUnitSalePrice === '' ? null : Number(unitEditForm.specificUnitSalePrice),
+        rentalRate: unitEditForm.rentalRate === '' ? null : Number(unitEditForm.rentalRate),
+        rentEscalationPercentage: unitEditForm.rentEscalationPercentage === '' ? null : Number(unitEditForm.rentEscalationPercentage),
+        leaseTermMonths: unitEditForm.leaseTermMonths === '' ? null : Number(unitEditForm.leaseTermMonths),
         isCurrentlyVacant: unitEditForm.isCurrentlyVacant
       });
       // Reflect edits into the open modal + the master property list
@@ -408,9 +414,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         propertyTypeId: Number(propertyForm.propertyTypeId || property.propertyTypeId),
         valuationPrice: Number(propertyForm.valuationPrice || 0),
         salePrice: propertyForm.salePrice === '' ? null : Number(propertyForm.salePrice),
-        baseRentalRate: propertyForm.baseRentalRate === '' ? null : Number(propertyForm.baseRentalRate),
-        rentEscalationPercentage: propertyForm.rentEscalationPercentage === '' ? null : Number(propertyForm.rentEscalationPercentage),
-        leaseTermMonths: propertyForm.leaseTermMonths === '' ? null : Number(propertyForm.leaseTermMonths),
         tenantInstallationAllowance: Number(propertyForm.tenantInstallationAllowance || 0),
         latitude: Number(propertyForm.latitude || 0), longitude: Number(propertyForm.longitude || 0)
       });
@@ -524,34 +527,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                   R {property.valuationPrice ? property.valuationPrice.toLocaleString() : 'N/A'}
                 </span>
               </div>
-              <div>
-                <span className="block text-[10px] text-slate-500 font-bold uppercase">
-                  {property.marketClass === 'Rental' ? 'Monthly Base Rental' : 'Target Sale Price'}
-                </span>
-                <span className="text-sm font-bold text-white mt-0.5 block">
-                  {property.marketClass === 'Rental' 
-                    ? `R ${(property.baseRentalRate || 0).toLocaleString()}/mo`
-                    : `R ${(property.salePrice || property.valuationPrice || 0).toLocaleString()}`}
-                </span>
-              </div>
             </div>
-
-            {property.marketClass === 'Rental' && (
-              <div className="grid grid-cols-3 gap-3 p-3 bg-slate-950/40 rounded-xl border border-slate-800 text-xs mb-4">
-                <div>
-                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Annual Escalation</span>
-                  <span className="text-slate-200 font-semibold">{property.rentEscalationPercentage || 7.5}% / yr</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Mandated Term</span>
-                  <span className="text-slate-200 font-semibold">{property.leaseTermMonths || 12} Months</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[10px] uppercase font-bold">TI Fit-out Allowance</span>
-                  <span className="text-amber-400 font-semibold">R {(property.tenantInstallationAllowance || 0).toLocaleString()}</span>
-                </div>
-              </div>
-            )}
 
             {/* 🗺️ Geospatial Coordinates Container */}
             <div className="h-44 w-full bg-slate-950 border border-slate-800 rounded-xl flex flex-col items-center justify-center p-4 text-center relative overflow-hidden">
@@ -676,7 +652,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                     <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Unit Description / Specification</label>
                     <input 
                       type="text" 
-                      placeholder="e.g. Corner office suite with double glass facade and cold storage" 
+                      placeholder="e.g. Corner office suite" 
                       value={newUnit.unitDescription}
                       onChange={e => setNewUnit({ ...newUnit, unitDescription: e.target.value })}
                       className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
@@ -791,6 +767,9 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                       <label className="label sm:col-span-2">Unit description<textarea rows={2} value={unitEditForm.unitDescription} onChange={e => setUnitEditForm({ ...unitEditForm, unitDescription: e.target.value })} className="field" placeholder="e.g. Ground floor retail shell" /></label>
                       <label className="label">Rental price<input type="number" min="0" value={unitEditForm.specificUnitRentalPrice ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, specificUnitRentalPrice: e.target.value || '' })} className="field" /></label>
                       <label className="label">Sale price<input type="number" min="0" value={unitEditForm.specificUnitSalePrice ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, specificUnitSalePrice: e.target.value || '' })} className="field" /></label>
+                      <label className="label">Rental rate (R/mo)<input type="number" min="0" value={unitEditForm.rentalRate ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, rentalRate: e.target.value || '' })} className="field" /></label>
+                      <label className="label">Escalation %<input type="number" min="0" step="0.01" value={unitEditForm.rentEscalationPercentage ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, rentEscalationPercentage: e.target.value || '' })} className="field" /></label>
+                      <label className="label">Lease term (months)<input type="number" min="0" value={unitEditForm.leaseTermMonths ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, leaseTermMonths: e.target.value || '' })} className="field" /></label>
                       <label className="flex items-center gap-2 text-xs mt-1"><input type="checkbox" checked={unitEditForm.isCurrentlyVacant} onChange={e => setUnitEditForm({ ...unitEditForm, isCurrentlyVacant: e.target.checked })} /><span className="text-slate-300">Currently vacant</span></label>
                       <div className="sm:col-span-2">
                         <button type="submit" className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold"><Save size={13} />Save unit details</button>
@@ -1029,7 +1008,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
             <h3 className="text-white font-bold">Edit property details</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {[
-                ['completeAddress', 'Address'], ['erfSpatialSize', 'Erf size'], ['titleDeedType', 'Title deed type'], ['portfolioZoning', 'Zoning'], ['linkedOwnerId', 'Owner record ID'], ['valuationPrice', 'Valuation'], ['salePrice', 'Sale price'], ['baseRentalRate', 'Monthly rent'], ['rentEscalationPercentage', 'Escalation %'], ['leaseTermMonths', 'Lease months'], ['tenantInstallationAllowance', 'TI allowance'], ['latitude', 'Latitude'], ['longitude', 'Longitude']
+                ['completeAddress', 'Address'], ['erfSpatialSize', 'Erf size'], ['titleDeedType', 'Title deed type'], ['portfolioZoning', 'Zoning'], ['linkedOwnerId', 'Owner record ID'], ['valuationPrice', 'Valuation'], ['salePrice', 'Sale price'], ['tenantInstallationAllowance', 'TI allowance'], ['latitude', 'Latitude'], ['longitude', 'Longitude']
               ].map(([key, label]) => <label key={key} className="text-[10px] text-slate-400 uppercase">{label}<input value={propertyForm[key] ?? ''} onChange={e => setPropertyForm({ ...propertyForm, [key]: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case" /></label>)}
               <label className="text-[10px] text-slate-400 uppercase">Market class<select value={propertyForm.marketClass || 'Sale'} onChange={e => setPropertyForm({ ...propertyForm, marketClass: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case"><option>Sale</option><option>Rental</option></select></label>
             </div>

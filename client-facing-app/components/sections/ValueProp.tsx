@@ -27,10 +27,10 @@ export default function ValueProp() {
     <section className="py-16 sm:py-20">
       <div className="container">
         <div className="mx-auto max-w-3xl text-center">
-          <h2 className="text-3xl font-display font-extrabold tracking-tight text-slate-900 sm:text-4xl">
+          <h2 className="text-3xl font-display font-extrabold tracking-tight text-white sm:text-4xl">
             A workflow built for brokers
           </h2>
-          <p className="mt-4 text-lg text-slate-600">
+          <p className="mt-4 text-lg text-slate-300">
             Three steps from pipeline to signed deal.
           </p>
         </div>
@@ -42,8 +42,8 @@ export default function ValueProp() {
                 {step.step}
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">{step.title}</h3>
-                <p className="mt-1 text-sm text-slate-600">{step.description}</p>
+                <h3 className="text-lg font-semibold text-white">{step.title}</h3>
+                <p className="mt-1 text-sm text-slate-300">{step.description}</p>
               </div>
             </div>
           ))}
@@ -53,7 +53,7 @@ export default function ValueProp() {
           <Link href="/login">
             <button
               type="button"
-              className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-6 py-3 text-base font-semibold text-slate-900 transition-colors hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500"
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-6 py-3 text-base font-semibold text-slate-900 transition-all duration-200 ease-in-out hover:scale-105 hover:bg-emerald-400 hover:shadow-lg active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
             >
               Start the demo
               <ArrowRight className="h-5 w-5" />

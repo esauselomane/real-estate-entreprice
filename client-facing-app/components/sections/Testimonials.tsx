@@ -5,7 +5,7 @@ export default function Testimonials() {
     <section className="py-16 sm:py-20">
       <div className="container">
         <div className="mx-auto max-w-3xl text-center">
-          <h2 className="text-3xl font-display font-extrabold tracking-tight text-slate-900 sm:text-4xl">
+          <h2 className="text-3xl font-display font-extrabold tracking-tight text-white sm:text-4xl">
             What our brokers say
           </h2>
         </div>
@@ -14,16 +14,16 @@ export default function Testimonials() {
           {testimonials.map((t) => (
             <div
               key={t.name}
-              className="rounded-2xl border border-slate-200/70 bg-white p-6 shadow-card"
+              className="rounded-2xl border border-slate-700 bg-slate-800/60 p-6 shadow-lg shadow-black/20"
             >
-              <p className="text-slate-700">“{t.quote}”</p>
+              <p className="text-slate-300">"{t.quote}"</p>
               <div className="mt-4 flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-700 font-semibold">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-900/40 text-blue-400 font-semibold">
                   {t.logo}
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-900">{t.name}</p>
-                  <p className="text-sm text-slate-500">{t.role}</p>
+                  <p className="text-sm font-semibold text-white">{t.name}</p>
+                  <p className="text-sm text-slate-400">{t.role}</p>
                 </div>
               </div>
             </div>

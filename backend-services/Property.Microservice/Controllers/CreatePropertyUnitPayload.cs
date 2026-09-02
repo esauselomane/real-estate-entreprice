@@ -23,6 +23,9 @@ namespace Property.Microservice.Controllers
             public decimal NetRentableAreaSqM { get; set; }
             public decimal? SpecificUnitRentalPrice { get; set; }
             public decimal? SpecificUnitSalePrice { get; set; }
+            public decimal? RentalRate { get; set; }
+            public decimal? RentEscalationPercentage { get; set; }
+            public int? LeaseTermMonths { get; set; }
             public bool IsCurrentlyVacant { get; set; } = true;
         }
 }

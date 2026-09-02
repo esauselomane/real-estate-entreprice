@@ -43,14 +43,6 @@ namespace Property.Microservice.Models
         [Column(TypeName = "decimal(18,2)")]
         public decimal? SalePrice { get; set; } // Populated if MarketClass == "Sale"
 
-        [Column(TypeName = "decimal(18,2)")]
-        public decimal? BaseRentalRate { get; set; } // Populated if MarketClass == "Rental"
-
-        [Column(TypeName = "decimal(5,2)")]
-        public decimal? RentEscalationPercentage { get; set; } // Annual lease compound markup e.g. 7.50%
-
-        public int? LeaseTermMonths { get; set; } // Expected contract commitment length
-
         // --- 🏗️ TENANT INCENTIVES & ALLOWANCES ---
         [Column(TypeName = "decimal(18,2)")]
         public decimal TenantInstallationAllowance { get; set; } // Numerical incentive budget allocation

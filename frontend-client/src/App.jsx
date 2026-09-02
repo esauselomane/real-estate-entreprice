@@ -11,10 +11,14 @@ import SystemAdminWorkspace from './components/SystemAdminWorkspace.jsx';
 import BrochureBuilderWorkspace from './components/BrochureBuilderWorkspace.jsx';
 import RoleDashboard from './components/RoleDashboard.jsx';
 import SetPassword from './components/SetPassword.jsx';
+import LeadsPage from './components/LeadsPage.jsx';
+import DealsPage from './components/DealsPage.jsx';
 
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useAppUi } from './contexts/AppUiContext.jsx';
 import { useAgency } from './contexts/AgencyContext.jsx';
+import { isTrialUser, getTrialExpiry } from './services/authService.js';
+import './index.css';
 
 export default function App() {
   const {
@@ -86,7 +90,7 @@ export default function App() {
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none"></div>
 
         {/* Premium Animated Rotating Card Container */}
-        <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-8 rounded-2xl shadow-2xl shadow-black/50">
+        <div className="card w-full max-w-md">
           
           {/* Logo and Greeting Header */}
           <div className="text-center mb-8">
@@ -103,20 +107,21 @@ export default function App() {
             <button
               type="button"
               onClick={() => setRegistering(false)}
-              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${!isRegistering ? 'bg-blue-600 text-white' : 'text-slate-300'}`}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition btn-primary`}
             >
               Sign In
             </button>
             <button
               type="button"
               onClick={() => setRegistering(true)}
-              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${isRegistering ? 'bg-blue-600 text-white' : 'text-slate-300'}`}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition text-slate-300 hover:text-white hidden`}
             >
               Register
             </button>
           </div>
 
-          {isRegistering ? (
+          {/* eslint-disable no-constant-condition, no-constant-binary-expression */}
+          {false && isRegistering ? (
             <form onSubmit={handleRegisterSubmit} className="space-y-5">
               {errorMessage && (
                 <div className={`p-3 rounded-xl text-xs font-medium ${errorMessage.includes('successful') ? 'bg-emerald-950/40 border border-emerald-900 text-emerald-400' : 'bg-red-950/40 border border-red-900 text-red-400'} animate-pulse`}>
@@ -148,9 +153,9 @@ export default function App() {
                 </select>
               </div>
 
-              <button type="submit" disabled={isConnecting} className="w-full py-3 mt-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:bg-emerald-800 disabled:text-slate-400 text-white font-semibold rounded-xl shadow-lg shadow-emerald-600/20 hover:shadow-emerald-500/30 transition-all duration-200 cursor-pointer">
+               <button type="submit" disabled={isConnecting} className="btn-success">
                 {isConnecting ? 'Creating Account...' : 'Create Account'}
-              </button>
+               </button>
             </form>
           ) : (
             <form onSubmit={handleLoginSubmit} className="space-y-5">
@@ -177,7 +182,7 @@ export default function App() {
 
               <button
                 type="submit" disabled={isConnecting}
-                className="w-full py-3 mt-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:bg-blue-800 disabled:text-slate-400 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/20 hover:shadow-blue-500/30 transition-all duration-200 cursor-pointer"
+                className="btn-primary"
               >
                 {isConnecting ? "Validating Tokens..." : "Sign In to Dashboard"}
               </button>
@@ -197,7 +202,7 @@ export default function App() {
   // 2. MAIN SYSTEM DASHBOARD VIEW: Render workspace layers after successful authentication
   return (
     <div className="flex bg-slate-950 min-h-screen text-slate-100">
-      
+
       {/* 🧭 Collapsible Side Navigation Drawer Shell */}
       <LeftSidebar />
 
@@ -220,6 +225,32 @@ export default function App() {
           </div>
         </header>
 
+        {/* 🎯 TRIAL BANNER — prominently shown at the top for trial accounts */}
+        {isTrialUser() && (() => {
+          const expiry = getTrialExpiry();
+          const isExpired = expiry && new Date(expiry) < new Date();
+          const formatted = expiry ? new Date(expiry).toLocaleDateString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric' }) : 'soon';
+          return (
+            <div className={`mb-6 p-4 rounded-2xl border flex items-center gap-3 ${
+              isExpired
+                ? 'bg-red-950/40 border-red-800 text-red-200'
+                : 'bg-amber-950/40 border-amber-700 text-amber-200'
+            }`}>
+              <div className={`text-2xl ${isExpired ? 'text-red-400' : 'text-amber-400'}`}>⚠️</div>
+              <div className="flex-1">
+                <p className="text-sm font-bold uppercase tracking-wider">
+                  {isExpired ? 'Trial Expired' : 'Trial Period Active'}
+                </p>
+                <p className="text-xs opacity-90">
+                  {isExpired
+                    ? 'Your trial has ended. Please contact support to upgrade.'
+                    : `Your 14-day free trial expires on ${formatted}.`}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ⚙️ Dynamic UI view routing execution conditional dispatcher matrices */}
         {currentView === 'dashboard' && <RoleDashboard />}
 
@@ -234,6 +265,10 @@ export default function App() {
           />
         ) : currentView === 'crm' ? (
           <CRMWorkspace />
+        ) : currentView === 'leads' ? (
+          <LeadsPage />
+        ) : currentView === 'deals' ? (
+          <DealsPage />
         ) : null}
 
         {currentView === 'owners-tenants' && (

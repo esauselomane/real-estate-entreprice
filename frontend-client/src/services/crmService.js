@@ -2,9 +2,9 @@ import apiClient from './apiClient.js';
 
 export const crmService = {
    getOperationalRecords: async (module, page = 1) => {
-    const response = await apiClient.get('/crm/operations', { params: { module, page } });
-    return response.data;
-  },
+     const response = await apiClient.get('/crm/operations', { params: { module, page } });
+     return Object.assign(response.data, { totalCount: Number(response.headers['x-total-count'] || 0) });
+   },
 
    // --- 🔗 UNIT-SCOPED OPERATIONAL RECORDS (leases / maintenance / document vault) ---
   getOperationalRecordsForUnit: async (module, propertyId, propertyUnitId, page = 1) => {
@@ -24,15 +24,14 @@ export const crmService = {
     const response = await apiClient.put(`/crm/operations/${recordId}`, payload);
     return response.data;
   },
-  getCRMBoards: async (page = 1) => {
-    try {
-      const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
-      const parameters = {
-        page,
-        agentName: userProfile.name || '',
-        userRole: userProfile.role || 'Agent'
-      };
-      const response = await apiClient.get('/crm/boards', { params: parameters });
+   getCRMBoards: async (page = 1) => {
+     try {
+       const parameters = {
+         page,
+         agentName: '',
+         userRole: ''
+       };
+       const response = await apiClient.get('/crm/boards', { params: parameters });
       // X-Lead-Count / X-Deal-Count expose tenant-scoped totals for pagination
       return {
         ...response.data,
@@ -46,9 +45,8 @@ export const crmService = {
 
   getOwnerTenantRecords: async (page = 1) => {
     try {
-      const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
       const response = await apiClient.get('/crm/owners-tenants', { params: { page } });
-      return response.data;
+      return Object.assign(response.data, { totalCount: Number(response.headers['x-total-count'] || 0) });
     } catch (error) {
       throw error.response?.data?.message || 'Owner/tenant registry sync failed.';
     }
@@ -108,7 +106,6 @@ export const crmService = {
 
   getCRMReportOverview: async (year = new Date().getFullYear()) => {
     try {
-      const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
       const response = await apiClient.get('/crm/report/overview', { params: { year } });
       return response.data;
     } catch (error) {
@@ -118,11 +115,10 @@ export const crmService = {
 
   getAgencies: async (page = 1) => {
     try {
-      const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
       const response = await apiClient.get('/crm/agencies', { params: { page } });
-      return response.data;
+      const data = Array.isArray(response.data) ? response.data : (response.data.items || []);
+      return Object.assign(data, { totalCount: Number(response.headers['x-total-count'] || 0) });
     } catch (error) {
-      debugger;
       throw error.response?.data?.message || 'Agency list sync failed.';
     }
   },
@@ -202,9 +198,9 @@ export const crmService = {
 
   getBrokers: async (page = 1) => {
     try {
-      const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
       const response = await apiClient.get('/crm/brokers', { params: { page } });
-      return response.data;
+      const data = Array.isArray(response.data) ? response.data : (response.data.items || []);
+      return Object.assign(data, { totalCount: Number(response.headers['x-total-count'] || 0) });
     } catch (error) {
       throw error.response?.data?.message || 'Broker list sync failed.';
     }
@@ -243,29 +239,47 @@ export const crmService = {
     }
   },
 
-  updateLeadStage: async (leadId, nextStage, notesUpdate = '', propertyId = null, sellerName = '') => {
-    try {
-      const payload = {
-        leadId: parseInt(leadId, 10),
-        nextStage,
-        notesUpdate,
-        linkToPropertyId: propertyId ? parseInt(propertyId, 10) : null,
-        sellerNameIfNewDeal: sellerName
-      };
-      const response = await apiClient.post('/crm/update-lead-stage', payload);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data?.message || 'Failed to progress lead milestone.';
-    }
-  },
-
-   updateDealStage: async (dealId, nextStage, notesUpdate = '') => {
+   updateLeadStage: async (leadId, nextStage, notesUpdate = '', propertyId = null, sellerName = '') => {
      try {
-       const payload = { dealId: parseInt(dealId, 10), nextStage, notesUpdate };
-       const response = await apiClient.post('/crm/update-deal-stage', payload);
+       const payload = {
+         leadId: parseInt(leadId, 10),
+         nextStage,
+         notesUpdate,
+         linkToPropertyId: propertyId ? parseInt(propertyId, 10) : null,
+         sellerNameIfNewDeal: sellerName
+       };
+       const response = await apiClient.post('/crm/update-lead-stage', payload);
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'Failed to progress deal phase.';
+       throw error.response?.data?.message || 'Failed to progress lead milestone.';
+     }
+   },
+
+   updateLead: async (leadId, payload) => {
+     try {
+       const response = await apiClient.put(`/crm/lead/${leadId}`, payload);
+       return response.data;
+     } catch (error) {
+       throw error.response?.data?.message || 'Failed to update lead.';
+     }
+   },
+
+    updateDealStage: async (dealId, nextStage, notesUpdate = '') => {
+      try {
+        const payload = { dealId: parseInt(dealId, 10), nextStage, notesUpdate };
+        const response = await apiClient.post('/crm/update-deal-stage', payload);
+        return response.data;
+      } catch (error) {
+        throw error.response?.data?.message || 'Failed to progress deal phase.';
+      }
+    },
+
+   updateDeal: async (dealId, payload) => {
+     try {
+       const response = await apiClient.put(`/crm/deal/${dealId}`, payload);
+       return response.data;
+     } catch (error) {
+       throw error.response?.data?.message || 'Failed to update deal.';
      }
    },
 
@@ -310,7 +324,6 @@ export const crmService = {
 
   getPipelineReportSummary: async () => {
     try {
-      const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
       const response = await apiClient.get('/crm/report/summary', { params: {} });
       return response.data;
     } catch (error) {
@@ -351,15 +364,14 @@ export const crmService = {
         }
       }
       return Object.entries(counts).map(([name, value]) => ({ name, value, pct: total ? Math.round((value / total) * 100) : 0 }));
-    } catch (error) {
+    } catch {
       return [];
     }
   },
 
   getCompanies: async (page = 1) => {
-    const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
     const response = await apiClient.get('/crm/companies', { params: { page } });
-    return response.data;
+    return Object.assign(response.data, { totalCount: Number(response.headers['x-total-count'] || 0) });
   },
 
   updateCompany: async (companyPayload) => {
@@ -368,9 +380,8 @@ export const crmService = {
   },
 
   getLegalEntities: async (page = 1) => {
-    const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
     const response = await apiClient.get('/crm/legal-entities', { params: { page } });
-    return response.data;
+    return Object.assign(response.data, { totalCount: Number(response.headers['x-total-count'] || 0) });
   },
 
   updateLegalEntity: async (legalEntityPayload) => {
@@ -379,9 +390,17 @@ export const crmService = {
   },
 
   getContacts: async (page = 1) => {
-    const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
     const response = await apiClient.get('/crm/contacts', { params: { page } });
-    return response.data;
+    return Object.assign(response.data, { totalCount: Number(response.headers['x-total-count'] || 0) });
+  },
+
+  searchContacts: async (query = '') => {
+    try {
+      const response = await apiClient.get('/crm/contacts/search', { params: { q: query, page: 1 } });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data?.message || 'Contact search failed.';
+    }
   },
 
   updateContact: async (contactPayload) => {

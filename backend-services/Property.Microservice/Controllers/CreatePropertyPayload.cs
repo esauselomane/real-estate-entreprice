@@ -25,9 +25,6 @@ namespace Property.Microservice.Controllers
             public int PropertyTypeId { get; set; } = 1;
             public decimal ValuationPrice { get; set; }
             public decimal? SalePrice { get; set; }
-            public decimal? BaseRentalRate { get; set; }
-            public decimal? RentEscalationPercentage { get; set; }
-            public int? LeaseTermMonths { get; set; }
             public decimal TenantInstallationAllowance { get; set; } = 0;
             public decimal Latitude { get; set; } = -33.9249m;
             public decimal Longitude { get; set; } = 18.4241m;

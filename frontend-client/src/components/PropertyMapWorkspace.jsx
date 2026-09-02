@@ -62,9 +62,6 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
     propertyTypeId: 1,
     valuationPrice: '',
     salePrice: '',
-    baseRentalRate: '',
-    rentEscalationPercentage: '',
-    leaseTermMonths: '',
     tenantInstallationAllowance: 0,
     latitude: -33.9249,
     longitude: 18.4241,
@@ -138,8 +135,7 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
     setPropertyForm({
       completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold',
       portfolioZoning: 'Commercial Zone', marketClass: 'Sale', propertyTypeId: 1,
-      valuationPrice: '', salePrice: '', baseRentalRate: '', rentEscalationPercentage: '',
-      leaseTermMonths: '', tenantInstallationAllowance: 0,
+      valuationPrice: '', salePrice: '', tenantInstallationAllowance: 0,
       latitude: -33.9249, longitude: 18.4241, linkedOwnerId: 'OT-0001', subUnits: []
     });
     setSaveError('');
@@ -165,9 +161,6 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
         ...propertyForm,
         valuationPrice: Number(propertyForm.valuationPrice) || 0,
         salePrice: propertyForm.salePrice ? Number(propertyForm.salePrice) : null,
-        baseRentalRate: propertyForm.baseRentalRate ? Number(propertyForm.baseRentalRate) : null,
-        rentEscalationPercentage: propertyForm.rentEscalationPercentage ? Number(propertyForm.rentEscalationPercentage) : null,
-        leaseTermMonths: propertyForm.leaseTermMonths ? Number(propertyForm.leaseTermMonths) : null,
         tenantInstallationAllowance: Number(propertyForm.tenantInstallationAllowance) || 0,
         latitude: Number(propertyForm.latitude) || -33.9249,
         longitude: Number(propertyForm.longitude) || 18.4241,
@@ -469,37 +462,6 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
                 />
               </div>
-              <div>
-                <label className="block text-[10px] text-slate-400 uppercase mb-1">Base Rental Rate</label>
-                <input
-                  type="number" step="0.01"
-                  value={propertyForm.baseRentalRate}
-                  onChange={(e) => handleFormChange('baseRentalRate', e.target.value)}
-                  placeholder="0.00 / month"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] text-slate-400 uppercase mb-1">Rent Escalation %</label>
-                <input
-                  type="number" step="0.01"
-                  value={propertyForm.rentEscalationPercentage}
-                  onChange={(e) => handleFormChange('rentEscalationPercentage', e.target.value)}
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] text-slate-400 uppercase mb-1">Lease Term (months)</label>
-                <input
-                  type="number"
-                  value={propertyForm.leaseTermMonths}
-                  onChange={(e) => handleFormChange('leaseTermMonths', e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
-                />
-              </div>
-
               <div>
                 <label className="block text-[10px] text-slate-400 uppercase mb-1">Tenant Install Allowance</label>
                 <input
