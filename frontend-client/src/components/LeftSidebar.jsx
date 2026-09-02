@@ -1,31 +1,35 @@
 import { useState } from 'react';
-import { Home, Search, Users, Briefcase, BarChart3, ChevronLeft, ChevronRight, LogOut, Shield, Map, UserPlus } from 'lucide-react';
+import { Home, Search, Users, Briefcase, BarChart3, ChevronLeft, ChevronRight, LogOut, Shield, Map, UserPlus, Settings } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { useAgency } from '../contexts/AgencyContext.jsx';
+import { usePermission } from '../contexts/PermissionContext.jsx';
+import Can from '../components/Can.jsx';
 
 export default function LeftSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { userRole, activeProfile, logout } = useAuth();
   const { currentView, navigateTo } = useAppUi();
   const { currentAgency } = useAgency();
+  const { hasPermission } = usePermission();
 
 
   // Base structural links mapped directly to permissions
   const navItems = [
-    { name: 'Dashboard', view: 'dashboard', icon: Home, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] },
-    { name: 'Property Search', view: 'search', icon: Search, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
-    { name: 'Property Map', view: 'map', icon: Map, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
-    { name: 'Leads', view: 'leads', icon: UserPlus, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker'] },
-    { name: 'Deals', view: 'deals', icon: Briefcase, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker'] },
-    { name: 'CRM Directory', view: 'crm', icon: Briefcase, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker'] },
-    { name: 'Clients (Tenants/Owners)', view: 'owners-tenants', icon: Users, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
-    { name: 'Performance Reports', view: 'reports', icon: BarChart3, roles: ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner'] },
-    { name: 'System Admin', view: 'admin', icon: Shield, roles: ['PlatformAdmin', 'AgencyAdmin'] },
+    { name: 'Dashboard', view: 'dashboard', icon: Home, permission: 'properties:view' },
+    { name: 'Property Search', view: 'search', icon: Search, permission: 'properties:view' },
+    { name: 'Property Map', view: 'map', icon: Map, permission: 'properties:view' },
+    { name: 'Leads', view: 'leads', icon: UserPlus, permission: 'leads:view' },
+    { name: 'Deals', view: 'deals', icon: Briefcase, permission: 'deals:view' },
+    { name: 'CRM Directory', view: 'crm', icon: Briefcase, permission: 'users:view' },
+    { name: 'Clients (Tenants/Owners)', view: 'owners-tenants', icon: Users, permission: 'users:view' },
+    { name: 'Performance Reports', view: 'reports', icon: BarChart3, permission: 'billing:view' },
+    { name: 'System Admin', view: 'admin', icon: Shield, permission: 'agencies:view' },
+    { name: 'Roles & Permissions', view: 'roles', icon: Settings, permission: 'system:roles:manage' },
   ];
 
-  // Filters visible screens depending on the user's role criteria
-  const visibleItems = navItems.filter(item => item.roles.includes(userRole));
+  // Filters visible screens depending on the user's permission criteria
+  const visibleItems = navItems.filter(item => hasPermission(item.permission));
 
   return (
     <div 

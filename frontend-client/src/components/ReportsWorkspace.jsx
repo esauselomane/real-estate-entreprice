@@ -15,7 +15,7 @@ export default function ReportsWorkspace() {
         const data = await crmService.getCRMReportOverview(year);
         setReport(data || { totalLeads: 0, totalDeals: 0, totalRevenue: 0, monthlyBreakdown: [] });
       } catch (err) {
-        setError(err || 'Report load failed.');
+        setError((err && err.message) || 'Report load failed.');
       } finally {
         setIsLoading(false);
       }

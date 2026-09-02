@@ -8,8 +8,11 @@ import {
 import { propertyService } from '../services/propertyService.js';
 import { crmService } from '../services/crmService.js';
 import { canManageUnits } from '../services/authService.js';
+import { usePermission } from '../contexts/PermissionContext.jsx';
+import Can from '../components/Can.jsx';
 
 export default function PropertyDetails({ propertyId, onBack, onNavigateToClient }) {
+  const { hasPermission } = usePermission();
   const [property, setProperty] = useState(null);
   const [subUnits, setSubUnits] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -510,7 +513,9 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               </span>
             </div>
 
-            <button type="button" onClick={() => { setPropertyForm({ ...property }); setIsEditingProperty(true); }} className="mb-4 text-xs font-bold text-blue-300 border border-blue-900 rounded-lg px-3 py-1.5 hover:bg-blue-950">Edit property details</button>
+            <Can permission="properties:edit">
+              <button type="button" onClick={() => { setPropertyForm({ ...property }); setIsEditingProperty(true); }} className="mb-4 text-xs font-bold text-blue-300 border border-blue-900 rounded-lg px-3 py-1.5 hover:bg-blue-950">Edit property details</button>
+            </Can>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-slate-950/60 rounded-xl border border-slate-800/80 my-4">
               <div>
@@ -659,13 +664,15 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                     />
                   </div>
                   <div>
-                    <button
-                      type="submit"
-                      disabled={isSubmittingUnit}
-                      className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                    >
-                      {isSubmittingUnit ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Save & Link
-                    </button>
+                    <Can permission="units:create">
+                      <button
+                        type="submit"
+                        disabled={isSubmittingUnit}
+                        className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {isSubmittingUnit ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Save & Link
+                      </button>
+                    </Can>
                   </div>
                 </div>
               </form>
@@ -719,14 +726,16 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                           <Wrench size={14} />
                         </button>
                         {canManage && (
-                           <button 
-                            type="button"
-                            onClick={() => handleDeleteSubUnit(unit.propertyUnitId, unit.unitNumber)}
-                            title="Remove Sub-unit"
-                            className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                          >
-                            <Trash2 size={14} />
-                           </button>
+                          <Can permission="units:delete">
+                            <button 
+                              type="button"
+                              onClick={() => handleDeleteSubUnit(unit.propertyUnitId, unit.unitNumber)}
+                              title="Remove Sub-unit"
+                              className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </Can>
                         )}
                     </div>
                   </div>
@@ -772,7 +781,9 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                       <label className="label">Lease term (months)<input type="number" min="0" value={unitEditForm.leaseTermMonths ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, leaseTermMonths: e.target.value || '' })} className="field" /></label>
                       <label className="flex items-center gap-2 text-xs mt-1"><input type="checkbox" checked={unitEditForm.isCurrentlyVacant} onChange={e => setUnitEditForm({ ...unitEditForm, isCurrentlyVacant: e.target.checked })} /><span className="text-slate-300">Currently vacant</span></label>
                       <div className="sm:col-span-2">
-                        <button type="submit" className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold"><Save size={13} />Save unit details</button>
+                        <Can permission="units:edit">
+                          <button type="submit" className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold"><Save size={13} />Save unit details</button>
+                        </Can>
                       </div>
                     </form>
                   )}
@@ -795,10 +806,12 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                           </div>
                           <label className="label">{activeOpsTab.amount}<input type="number" min="0" value={unitOpsForm.amount ?? ''} onChange={e => setUnitOpsForm({ ...unitOpsForm, amount: e.target.value })} className="field" /></label>
                           <label className="label">Details<textarea rows={4} value={unitOpsForm.details} onChange={e => setUnitOpsForm({ ...unitOpsForm, details: e.target.value })} className="field" placeholder={activeOpsTab.detailsPlaceholder} /></label>
-                          <div className="flex gap-3">
-                            <button type="button" onClick={resetUnitOpForm} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Clear</button>
-                            <button className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">{unitOpsEditing ? 'Save changes' : 'Save record'}</button>
-                          </div>
+                           <div className="flex gap-3">
+                             <button type="button" onClick={resetUnitOpForm} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Clear</button>
+                             <Can permission="units:edit">
+                               <button className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">{unitOpsEditing ? 'Save changes' : 'Save record'}</button>
+                             </Can>
+                           </div>
                         </form>
 
                         <div>
@@ -814,7 +827,9 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                                     {r.details && <p className="text-[10px] text-slate-500 whitespace-pre-wrap">{r.details}</p>}
                                     {Number(r.amount || 0) !== 0 && <p className="text-[10px] text-emerald-400">R {Number(r.amount).toLocaleString()}</p>}
                                   </div>
-                                  <button type="button" onClick={() => editUnitOp(r)} className="h-fit p-1.5 text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                                   <Can permission="units:edit">
+                                     <button type="button" onClick={() => editUnitOp(r)} className="h-fit p-1.5 text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                                   </Can>
                                 </div>
                               ))}
                               {!unitOpsRecords.length && <p className="text-[10px] text-slate-500">No {activeOpsTab.label.toLowerCase()} records for this unit yet.</p>}
@@ -837,9 +852,11 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                           <input required type="file" onChange={e => setUnitDocForm({ ...unitDocForm, file: e.target.files?.[0] || null })} className="text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700" />
                           <span className="text-[10px] text-slate-500 block mt-1">{unitDocForm.file?.name || 'No file chosen'}</span>
                         </label>
-                        <div className="sm:col-span-2">
-                          <button type="submit" disabled={unitDocUploading} className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 disabled:opacity-60 text-white rounded-xl text-xs font-bold"><Upload size={13} />{unitDocUploading ? 'Uploading…' : 'Save to vault'}</button>
-                        </div>
+                         <div className="sm:col-span-2">
+                           <Can permission="units:edit">
+                             <button type="submit" disabled={unitDocUploading} className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 disabled:opacity-60 text-white rounded-xl text-xs font-bold"><Upload size={13} />{unitDocUploading ? 'Uploading…' : 'Save to vault'}</button>
+                           </Can>
+                         </div>
                       </form>
                       <div className="border-t border-slate-800 pt-3 space-y-2">
                         <h6 className="text-[10px] font-bold uppercase text-slate-400">Stored documents</h6>
@@ -852,12 +869,14 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                                   {d.description && <p className="text-[10px] text-slate-400 truncate">{d.description}</p>}
                                   <p className="text-[10px] text-slate-500">{d.contentType || 'file'} · {(d.sizeBytes / 1024).toFixed(1)} KB · {new Date(d.uploadedAt).toLocaleDateString()}</p>
                                 </div>
-                                <div className="flex items-center gap-1.5">
-                                  <button type="button" onClick={() => downloadUnitDocument(d)} title="Download" className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"><Download size={13} /></button>
-                                  {canManage && (
-                                    <button type="button" onClick={() => deleteUnitDocument(d)} title="Delete document" className="p-1.5 text-slate-400 hover:text-red-400 rounded-lg hover:bg-slate-800"><Trash2 size={13} /></button>
-                                  )}
-                                </div>
+                                 <div className="flex items-center gap-1.5">
+                                   <button type="button" onClick={() => downloadUnitDocument(d)} title="Download" className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"><Download size={13} /></button>
+                                   {canManage && (
+                                     <Can permission="units:delete">
+                                       <button type="button" onClick={() => deleteUnitDocument(d)} title="Delete document" className="p-1.5 text-slate-400 hover:text-red-400 rounded-lg hover:bg-slate-800"><Trash2 size={13} /></button>
+                                     </Can>
+                                   )}
+                                 </div>
                               </div>
                             ))}</div>}
                       </div>
@@ -965,15 +984,17 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                 return (
                   <div key={plat.platformId} className="flex items-center justify-between p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
                     <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleSyndication(plat.platformId, active)}
-                        className={`w-5 h-5 rounded flex items-center justify-center border transition-colors cursor-pointer ${
-                          active ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-700 bg-slate-950 hover:border-slate-600'
-                        }`}
-                      >
-                        {active && <Check size={12} />}
-                      </button>
+                      <Can permission="properties:edit">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSyndication(plat.platformId, active)}
+                          className={`w-5 h-5 rounded flex items-center justify-center border transition-colors cursor-pointer ${
+                            active ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-700 bg-slate-950 hover:border-slate-600'
+                          }`}
+                        >
+                          {active && <Check size={12} />}
+                        </button>
+                      </Can>
                       <div>
                         <span className="text-xs font-semibold text-slate-300 block">{plat.platformName}</span>
                         {syncDetails?.externalReferenceIndex && (
@@ -1012,7 +1033,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               ].map(([key, label]) => <label key={key} className="text-[10px] text-slate-400 uppercase">{label}<input value={propertyForm[key] ?? ''} onChange={e => setPropertyForm({ ...propertyForm, [key]: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case" /></label>)}
               <label className="text-[10px] text-slate-400 uppercase">Market class<select value={propertyForm.marketClass || 'Sale'} onChange={e => setPropertyForm({ ...propertyForm, marketClass: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case"><option>Sale</option><option>Rental</option></select></label>
             </div>
-            <div className="flex gap-3"><button type="button" onClick={() => setIsEditingProperty(false)} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Cancel</button><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">Save property</button></div>
+             <div className="flex gap-3"><button type="button" onClick={() => setIsEditingProperty(false)} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Cancel</button><Can permission="properties:edit"><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">Save property</button></Can></div>
           </form>
         </div>
       )}

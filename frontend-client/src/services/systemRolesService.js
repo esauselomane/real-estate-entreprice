@@ -7,6 +7,11 @@ export const systemRolesService = {
     return response.data;
   },
 
+  getSystemRole: async (id) => {
+    const response = await apiClient.get(`/system/roles/${id}`);
+    return response.data;
+  },
+
   createSystemRole: async (payload) => {
     const response = await apiClient.post('/system/roles', payload);
     return response.data;

@@ -4,6 +4,8 @@ import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaf
 import L from 'leaflet';
 import { propertyService } from '../services/propertyService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { usePermission } from '../contexts/PermissionContext.jsx';
+import Can from '../components/Can.jsx';
 
 // 🗺️ Vite + Leaflet default-marker icon patch — the bundler can't resolve the PNG
 // asset URLs otherwise, which leaves markers invisible. Resolved once per load.
@@ -40,6 +42,7 @@ const DEFAULT_CENTER = [-33.9249, 18.4207]; // Cape Town fallback
 
 export default function PropertyMapWorkspace({ onSelectProperty }) {
   const { userRole } = useAuth();
+  const { hasPermission } = usePermission();
   const [properties, setProperties] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -50,8 +53,6 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
-
-  const canCreate = userRole === 'PlatformAdmin' || userRole === 'AgencyAdmin' || userRole === 'Broker';
 
   const [propertyForm, setPropertyForm] = useState({
     completeAddress: '',
@@ -221,7 +222,7 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
           />
-          {canCreate && (
+          <Can permission="properties:create">
             <button
               type="button"
               onClick={handleOpenAddModal}
@@ -229,7 +230,7 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
             >
               <Plus size={14} /> Add Property
             </button>
-          )}
+          </Can>
         </div>
 
         {/* Dynamic Asset Record Cards Scrollbox */}

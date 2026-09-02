@@ -16,6 +16,8 @@ namespace Identity.Microservice.Data
         public DbSet<UserAccount> UserAccounts { get; set; }
         public DbSet<UserAccessClaim> UserAccessClaims { get; set; }
         public DbSet<SystemRoleDefinition> SystemRoles { get; set; }
+        public DbSet<Permission> Permissions { get; set; }
+        public DbSet<RolePermission> RolePermissions { get; set; }
         public DbSet<LeadCaptureRequest> LeadCaptureRequests { get; set; }
         public DbSet<LeadWorkflow> LeadWorkflows { get; set; }
         public DbSet<PricingPackage> PricingPackages { get; set; }
@@ -27,6 +29,25 @@ namespace Identity.Microservice.Data
             // Enforce unique structural email parameters inside the user table
             modelBuilder.Entity<UserAccount>()
                 .HasIndex(u => u.Email)
+                .IsUnique();
+
+            modelBuilder.Entity<RolePermission>()
+                .HasKey(rp => new { rp.RoleDefId, rp.PermissionId });
+
+            modelBuilder.Entity<RolePermission>()
+                .HasOne(rp => rp.Role)
+                .WithMany(r => r.RolePermissions)
+                .HasForeignKey(rp => rp.RoleDefId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<RolePermission>()
+                .HasOne(rp => rp.Permission)
+                .WithMany(p => p.RolePermissions)
+                .HasForeignKey(rp => rp.PermissionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Permission>()
+                .HasIndex(p => p.Key)
                 .IsUnique();
         }
     }

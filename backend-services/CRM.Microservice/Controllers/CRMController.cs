@@ -7,6 +7,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using CRM.Microservice.Data;
 using CRM.Microservice.Models;
+using CRM.Microservice.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,13 +24,15 @@ namespace CRM.Microservice.Controllers
         private readonly IHttpClientFactory _http;
         private readonly string _gatewayUrl;
         private readonly ILogger<CRMController> _logger;
+        private readonly PermissionCheckService _permissionCheck;
 
-        public CRMController(CRMDbContext context, IHttpClientFactory http, IConfiguration configuration, ILogger<CRMController> logger)
+        public CRMController(CRMDbContext context, IHttpClientFactory http, IConfiguration configuration, ILogger<CRMController> logger, PermissionCheckService permissionCheck)
         {
             _context = context;
             _http = http;
             _gatewayUrl = configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
             _logger = logger;
+            _permissionCheck = permissionCheck;
         }
 
         // 🔐 Resolves the caller's tenant directly from the bearer JWT claim
@@ -96,6 +99,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("operations")]
         public async Task<IActionResult> GetOperationalRecords([FromQuery] int page = 1, [FromQuery] string? module = null, [FromQuery] int? propertyId = null, [FromQuery] int? propertyUnitId = null)
         {
+            if (!await _permissionCheck.HasPermissionAsync("units:view"))
+            {
+                _logger.LogWarning("GetOperationalRecords: forbidden — caller lacks units:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var query = _context.OperationalRecords.Where(r => r.TenantId == tenantId);
             if (!string.IsNullOrWhiteSpace(module)) query = query.Where(r => r.Module == module);
@@ -112,6 +121,20 @@ namespace CRM.Microservice.Controllers
         {
             if (record == null || string.IsNullOrWhiteSpace(record.Module) || string.IsNullOrWhiteSpace(record.Title))
                 return BadRequest(new { message = "Module and title are required." });
+
+            var permission = record.Module.ToLowerInvariant() switch
+            {
+                "leases" or "maintenance" => "units:edit",
+                "valuations" => "valuations:bypass",
+                _ => "properties:edit"
+            };
+
+            if (!await _permissionCheck.HasPermissionAsync(permission))
+            {
+                _logger.LogWarning("CreateOperationalRecord: forbidden — caller lacks {Permission} permission", permission);
+                return Forbid();
+            }
+
             record.CreatedAt = DateTime.UtcNow;
             record.UpdatedAt = DateTime.UtcNow;
             _context.OperationalRecords.Add(record);
@@ -124,6 +147,19 @@ namespace CRM.Microservice.Controllers
         {
             var record = await _context.OperationalRecords.FindAsync(recordId);
             if (record == null) return NotFound(new { message = "Operational record not found." });
+
+            var permission = (record.Module ?? string.Empty).ToLowerInvariant() switch
+            {
+                "leases" or "maintenance" => "units:edit",
+                "valuations" => "valuations:bypass",
+                _ => "properties:edit"
+            };
+
+            if (!await _permissionCheck.HasPermissionAsync(permission))
+            {
+                _logger.LogWarning("UpdateOperationalRecord: forbidden — caller lacks {Permission} permission", permission);
+                return Forbid();
+            }
             record.Title = updatedRecord.Title;
             record.PropertyReference = updatedRecord.PropertyReference;
             record.ContactName = updatedRecord.ContactName;
@@ -141,6 +177,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("companies")]
         public async Task<IActionResult> GetCompanies([FromQuery] int page)
         {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("GetCompanies: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var query = _context.CRMCompanies.Where(c => c.TenantId == tenantId).OrderBy(c => c.BusinessName);
             var (items, total) = await PageAsync(query, page);
@@ -151,6 +193,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("owners-tenants")]
         public async Task<IActionResult> GetOwnerTenantRecords([FromQuery] int page)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:view"))
+            {
+                _logger.LogWarning("GetOwnerTenantRecords: forbidden — caller lacks users:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var query = _context.OwnerTenantRecords.Where(r => r.TenantId == tenantId).OrderByDescending(r => r.CreatedAt);
             var (items, total) = await PageAsync(query, page);
@@ -161,6 +209,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("owners-tenants/{ownerTenantId:int}")]
         public async Task<IActionResult> GetOwnerTenantRecord(int ownerTenantId)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:view"))
+            {
+                _logger.LogWarning("GetOwnerTenantRecord: forbidden — caller lacks users:view permission");
+                return Forbid();
+            }
+
             var record = await _context.OwnerTenantRecords.FindAsync(ownerTenantId);
             return record == null
                 ? NotFound(new { message = "Owner or tenant record not found." })
@@ -171,6 +225,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("geography")]
         public async Task<IActionResult> SearchGeography([FromQuery] string? search)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:view"))
+            {
+                _logger.LogWarning("SearchGeography: forbidden — caller lacks users:view permission");
+                return Forbid();
+            }
+
             var query = _context.GeographyRecords.AsQueryable();
             var term = (search ?? string.Empty).Trim().ToLower();
             if (!string.IsNullOrEmpty(term))
@@ -189,6 +249,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("geography/{geographyId:int}")]
         public async Task<IActionResult> GetGeography(int geographyId)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:view"))
+            {
+                _logger.LogWarning("GetGeography: forbidden — caller lacks users:view permission");
+                return Forbid();
+            }
+
             var geo = await _context.GeographyRecords.FindAsync(geographyId);
             return geo == null ? NotFound(new { message = "Geography record not found." }) : Ok(geo);
         }
@@ -196,6 +262,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("owners-tenants")]
         public async Task<IActionResult> CreateOwnerTenantRecord([FromBody] OwnerTenantRecord record)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:create"))
+            {
+                _logger.LogWarning("CreateOwnerTenantRecord: forbidden — caller lacks users:create permission");
+                return Forbid();
+            }
+
             if (record == null || string.IsNullOrWhiteSpace(record.FullName))
                 return BadRequest(new { message = "Owner / Tenant details are required." });
 
@@ -208,6 +280,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("owners-tenants")]
         public async Task<IActionResult> UpdateOwnerTenantRecord([FromBody] OwnerTenantRecord updatedRecord)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:edit"))
+            {
+                _logger.LogWarning("UpdateOwnerTenantRecord: forbidden — caller lacks users:edit permission");
+                return Forbid();
+            }
+
             var existing = await _context.OwnerTenantRecords.FindAsync(updatedRecord.OwnerTenantId);
             if (existing == null) return NotFound(new { message = "Owner or tenant record not found." });
 
@@ -230,6 +308,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("agencies")]
         public async Task<IActionResult> GetAgencies([FromQuery] int page)
         {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("GetAgencies: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
             var tenant = GetCurrentTenant();
             var callerRole = GetCurrentCanonicalRole();
             _logger.LogInformation("GetAgencies: Page={Page} Tenant={Tenant} Role={Role}", page, tenant, callerRole);
@@ -248,6 +332,12 @@ namespace CRM.Microservice.Controllers
         public async Task<IActionResult> CreateAgency([FromBody] AgencyRecord agency)
         {
             var caller = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "Unknown";
+            if (!await _permissionCheck.HasPermissionAsync("agencies:create"))
+            {
+                _logger.LogWarning("CreateAgency: forbidden — caller {Caller} lacks agencies:create permission", caller);
+                return Forbid();
+            }
+
             if (GetCurrentCanonicalRole() != "PlatformAdmin")
             {
                 _logger.LogWarning("CreateAgency: forbidden — caller {Caller} role {Role} cannot provision agencies",
@@ -276,6 +366,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("agencies/{agencyId}")]
         public async Task<IActionResult> UpdateAgency(string agencyId, [FromBody] AgencyRecord updatedAgency)
         {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:edit"))
+            {
+                _logger.LogWarning("UpdateAgency: forbidden — caller lacks agencies:edit permission");
+                return Forbid();
+            }
+
             var agency = await _context.AgencyRecords
                 .Include(a => a.ContactPersons)
                 .FirstOrDefaultAsync(a => a.AgencyId == agencyId);
@@ -295,6 +391,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("agencies/{agencyId}/contacts")]
         public async Task<IActionResult> GetAgencyContacts(string agencyId)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:view"))
+            {
+                _logger.LogWarning("GetAgencyContacts: forbidden — caller lacks users:view permission");
+                return Forbid();
+            }
+
             var exists = await _context.AgencyRecords.AnyAsync(a => a.AgencyId == agencyId);
             if (!exists) return NotFound(new { message = "Agency not found." });
             var contacts = await _context.ContactPersons
@@ -306,6 +408,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("agencies/{agencyId}/contacts")]
         public async Task<IActionResult> CreateContactPerson(string agencyId, [FromBody] ContactPerson contact)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:create"))
+            {
+                _logger.LogWarning("CreateContactPerson: forbidden — caller lacks users:create permission");
+                return Forbid();
+            }
+
             var agency = await _context.AgencyRecords.FirstOrDefaultAsync(a => a.AgencyId == agencyId);
             if (agency == null) return NotFound(new { message = "Agency not found." });
             if (string.IsNullOrWhiteSpace(contact.FullName))
@@ -322,6 +430,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("contact-persons/{contactId}")]
         public async Task<IActionResult> UpdateContactPerson(string contactId, [FromBody] ContactPerson updated)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:edit"))
+            {
+                _logger.LogWarning("UpdateContactPerson: forbidden — caller lacks users:edit permission");
+                return Forbid();
+            }
+
             var existing = await _context.ContactPersons.FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
             if (existing == null) return NotFound(new { message = "Contact person not found." });
             existing.FullName = updated.FullName;
@@ -337,6 +451,12 @@ namespace CRM.Microservice.Controllers
         [HttpDelete("contact-persons/{contactId}")]
         public async Task<IActionResult> DeleteContactPerson(string contactId)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:delete"))
+            {
+                _logger.LogWarning("DeleteContactPerson: forbidden — caller lacks users:delete permission");
+                return Forbid();
+            }
+
             var existing = await _context.ContactPersons.FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
             if (existing == null) return NotFound(new { message = "Contact person not found." });
             _context.ContactPersons.Remove(existing);
@@ -348,6 +468,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("contact-persons/{contactId}/promote-to-broker")]
         public async Task<IActionResult> PromoteContactToBroker(string contactId)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:edit"))
+            {
+                _logger.LogWarning("PromoteContactToBroker: forbidden — caller lacks users:edit permission");
+                return Forbid();
+            }
+
             var contact = await _context.ContactPersons.FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
             if (contact == null) return NotFound(new { message = "Contact person not found." });
 
@@ -372,6 +498,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("brokers")]
         public async Task<IActionResult> GetBrokers([FromQuery] int page)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:view"))
+            {
+                _logger.LogWarning("GetBrokers: forbidden — caller lacks users:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var query = _context.BrokerRecords
                 .Where(b => b.TenantId == tenantId)
@@ -384,6 +516,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("brokers")]
         public async Task<IActionResult> CreateBroker([FromBody] BrokerRecord broker)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:create"))
+            {
+                _logger.LogWarning("CreateBroker: forbidden — caller lacks users:create permission");
+                return Forbid();
+            }
+
             if (broker == null || string.IsNullOrWhiteSpace(broker.FullName))
                 return BadRequest(new { message = "Broker details are required." });
 
@@ -400,6 +538,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("brokers/{brokerId}")]
         public async Task<IActionResult> UpdateBroker(string brokerId, [FromBody] BrokerRecord updatedBroker)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:edit"))
+            {
+                _logger.LogWarning("UpdateBroker: forbidden — caller lacks users:edit permission");
+                return Forbid();
+            }
+
             var broker = await _context.BrokerRecords.FindAsync(brokerId);
             if (broker == null) return NotFound(new { message = "Broker record not found." });
             broker.AgencyId = updatedBroker.AgencyId;
@@ -415,6 +559,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("company/create")]
         public async Task<IActionResult> CreateCompany([FromBody] CRMCompany company)
         {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:create"))
+            {
+                _logger.LogWarning("CreateCompany: forbidden — caller lacks agencies:create permission");
+                return Forbid();
+            }
+
             if (string.IsNullOrEmpty(company.CompanyId)) company.CompanyId = "COM-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
             // 🔐 Tenant taken from the caller's JWT, never from the request body.
             company.TenantId = GetCurrentTenant();
@@ -427,6 +577,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("company/update")]
         public async Task<IActionResult> UpdateCompany([FromBody] CRMCompany updatedCompany)
         {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:edit"))
+            {
+                _logger.LogWarning("UpdateCompany: forbidden — caller lacks agencies:edit permission");
+                return Forbid();
+            }
+
             var existing = await _context.CRMCompanies.FindAsync(updatedCompany.CompanyId);
             if (existing == null) return NotFound(new { message = "Company record not found." });
 
@@ -445,6 +601,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("legal-entities")]
         public async Task<IActionResult> GetLegalEntities([FromQuery] int page)
         {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("GetLegalEntities: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var query = _context.CRMLegalEntities
                 .Include(e => e.CompanyDetails)
@@ -458,6 +620,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("legal-entity/create")]
         public async Task<IActionResult> CreateLegalEntity([FromBody] CRMLegalEntity legalEntity)
         {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:create"))
+            {
+                _logger.LogWarning("CreateLegalEntity: forbidden — caller lacks agencies:create permission");
+                return Forbid();
+            }
+
             if (string.IsNullOrEmpty(legalEntity.LegalEntityId))
                 legalEntity.LegalEntityId = "LGE-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
             // 🔐 Tenant taken from the caller's JWT, never from the request body.
@@ -471,6 +639,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("legal-entity/update")]
         public async Task<IActionResult> UpdateLegalEntity([FromBody] CRMLegalEntity updatedEntity)
         {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:edit"))
+            {
+                _logger.LogWarning("UpdateLegalEntity: forbidden — caller lacks agencies:edit permission");
+                return Forbid();
+            }
+
             var existing = await _context.CRMLegalEntities.FindAsync(updatedEntity.LegalEntityId);
             if (existing == null) return NotFound(new { message = "Legal Entity record not found." });
 
@@ -487,6 +661,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("contacts")]
         public async Task<IActionResult> GetContacts([FromQuery] int page)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:view"))
+            {
+                _logger.LogWarning("GetContacts: forbidden — caller lacks users:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var query = _context.CRMContacts
                 .Include(c => c.CompanyDetails)
@@ -501,6 +681,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("contacts/search")]
         public async Task<IActionResult> SearchContacts([FromQuery] string q, [FromQuery] int page = 1)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:view"))
+            {
+                _logger.LogWarning("SearchContacts: forbidden — caller lacks users:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var query = _context.CRMContacts
                 .Include(c => c.CompanyDetails)
@@ -524,6 +710,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("contact/create")]
         public async Task<IActionResult> CreateContact([FromBody] CRMContact contact)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:create"))
+            {
+                _logger.LogWarning("CreateContact: forbidden — caller lacks users:create permission");
+                return Forbid();
+            }
+
             if (string.IsNullOrEmpty(contact.ContactId))
                 contact.ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
             // 🔐 Tenant taken from the caller's JWT, never from the request body.
@@ -537,6 +729,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("contact/update")]
         public async Task<IActionResult> UpdateContact([FromBody] CRMContact updatedContact)
         {
+            if (!await _permissionCheck.HasPermissionAsync("users:edit"))
+            {
+                _logger.LogWarning("UpdateContact: forbidden — caller lacks users:edit permission");
+                return Forbid();
+            }
+
             var existing = await _context.CRMContacts.FindAsync(updatedContact.ContactId);
             if (existing == null) return NotFound(new { message = "Contact tracking profile record not found." });
 
@@ -556,6 +754,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("boards")]
         public async Task<IActionResult> GetCRMBoards([FromQuery] int page, [FromQuery] string agentName = "", [FromQuery] string userRole = "")
         {
+            if (!await _permissionCheck.HasPermissionAsync("deals:view"))
+            {
+                _logger.LogWarning("GetCRMBoards: forbidden — caller lacks deals:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             // 🔐 Scoping is authoritative from the JWT, never from a client-supplied role string.
             var callerRole = GetCurrentCanonicalRole();
@@ -586,6 +790,12 @@ namespace CRM.Microservice.Controllers
          [HttpPost("lead/create")]
          public async Task<IActionResult> CreateLead([FromBody] LeadRecord newLead)
          {
+             if (!await _permissionCheck.HasPermissionAsync("leads:create"))
+             {
+                 _logger.LogWarning("CreateLead: forbidden — caller lacks leads:create permission");
+                 return Forbid();
+             }
+
              if (newLead == null) return BadRequest(new { message = "Invalid lead structural parameters." });
 
             var tenantId = GetCurrentTenant();
@@ -624,6 +834,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("lead/{leadId:int}")]
         public async Task<IActionResult> UpdateLead(int leadId, [FromBody] LeadRecord updatedLead)
         {
+            if (!await _permissionCheck.HasPermissionAsync("leads:edit"))
+            {
+                _logger.LogWarning("UpdateLead: forbidden — caller lacks leads:edit permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var lead = await _context.LeadRecords.FirstOrDefaultAsync(l => l.LeadId == leadId && l.TenantId == tenantId);
             if (lead == null) return NotFound(new { message = "Lead record not found." });
@@ -653,6 +869,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("leads/{leadId:int}/promote")]
         public async Task<IActionResult> PromoteLeadToDeal(int leadId, [FromBody] PromotionRequest request)
         {
+            if (!await _permissionCheck.HasPermissionAsync("leads:edit"))
+            {
+                _logger.LogWarning("PromoteLeadToDeal: forbidden — caller lacks leads:edit permission");
+                return Forbid();
+            }
+
             var lead = await _context.LeadRecords
                 .FirstOrDefaultAsync(l => l.LeadId == leadId && l.TenantId == GetCurrentTenant());
             if (lead == null) return NotFound(new { message = "Target lead record not found." });
@@ -773,6 +995,12 @@ namespace CRM.Microservice.Controllers
         [HttpDelete("deals/{dealId:int}")]
         public async Task<IActionResult> DeleteDeal(int dealId)
         {
+            if (!await _permissionCheck.HasPermissionAsync("deals:delete"))
+            {
+                _logger.LogWarning("DeleteDeal: forbidden — caller lacks deals:delete permission");
+                return Forbid();
+            }
+
             var callerRole = GetCurrentCanonicalRole();
             if (callerRole != "AgencyAdmin" && callerRole != "PlatformAdmin")
                 return Forbid();
@@ -789,6 +1017,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("deal/{dealId:int}")]
         public async Task<IActionResult> UpdateDeal(int dealId, [FromBody] DealRecord updatedDeal)
         {
+            if (!await _permissionCheck.HasPermissionAsync("deals:edit"))
+            {
+                _logger.LogWarning("UpdateDeal: forbidden — caller lacks deals:edit permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Deal record not found." });
@@ -816,6 +1050,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("reallocate")]
         public async Task<IActionResult> ReallocateTarget([FromBody] ReallocatePayload payload)
         {
+            if (!await _permissionCheck.HasPermissionAsync("deals:edit"))
+            {
+                _logger.LogWarning("ReallocateTarget: forbidden — caller lacks deals:edit permission");
+                return Forbid();
+            }
+
             if (payload.IsDeal)
             {
                 var deal = await _context.DealRecords.FindAsync(payload.TargetId);
@@ -836,6 +1076,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("update-lead-stage")]
         public async Task<IActionResult> UpdateLeadStage([FromBody] LeadUpdatePayload payload)
         {
+            if (!await _permissionCheck.HasPermissionAsync("leads:edit"))
+            {
+                _logger.LogWarning("UpdateLeadStage: forbidden — caller lacks leads:edit permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var lead = await _context.LeadRecords.FirstOrDefaultAsync(l => l.LeadId == payload.LeadId && l.TenantId == tenantId);
             if (lead == null) return NotFound(new { message = "Target lead tracking record not found." });
@@ -921,6 +1167,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("update-deal-stage")]
         public async Task<IActionResult> UpdateDealStage([FromBody] DealUpdatePayload payload)
         {
+            if (!await _permissionCheck.HasPermissionAsync("deals:edit"))
+            {
+                _logger.LogWarning("UpdateDealStage: forbidden — caller lacks deals:edit permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == payload.DealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Target deal record not found." });
@@ -960,6 +1212,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("report/summary")]
         public async Task<IActionResult> GetPipelineReportSummary()
         {
+            if (!await _permissionCheck.HasPermissionAsync("billing:view"))
+            {
+                _logger.LogWarning("GetPipelineReportSummary: forbidden — caller lacks billing:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
@@ -990,6 +1248,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("report/overview")]
         public async Task<IActionResult> GetReportOverview([FromQuery] int? year)
         {
+            if (!await _permissionCheck.HasPermissionAsync("billing:view"))
+            {
+                _logger.LogWarning("GetReportOverview: forbidden — caller lacks billing:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
@@ -1032,6 +1296,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("report/commission-by-stage")]
         public async Task<IActionResult> GetCommissionByStage()
         {
+            if (!await _permissionCheck.HasPermissionAsync("billing:view"))
+            {
+                _logger.LogWarning("GetCommissionByStage: forbidden — caller lacks billing:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
@@ -1056,6 +1326,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("report/broker-leaderboard")]
         public async Task<IActionResult> GetBrokerLeaderboard()
         {
+            if (!await _permissionCheck.HasPermissionAsync("billing:view"))
+            {
+                _logger.LogWarning("GetBrokerLeaderboard: forbidden — caller lacks billing:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var rows = await _context.DealRecords
                 .Where(d => d.TenantId == tenantId && d.AllocatedToAgent != null && d.AllocatedToAgent != "")
@@ -1077,6 +1353,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("brochure-cards")]
         public async Task<IActionResult> GetBrochureCardByDeal([FromQuery] int dealId)
         {
+            if (!await _permissionCheck.HasPermissionAsync("billing:view"))
+            {
+                _logger.LogWarning("GetBrochureCardByDeal: forbidden — caller lacks billing:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
@@ -1121,6 +1403,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("brochure-cards/active")]
         public async Task<IActionResult> GetActiveBrochureCards()
         {
+            if (!await _permissionCheck.HasPermissionAsync("billing:view"))
+            {
+                _logger.LogWarning("GetActiveBrochureCards: forbidden — caller lacks billing:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
@@ -1145,6 +1433,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("brochure-cards")]
         public async Task<IActionResult> UpsertBrochureCard([FromBody] BrochureCardUpsertRequest request)
         {
+            if (!await _permissionCheck.HasPermissionAsync("billing:edit"))
+            {
+                _logger.LogWarning("UpsertBrochureCard: forbidden — caller lacks billing:edit permission");
+                return Forbid();
+            }
+
             if (request == null || request.DealId <= 0)
                 return BadRequest(new { message = "DealId is required for a brochure card." });
 
@@ -1212,6 +1506,12 @@ namespace CRM.Microservice.Controllers
         [HttpDelete("brochure-cards/{cardId:int}/lines/{lineId:int}")]
         public async Task<IActionResult> DeleteBrochureCardLine(int cardId, int lineId)
         {
+            if (!await _permissionCheck.HasPermissionAsync("billing:delete"))
+            {
+                _logger.LogWarning("DeleteBrochureCardLine: forbidden — caller lacks billing:delete permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var line = await _context.BrochureCardLines.FirstOrDefaultAsync(l => l.LineId == lineId && l.CardId == cardId);
             if (line == null) return NotFound(new { message = "Brochure card line not found." });
@@ -1261,6 +1561,12 @@ namespace CRM.Microservice.Controllers
         [HttpGet("deals/{dealId:int}/broker-splits")]
         public async Task<IActionResult> GetDealBrokerSplits(int dealId)
         {
+            if (!await _permissionCheck.HasPermissionAsync("billing:view"))
+            {
+                _logger.LogWarning("GetDealBrokerSplits: forbidden — caller lacks billing:view permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Deal record not found." });
@@ -1275,6 +1581,12 @@ namespace CRM.Microservice.Controllers
         [HttpPut("deals/{dealId:int}/broker-splits")]
         public async Task<IActionResult> UpsertDealBrokerSplits(int dealId, [FromBody] UpsertBrokerSplitsRequest request)
         {
+            if (!await _permissionCheck.HasPermissionAsync("billing:edit"))
+            {
+                _logger.LogWarning("UpsertDealBrokerSplits: forbidden — caller lacks billing:edit permission");
+                return Forbid();
+            }
+
             var callerRole = GetCurrentCanonicalRole();
             if (callerRole != "AgencyAdmin" && callerRole != "PlatformAdmin")
                 return Forbid();
@@ -1316,6 +1628,12 @@ namespace CRM.Microservice.Controllers
         [HttpPost("contacts/{contactId}/link-deal/{dealId:int}")]
         public async Task<IActionResult> LinkContactToDeal(string contactId, int dealId)
         {
+            if (!await _permissionCheck.HasPermissionAsync("deals:edit"))
+            {
+                _logger.LogWarning("LinkContactToDeal: forbidden — caller lacks deals:edit permission");
+                return Forbid();
+            }
+
             var tenantId = GetCurrentTenant();
             var contact = await _context.CRMContacts.FirstOrDefaultAsync(c => c.ContactId == contactId && c.TenantId == tenantId);
             if (contact == null) return NotFound(new { message = "Contact not found." });

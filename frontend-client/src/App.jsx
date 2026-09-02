@@ -10,6 +10,7 @@ import ReportsWorkspace from './components/ReportsWorkspace.jsx';
 import SystemAdminWorkspace from './components/SystemAdminWorkspace.jsx';
 import BrochureBuilderWorkspace from './components/BrochureBuilderWorkspace.jsx';
 import RoleDashboard from './components/RoleDashboard.jsx';
+import RolePermissionsPage from './components/RolePermissionsPage.jsx';
 import SetPassword from './components/SetPassword.jsx';
 import LeadsPage from './components/LeadsPage.jsx';
 import DealsPage from './components/DealsPage.jsx';
@@ -17,6 +18,7 @@ import DealsPage from './components/DealsPage.jsx';
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useAppUi } from './contexts/AppUiContext.jsx';
 import { useAgency } from './contexts/AgencyContext.jsx';
+import { usePermission } from './contexts/PermissionContext.jsx';
 import { isTrialUser, getTrialExpiry } from './services/authService.js';
 import './index.css';
 
@@ -44,6 +46,7 @@ export default function App() {
   } = useAppUi();
 
   const { currentAgency } = useAgency();
+  const { hasPermission } = usePermission();
 
   const activationToken = !isLoggedIn ? new URLSearchParams(window.location.search).get('token') : null;
 
@@ -220,6 +223,7 @@ export default function App() {
               {currentView === 'reports' && "Performance Reports"}
               {currentView === 'map' && "Property Map"}
               {currentView === 'admin' && "SuperAdmin Control Board"}
+              {currentView === 'roles' && "Role & Permission Management"}
             </h2>
             <p className="text-slate-400 text-sm">Multi-tenant spatial intelligence portal for {currentAgency.name}</p>
           </div>
@@ -300,8 +304,11 @@ export default function App() {
           />
         )}
 
-        {currentView === 'admin' && (userRole === 'PlatformAdmin' || userRole === 'AgencyAdmin') && (
+        {currentView === 'admin' && hasPermission('agencies:view') && (
           <SystemAdminWorkspace />
+        )}
+        {currentView === 'roles' && hasPermission('system:roles:manage') && (
+          <RolePermissionsPage />
         )}
       </div>
 

@@ -3,17 +3,25 @@ import { Building2, UserPlus, Users, Pencil, Trash2, ShieldCheck, Tag, ChevronRi
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { systemRolesService } from '../services/systemRolesService.js';
+import { permissionsService } from '../services/permissionsService.js';
 import { authService } from '../services/authService.js';
 import { leadCaptureService } from '../services/leadCaptureService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { usePermission } from '../contexts/PermissionContext.jsx';
+import Can from '../components/Can.jsx';
 
-export default function SystemAdminWorkspace() {
+export default function SystemAdminWorkspace({ defaultTab }) {
   const { userRole: currentUserRole } = useAuth();
+  const { hasPermission } = usePermission();
+  const isSuperAdmin = currentUserRole === 'PlatformAdmin';
+  const [activeTab, setActiveTab] = useState(defaultTab || (isSuperAdmin ? 'agencies' : 'users'));
+
   const [agencies, setAgencies] = useState([]);
   const [systemUsers, setSystemUsers] = useState([]);
   const [agencyContacts, setAgencyContacts] = useState({});
   const [roles, setRoles] = useState([]);
-  const [roleForm, setRoleForm] = useState({ name: '', description: '', isPlatformScoped: false, isAgencyScoped: false, permissionsJson: '[]', isActive: true });
+  const [allPermissions, setAllPermissions] = useState([]);
+  const [roleForm, setRoleForm] = useState({ name: '', description: '', isPlatformScoped: false, isAgencyScoped: false, permissionIds: [], isActive: true });
   const [editingRole, setEditingRole] = useState(null);
   const [agencyForm, setAgencyForm] = useState({
     name: '', tradingName: '', registrationNumber: '', companyLogoUrl: '',
@@ -54,7 +62,7 @@ export default function SystemAdminWorkspace() {
     try {
       const rows = await crmService.getAgencies();
       setAgencies(rows || []);
-    } catch (err) { setError(err || 'Unable to load agency records.'); }
+    } catch (err) { setError((err && err.message) || 'Unable to load agency records.'); }
   };
 
   const loadBrokers = async () => {
@@ -73,19 +81,20 @@ export default function SystemAdminWorkspace() {
 
   const loadRoles = async () => {
     try { setRoles(await systemRolesService.getSystemRoles() || []); }
-    catch (err) { setError(err || 'Unable to load system roles.'); }
+    catch (err) { setError((err && err.message) || 'Unable to load system roles.'); }
+  };
+
+  const loadPermissions = async () => {
+    try { setAllPermissions(await permissionsService.getPermissions() || []); }
+    catch (err) { console.error('Unable to load permissions:', err); }
   };
 
   const loadUsers = async () => {
     try { setSystemUsers(await authService.getUsers() || []); }
-    catch (err) { setError(err || 'Unable to load user directory.'); }
+    catch (err) { setError((err && err.message) || 'Unable to load user directory.'); }
   };
 
-  const isSuperAdmin = currentUserRole === 'PlatformAdmin';
-
-  const [activeTab, setActiveTab] = useState(isSuperAdmin ? 'agencies' : 'users');
-
-  const loadData = async () => { await Promise.all([loadAgencies(), loadBrokers(), loadUsers(), isSuperAdmin && loadRoles()]); };
+  const loadData = async () => { await Promise.all([loadAgencies(), loadBrokers(), loadUsers(), isSuperAdmin && loadRoles(), isSuperAdmin && loadPermissions()]); };
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -96,9 +105,10 @@ export default function SystemAdminWorkspace() {
     e.preventDefault();
     if (!isSuperAdmin) return;
     try {
-      if (editingRole) await systemRolesService.updateSystemRole(editingRole.roleDefId, roleForm);
-      else await systemRolesService.createSystemRole(roleForm);
-      setRoleForm({ name: '', description: '', isPlatformScoped: false, isAgencyScoped: false, permissionsJson: '[]', isActive: true });
+      const payload = { ...roleForm };
+      if (editingRole) await systemRolesService.updateSystemRole(editingRole.roleDefId, payload);
+      else await systemRolesService.createSystemRole(payload);
+      setRoleForm({ name: '', description: '', isPlatformScoped: false, isAgencyScoped: false, permissionIds: [], isActive: true });
       setEditingRole(null);
       await loadRoles();
     } catch (err) { alert(err || 'Role save failed.'); }
@@ -111,7 +121,7 @@ export default function SystemAdminWorkspace() {
       description: role.description || '',
       isPlatformScoped: role.isPlatformScoped || false,
       isAgencyScoped: role.isAgencyScoped || false,
-      permissionsJson: role.permissionsJson || '[]',
+      permissionIds: (role.permissions || []).map(p => p.permissionId),
       isActive: role.isActive
     });
   };
@@ -203,7 +213,7 @@ export default function SystemAdminWorkspace() {
       setLeadsTotal(result.totalCount);
       setLeadsHasMore(result.data.length === LEAD_PAGE_SIZE && (result.data.length + (reset ? 0 : (page - 1) * LEAD_PAGE_SIZE)) < result.totalCount);
     } catch (err) {
-      setLeadsError(err || 'Unable to load captured leads.');
+      setLeadsError((err && err.message) || 'Unable to load captured leads.');
     } finally {
       setLeadsLoading(false);
     }
@@ -332,16 +342,18 @@ export default function SystemAdminWorkspace() {
         >
           <Users size={12} className="inline mr-1.5" /> User Admin
         </button>
-        <button
-          onClick={() => setActiveTab('access')}
-          type="button"
-          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
-            activeTab === 'access' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-          }`}
-        >
-          <ShieldCheck size={12} className="inline mr-1.5" /> User Access
-        </button>
-         {isSuperAdmin && (
+        <Can permission="users:view">
+          <button
+            onClick={() => setActiveTab('access')}
+            type="button"
+            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+              activeTab === 'access' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <ShieldCheck size={12} className="inline mr-1.5" /> User Access
+          </button>
+        </Can>
+         <Can permission="system:roles:manage">
            <button
              onClick={() => setActiveTab('roles')}
              type="button"
@@ -350,30 +362,30 @@ export default function SystemAdminWorkspace() {
              }`}
            >
             <Settings size={12} className="inline mr-1.5" /> System Roles
-          </button>
-         )}
-         {isSuperAdmin && (
-          <button
-            onClick={() => setActiveTab('reports')}
-            type="button"
-            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
-              activeTab === 'reports' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-            }`}
-          >
-            <BarChart3 size={12} className="inline mr-1.5" /> Reports & Analytics
-          </button>
-        )}
-        {isSuperAdmin && (
-          <button
-            onClick={() => setActiveTab('captured-leads')}
-            type="button"
-            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
-              activeTab === 'captured-leads' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-            }`}
-          >
-            <Mail size={12} className="inline mr-1.5" /> Captured Leads
-          </button>
-        )}
+           </button>
+         </Can>
+         <Can permission="billing:view">
+           <button
+             onClick={() => setActiveTab('reports')}
+             type="button"
+             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+               activeTab === 'reports' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+             }`}
+           >
+             <BarChart3 size={12} className="inline mr-1.5" /> Reports & Analytics
+           </button>
+         </Can>
+         <Can permission="leads:view">
+           <button
+             onClick={() => setActiveTab('captured-leads')}
+             type="button"
+             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+               activeTab === 'captured-leads' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+             }`}
+           >
+             <Mail size={12} className="inline mr-1.5" /> Captured Leads
+           </button>
+         </Can>
       </div>
 
       {activeTab === 'agencies' && (
@@ -412,7 +424,9 @@ export default function SystemAdminWorkspace() {
                     </>
                   )}
                 </div>
-                <button type="submit" className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold">{editingAgency ? 'Save agency' : 'Provision agency + admin user'}</button>
+                <Can permission={editingAgency ? 'agencies:edit' : 'agencies:create'}>
+                  <button type="submit" className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold">{editingAgency ? 'Save agency' : 'Provision agency + admin user'}</button>
+                </Can>
               </form>
             ) : (
               <div className="bg-slate-950/40 border border-slate-800 rounded-2xl p-5 flex flex-col gap-3">
@@ -439,7 +453,9 @@ export default function SystemAdminWorkspace() {
                   <select value={contactForm.role} onChange={(e) => setContactForm({ ...contactForm, role: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"><option>Owner</option><option>Tenant</option><option>Manager</option></select>
                   <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-400"><input type="checkbox" checked={contactForm.isAgencyAdmin} onChange={(e) => setContactForm({ ...contactForm, isAgencyAdmin: e.target.checked })} /> Promote to AgencyAdmin on save</label>
                 </div>
-                <button type="submit" className="w-full py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold">{editingContact ? 'Update contact' : 'Create contact' }</button>
+                <Can permission={editingContact ? 'users:edit' : 'users:create'}>
+                  <button type="submit" className="w-full py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold">{editingContact ? 'Update contact' : 'Create contact' }</button>
+                </Can>
               </form>
             )}
           </div>
@@ -462,7 +478,9 @@ export default function SystemAdminWorkspace() {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-500">{agency.registrationNumber || 'Reg: —'}</span>
-                      <button type="button" onClick={(e) => { e.stopPropagation(); resetAgency(agency); }} className="text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                      <Can permission="agencies:edit">
+                        <button type="button" onClick={(e) => { e.stopPropagation(); resetAgency(agency); }} className="text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                      </Can>
                     </div>
                   </div>
 
@@ -477,22 +495,26 @@ export default function SystemAdminWorkspace() {
                             <div className="text-[10px] text-slate-500">{c.email} • {c.position || '—'}{c.isAgencyAdmin && <Tag size={10} className="ml-1 text-violet-400" />}</div>
                           </div>
                           <div className="flex gap-1.5">
-                            <button type="button" onClick={async () => {
-                              if (window.confirm(`Promote R{c.fullName} to a broker profile?`)) {
-                                try { await crmService.promoteContactToBroker(c.contactPersonId); await loadBrokers(); await loadAgencies(); await loadContacts(agency.agencyId); }
-                                catch (err) { alert(err || 'Promotion failed.'); }
-                              }
-                            }} className="p-1 rounded bg-violet-950 text-violet-300 border border-violet-900 hover:text-white" title="Promote to broker">
-                              <ShieldCheck size={11} />
-                            </button>
-                            <button type="button" onClick={async () => {
-                              if (window.confirm('Remove this contact person?')) {
-                                try { await crmService.deleteContactPerson(c.contactPersonId); await loadContacts(agency.agencyId); await loadAgencies(); }
-                                catch (err) { alert(err || 'Removal failed.'); }
-                              }
-                            }} className="p-1 rounded bg-red-950/30 text-red-300 border border-red-900 hover:text-white" title="Delete">
-                              <Trash2 size={11} />
-                            </button>
+                            <Can permission="users:edit">
+                              <button type="button" onClick={async () => {
+                                if (window.confirm(`Promote R{c.fullName} to a broker profile?`)) {
+                                  try { await crmService.promoteContactToBroker(c.contactPersonId); await loadBrokers(); await loadAgencies(); await loadContacts(agency.agencyId); }
+                                  catch (err) { alert(err || 'Promotion failed.'); }
+                                }
+                              }} className="p-1 rounded bg-violet-950 text-violet-300 border border-violet-900 hover:text-white" title="Promote to broker">
+                                <ShieldCheck size={11} />
+                              </button>
+                            </Can>
+                            <Can permission="users:delete">
+                              <button type="button" onClick={async () => {
+                                if (window.confirm('Remove this contact person?')) {
+                                  try { await crmService.deleteContactPerson(c.contactPersonId); await loadContacts(agency.agencyId); await loadAgencies(); }
+                                  catch (err) { alert(err || 'Removal failed.'); }
+                                }
+                              }} className="p-1 rounded bg-red-950/30 text-red-300 border border-red-900 hover:text-white" title="Delete">
+                                <Trash2 size={11} />
+                              </button>
+                            </Can>
                           </div>
                         </div>
                       ))}
@@ -538,7 +560,9 @@ export default function SystemAdminWorkspace() {
               {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
             <div className="flex gap-2">
-              <button type="submit" className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold">{editingUser ? 'Save user' : 'Create user'}</button>
+              <Can permission={editingUser ? 'users:edit' : 'users:create'}>
+                <button type="submit" className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold">{editingUser ? 'Save user' : 'Create user'}</button>
+              </Can>
               {editingUser && <button type="button" onClick={() => { setEditingUser(null); setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker' }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
             </div>
           </form>
@@ -557,20 +581,24 @@ export default function SystemAdminWorkspace() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] px-2 py-1 rounded-md bg-violet-950 text-violet-300 border border-violet-900">{u.systemRole}</span>
-                     {(isSuperAdmin || currentUserRole === 'AgencyAdmin') && u.systemRole !== 'PlatformAdmin' && (
-                      <>
-                        <button type="button" onClick={() => { setEditingUser(u); setUserForm({ fullName: u.fullName || '', email: u.email || '', password: '', systemRole: u.systemRole || 'Broker' }); }} className="p-2 text-slate-400 hover:text-white"><Pencil size={13} /></button>
-                        {u.accountStatus !== 'Disabled' && (
-                          <button type="button" onClick={async () => {
-                            if (!confirm(`Deactivate user "R{u.fullName}"? They will be unable to sign in.`)) return;
-                            try {
-                              await authService.disableUser(u.userId);
-                              setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, accountStatus: 'Disabled' } : x)));
-                            } catch (err) { alert(err || 'Deactivation failed.'); }
-                          }} className="p-2 text-red-400 hover:text-red-300"><CircleX size={13} /></button>
-                        )}
-                      </>
-                    )}
+                      {(isSuperAdmin || currentUserRole === 'AgencyAdmin') && u.systemRole !== 'PlatformAdmin' && (
+                        <>
+                          <Can permission="users:edit">
+                            <button type="button" onClick={() => { setEditingUser(u); setUserForm({ fullName: u.fullName || '', email: u.email || '', password: '', systemRole: u.systemRole || 'Broker' }); }} className="p-2 text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                          </Can>
+                          {u.accountStatus !== 'Disabled' && (
+                            <Can permission="users:edit">
+                              <button type="button" onClick={async () => {
+                                if (!confirm(`Deactivate user "R{u.fullName}"? They will be unable to sign in.`)) return;
+                                try {
+                                  await authService.disableUser(u.userId);
+                                  setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, accountStatus: 'Disabled' } : x)));
+                                } catch (err) { alert(err || 'Deactivation failed.'); }
+                              }} className="p-2 text-red-400 hover:text-red-300"><CircleX size={13} /></button>
+                            </Can>
+                          )}
+                        </>
+                      )}
                   </div>
                 </div>
               ))}
@@ -613,19 +641,21 @@ export default function SystemAdminWorkspace() {
                       </td>
                       <td className="py-1">
                         {u.accountStatus !== 'Disabled' && u.systemRole !== 'PlatformAdmin' && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              if (!confirm(`Deactivate user "R{u.fullName}"? They will be unable to sign in.`)) return;
-                              try {
-                                await authService.disableUser(u.userId);
-                                setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, accountStatus: 'Disabled' } : x)));
-                              } catch (err) { alert(err || 'Deactivation failed.'); }
-                            }}
-                            className="px-2 py-1 rounded bg-red-950/30 text-red-300 border border-red-900 hover:bg-red-950/50 text-xs"
-                          >
-                            Deactivate
-                          </button>
+                          <Can permission="users:edit">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (!confirm(`Deactivate user "R{u.fullName}"? They will be unable to sign in.`)) return;
+                                try {
+                                  await authService.disableUser(u.userId);
+                                  setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, accountStatus: 'Disabled' } : x)));
+                                } catch (err) { alert(err || 'Deactivation failed.'); }
+                              }}
+                              className="px-2 py-1 rounded bg-red-950/30 text-red-300 border border-red-900 hover:bg-red-950/50 text-xs"
+                            >
+                              Deactivate
+                            </button>
+                          </Can>
                         )}
                       </td>
                     </tr>
@@ -646,16 +676,32 @@ export default function SystemAdminWorkspace() {
               <Settings size={14} className="text-violet-500" /> {editingRole ? 'Edit Role Definition' : 'Add Role Definition'}
             </div>
             <input value={roleForm.name} onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })} placeholder="Role name (e.g. ResellerPartner)" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
-            <textarea value={roleForm.description} onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })} placeholder="Description" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white h-20" />
-            <div className="grid grid-cols-2 gap-3">
-              <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-300"><input type="checkbox" checked={roleForm.isPlatformScoped} onChange={(e) => setRoleForm({ ...roleForm, isPlatformScoped: e.target.checked })} disabled={!isSuperAdmin} /> Platform-scoped (assignable by PlatformAdmin)</label>
-              <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-300"><input type="checkbox" checked={roleForm.isAgencyScoped} onChange={(e) => setRoleForm({ ...roleForm, isAgencyScoped: e.target.checked })} disabled={!isSuperAdmin} /> Agency-scoped (assignable by AgencyAdmin)</label>
-              <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-300"><input type="checkbox" checked={roleForm.isActive} onChange={(e) => setRoleForm({ ...roleForm, isActive: e.target.checked })} /> Active</label>
-              <input value={roleForm.permissionsJson} onChange={(e) => setRoleForm({ ...roleForm, permissionsJson: e.target.value })} placeholder='Permissions JSON array, e.g. ["CanDeleteProperties"]' className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
-            </div>
+              <textarea value={roleForm.description} onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })} placeholder="Description" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white h-20" />
+              <div className="grid grid-cols-2 gap-3">
+                <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-300"><input type="checkbox" checked={roleForm.isPlatformScoped} onChange={(e) => setRoleForm({ ...roleForm, isPlatformScoped: e.target.checked })} disabled={!isSuperAdmin} /> Platform-scoped (assignable by PlatformAdmin)</label>
+                <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-300"><input type="checkbox" checked={roleForm.isAgencyScoped} onChange={(e) => setRoleForm({ ...roleForm, isAgencyScoped: e.target.checked })} disabled={!isSuperAdmin} /> Agency-scoped (assignable by AgencyAdmin)</label>
+                <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-300"><input type="checkbox" checked={roleForm.isActive} onChange={(e) => setRoleForm({ ...roleForm, isActive: e.target.checked })} /> Active</label>
+                <div className="col-span-2">
+                  <div className="text-[10px] text-slate-400 uppercase tracking-wider mb-2">Permissions</div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto bg-slate-950 border border-slate-700 rounded-xl p-3">
+                    {allPermissions.length === 0 && <div className="text-[11px] text-slate-500">Loading permissions...</div>}
+                    {allPermissions.map((perm) => {
+                      const checked = roleForm.permissionIds.includes(perm.permissionId);
+                      return (
+                        <label key={perm.permissionId} className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
+                          <input type="checkbox" checked={checked} onChange={(e) => setRoleForm({ ...roleForm, permissionIds: e.target.checked ? [...roleForm.permissionIds, perm.permissionId] : roleForm.permissionIds.filter(id => id !== perm.permissionId) })} />
+                          <span className="flex-1">{perm.description || perm.key}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
             <div className="flex gap-2">
-              <button type="submit" disabled={!isSuperAdmin} className={`py-2.5 rounded-xl text-xs font-bold R{isSuperAdmin ? 'bg-violet-600 text-white' : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}>{editingRole ? 'Save role' : 'Create role definition'}</button>
-              {editingRole && <button type="button" onClick={() => { setEditingRole(null); setRoleForm({ name: '', description: '', isPlatformScoped: false, isAgencyScoped: false, permissionsJson: '[]', isActive: true }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
+              <Can permission="system:roles:manage">
+                <button type="submit" disabled={!isSuperAdmin} className={`py-2.5 rounded-xl text-xs font-bold R{isSuperAdmin ? 'bg-violet-600 text-white' : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}>{editingRole ? 'Save role' : 'Create role definition'}</button>
+              </Can>
+              {editingRole && <button type="button" onClick={() => { setEditingRole(null); setRoleForm({ name: '', description: '', isPlatformScoped: false, isAgencyScoped: false, permissionIds: [], isActive: true }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
             </div>
           </form>
 
@@ -675,8 +721,12 @@ export default function SystemAdminWorkspace() {
                     </div>
                   </div>
                   <div className="flex gap-1.5">
-                    <button type="button" onClick={() => resetRole(role)} disabled={!isSuperAdmin} className={`p-2 rounded R{isSuperAdmin ? 'bg-slate-800 text-slate-300 hover:text-white' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`} title="Edit"><Pencil size={13} /></button>
-                    <button type="button" onClick={() => handleRoleDelete(role)} disabled={!isSuperAdmin} className={`p-2 rounded R{isSuperAdmin ? 'bg-red-950/30 text-red-300 border border-red-900 hover:text-white' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`} title="Deactivate"><Trash2 size={13} /></button>
+                    <Can permission="system:roles:manage">
+                      <button type="button" onClick={() => resetRole(role)} disabled={!isSuperAdmin} className={`p-2 rounded R{isSuperAdmin ? 'bg-slate-800 text-slate-300 hover:text-white' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`} title="Edit"><Pencil size={13} /></button>
+                    </Can>
+                    <Can permission="system:roles:manage">
+                      <button type="button" onClick={() => handleRoleDelete(role)} disabled={!isSuperAdmin} className={`p-2 rounded R{isSuperAdmin ? 'bg-red-950/30 text-red-300 border border-red-900 hover:text-white' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`} title="Deactivate"><Trash2 size={13} /></button>
+                    </Can>
                   </div>
                 </div>
               ))}
@@ -930,12 +980,14 @@ export default function SystemAdminWorkspace() {
                 <label htmlFor="demoRequested" className="cursor-pointer">Demo requested</label>
               </div>
 
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 transition-colors"
-              >
-                {editingLead ? 'Update Lead' : 'Create Lead'}
-              </button>
+              <Can permission={editingLead ? 'leads:edit' : 'leads:create'}>
+                <button
+                  type="submit"
+                  className="w-full py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 transition-colors"
+                >
+                  {editingLead ? 'Update Lead' : 'Create Lead'}
+                </button>
+              </Can>
             </form>
           </div>
 
@@ -985,25 +1037,29 @@ export default function SystemAdminWorkspace() {
                     </div>
 
                     <div className="flex flex-col gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => resetLead(lead)}
-                        className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
-                        title="Edit lead"
-                      >
-                        <Pencil size={12} />
-                      </button>
-                      <select
-                        onChange={(e) => handleLeadStatusChange(lead.id, e.target.value)}
-                        defaultValue=""
-                        className="text-[10px] bg-slate-800 border border-slate-700 rounded-lg px-1.5 py-0.5 text-slate-300 focus:outline-none focus:border-emerald-500"
-                        title="Advance lead status"
-                      >
-                        <option value="" disabled>Status →</option>
-                        {LEAD_STATUSES.map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
+                      <Can permission="leads:edit">
+                        <button
+                          type="button"
+                          onClick={() => resetLead(lead)}
+                          className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
+                          title="Edit lead"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                      </Can>
+                      <Can permission="leads:edit">
+                        <select
+                          onChange={(e) => handleLeadStatusChange(lead.id, e.target.value)}
+                          defaultValue=""
+                          className="text-[10px] bg-slate-800 border border-slate-700 rounded-lg px-1.5 py-0.5 text-slate-300 focus:outline-none focus:border-emerald-500"
+                          title="Advance lead status"
+                        >
+                          <option value="" disabled>Status →</option>
+                          {LEAD_STATUSES.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </Can>
                     </div>
                   </div>
               ))}

@@ -24,24 +24,31 @@ namespace Identity.Microservice.Data
 
             // EnsureCreated is a no-op against a pre-existing database, so provision our
             // configurable role-definitions table via raw DDL when it is missing.
-            var rolesTableExists = context.Database.SqlQueryRaw<int>(
-                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'SystemRoles'")
-                .AsEnumerable().FirstOrDefault();
-            if (rolesTableExists == 0)
-            {
-                context.Database.ExecuteSqlRaw(@"
-                    CREATE TABLE [SystemRoles] (
-                        [RoleDefId] int NOT NULL IDENTITY(1,1),
-                        [Name] nvarchar(450) NOT NULL,
-                        [Description] nvarchar(max) NOT NULL DEFAULT '',
-                        [IsPlatformScoped] bit NOT NULL DEFAULT 0,
-                        [IsAgencyScoped] bit NOT NULL DEFAULT 0,
-                        [PermissionsJson] nvarchar(max) NOT NULL DEFAULT '[]',
-                        [IsActive] bit NOT NULL DEFAULT 1,
-                        [CreatedAt] datetime2 NOT NULL DEFAULT GETUTCDATE(),
-                        CONSTRAINT [PK_SystemRoles] PRIMARY KEY ([RoleDefId]),
-                        CONSTRAINT [AK_SystemRoles_Name] UNIQUE ([Name])
-                    );
+             var rolesTableExists = context.Database.SqlQueryRaw<int>(
+                 "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'SystemRoles'")
+                 .AsEnumerable().FirstOrDefault();
+             if (rolesTableExists == 0)
+             {
+                 context.Database.ExecuteSqlRaw(@"
+                     CREATE TABLE [SystemRoles] (
+                         [RoleDefId] int NOT NULL IDENTITY(1,1),
+                         [Name] nvarchar(450) NOT NULL,
+                         [Description] nvarchar(max) NOT NULL DEFAULT '',
+                         [IsPlatformScoped] bit NOT NULL DEFAULT 0,
+                         [IsAgencyScoped] bit NOT NULL DEFAULT 0,
+                         [PermissionsJson] nvarchar(max) NOT NULL DEFAULT '[]',
+                         [IsActive] bit NOT NULL DEFAULT 1,
+                         [CreatedAt] datetime2 NOT NULL DEFAULT GETUTCDATE(),
+                         CONSTRAINT [PK_SystemRoles] PRIMARY KEY ([RoleDefId]),
+                         CONSTRAINT [AK_SystemRoles_Name] UNIQUE ([Name])
+                     );
+                 ");
+             }
+             else
+             {
+                 context.Database.ExecuteSqlRaw(@"
+                     IF COL_LENGTH(N'[SystemRoles]', 'CreatedAt') IS NULL
+                         ALTER TABLE [SystemRoles] ADD [CreatedAt] datetime2 NOT NULL CONSTRAINT DF_SystemRoles_CreatedAt DEFAULT GETUTCDATE();
                  ");
              }
 
@@ -284,15 +291,98 @@ namespace Identity.Microservice.Data
                  context.SaveChanges();
              }
 
-            // 🔐 Seed configurable system role definitions — the source of truth for the
-            // System Admin "Roles" configuration tab and the provisioning authority matrix.
+             // 🔐 Seed configurable system role definitions — the source of truth for the
+             // System Admin "Roles" configuration tab and the provisioning authority matrix.
+             var permissionsTableExists = context.Database.SqlQueryRaw<int>(
+                 "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Permissions'")
+                 .AsEnumerable().FirstOrDefault();
+             if (permissionsTableExists == 0)
+             {
+                 context.Database.ExecuteSqlRaw(@"
+                     CREATE TABLE [Permissions] (
+                         [PermissionId] int NOT NULL IDENTITY(1,1),
+                         [Key] nvarchar(450) NOT NULL,
+                         [Module] nvarchar(100) NOT NULL DEFAULT '',
+                         [Action] nvarchar(100) NOT NULL DEFAULT '',
+                         [Description] nvarchar(max) NOT NULL DEFAULT '',
+                         [IsActive] bit NOT NULL DEFAULT 1,
+                         [CreatedAt] datetime2 NOT NULL DEFAULT GETUTCDATE(),
+                         CONSTRAINT [PK_Permissions] PRIMARY KEY ([PermissionId]),
+                         CONSTRAINT [AK_Permissions_Key] UNIQUE ([Key])
+                     );
+                 ");
+             }
+             else
+             {
+                 context.Database.ExecuteSqlRaw(@"
+                     IF COL_LENGTH(N'[Permissions]', 'CreatedAt') IS NULL
+                         ALTER TABLE [Permissions] ADD [CreatedAt] datetime2 NOT NULL CONSTRAINT DF_Permissions_CreatedAt DEFAULT GETUTCDATE();
+                 ");
+             }
+
+             var rolePermissionsTableExists = context.Database.SqlQueryRaw<int>(
+                 "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'RolePermissions'")
+                 .AsEnumerable().FirstOrDefault();
+             if (rolePermissionsTableExists == 0)
+             {
+                 context.Database.ExecuteSqlRaw(@"
+                     CREATE TABLE [RolePermissions] (
+                         [RoleDefId] int NOT NULL,
+                         [PermissionId] int NOT NULL,
+                         CONSTRAINT [PK_RolePermissions] PRIMARY KEY ([RoleDefId], [PermissionId]),
+                         CONSTRAINT [FK_RolePermissions_SystemRoles] FOREIGN KEY ([RoleDefId]) REFERENCES [SystemRoles] ([RoleDefId]) ON DELETE CASCADE,
+                         CONSTRAINT [FK_RolePermissions_Permissions] FOREIGN KEY ([PermissionId]) REFERENCES [Permissions] ([PermissionId]) ON DELETE CASCADE
+                     );
+                 ");
+             }
+
+             var permissions = new[]
+            {
+                // Property Management
+                new Permission { Key = "properties:create", Description = "Can add property", IsActive = true, Module = "Properties" },
+                new Permission { Key = "properties:view", Description = "Can view properties", IsActive = true, Module = "Properties" },
+                new Permission { Key = "properties:edit", Description = "Can edit property", IsActive = true, Module = "Properties" },
+                new Permission { Key = "properties:delete", Description = "Can delete properties", IsActive = true, Module = "Properties" },
+                // Unit Management
+                new Permission { Key = "units:create", Description = "Can add units", IsActive = true, Module = "Units" },
+                new Permission { Key = "units:view", Description = "Can view units", IsActive = true, Module = "Units" },
+                new Permission { Key = "units:edit", Description = "Can edit units", IsActive = true, Module = "Units" },
+                new Permission { Key = "units:delete", Description = "Can delete units", IsActive = true, Module = "Units" },
+                // Agency Management
+                new Permission { Key = "agencies:create", Description = "Can create agency", IsActive = true, Module = "Agencies" },
+                new Permission { Key = "agencies:view", Description = "Can view agencies", IsActive = true, Module = "Agencies" },
+                new Permission { Key = "agencies:edit", Description = "Can edit agency", IsActive = true, Module = "Agencies" },
+                new Permission { Key = "agencies:delete", Description = "Can delete agency", IsActive = true, Module = "Agencies" },
+                // User Management
+                new Permission { Key = "users:create", Description = "Can create user", IsActive = true, Module = "Users" },
+                new Permission { Key = "users:view", Description = "Can view users", IsActive = true, Module = "Users" },
+                new Permission { Key = "users:edit", Description = "Can edit user", IsActive = true, Module = "Users" },
+                new Permission { Key = "users:delete", Description = "Can delete user", IsActive = true, Module = "Users" },
+                // System Administration
+                new Permission { Key = "system:roles:manage", Description = "Can manage system roles", IsActive = true, Module = "System" },
+                new Permission { Key = "system:permissions:manage", Description = "Can manage permissions", IsActive = true, Module = "System" },
+                // Billing & Reports
+                new Permission { Key = "billing:view", Description = "Can view billing", IsActive = true, Module = "Billing" },
+                new Permission { Key = "billing:export", Description = "Can export financial reports", IsActive = true, Module = "Billing" },
+                new Permission { Key = "valuations:bypass", Description = "Can bypass valuation stages", IsActive = true, Module = "Valuations" }
+            };
+            foreach (var perm in permissions)
+            {
+                var existing = context.Permissions.FirstOrDefault(p => p.Key == perm.Key);
+                if (existing == null)
+                {
+                    context.Permissions.Add(perm);
+                }
+            }
+            context.SaveChanges();
+
             var roleDefs = new[]
             {
-                new SystemRoleDefinition { Name = "PlatformAdmin", Description = "Platform-wide administrator with full provisioning authority.", IsPlatformScoped = true, IsAgencyScoped = false, PermissionsJson = "[\"CanDeleteProperties\",\"CanExportFinancialReports\",\"CanBypassValuationStages\"]" },
-                new SystemRoleDefinition { Name = "AgencyAdmin",   Description = "Agency-level administrator managing brokers and owners.", IsPlatformScoped = false, IsAgencyScoped = true, PermissionsJson = "[\"CanExportFinancialReports\",\"CanBypassValuationStages\"]" },
-                new SystemRoleDefinition { Name = "Broker",        Description = "Sales broker working a pipeline of deals.", IsPlatformScoped = false, IsAgencyScoped = true, PermissionsJson = "[]" },
-                new SystemRoleDefinition { Name = "Owner",         Description = "Property owner surfacing leads and interest.", IsPlatformScoped = false, IsAgencyScoped = false, PermissionsJson = "[]" },
-                new SystemRoleDefinition { Name = "Tenant",        Description = "Rental tenant with maintenance request access.", IsPlatformScoped = false, IsAgencyScoped = false, PermissionsJson = "[]" }
+                new SystemRoleDefinition { Name = "PlatformAdmin", Description = "Platform-wide administrator with full provisioning authority.", IsPlatformScoped = true, IsAgencyScoped = false, IsActive = true },
+                new SystemRoleDefinition { Name = "AgencyAdmin",   Description = "Agency-level administrator managing brokers and owners.", IsPlatformScoped = false, IsAgencyScoped = true, IsActive = true },
+                new SystemRoleDefinition { Name = "Broker",        Description = "Sales broker working a pipeline of deals.", IsPlatformScoped = false, IsAgencyScoped = true, IsActive = true },
+                new SystemRoleDefinition { Name = "Owner",         Description = "Property owner surfacing leads and interest.", IsPlatformScoped = false, IsAgencyScoped = false, IsActive = true },
+                new SystemRoleDefinition { Name = "Tenant",        Description = "Rental tenant with maintenance request access.", IsPlatformScoped = false, IsAgencyScoped = false, IsActive = true }
             };
             foreach (var rd in roleDefs)
             {
@@ -305,7 +395,6 @@ namespace Identity.Microservice.Data
                         Description = rd.Description,
                         IsPlatformScoped = rd.IsPlatformScoped,
                         IsAgencyScoped = rd.IsAgencyScoped,
-                        PermissionsJson = rd.PermissionsJson,
                         IsActive = true,
                         CreatedAt = DateTime.UtcNow
                     });
@@ -315,10 +404,46 @@ namespace Identity.Microservice.Data
                     existing.Description = rd.Description;
                     existing.IsPlatformScoped = rd.IsPlatformScoped;
                     existing.IsAgencyScoped = rd.IsAgencyScoped;
-                    existing.PermissionsJson = rd.PermissionsJson;
                     existing.IsActive = true;
                 }
             }
+            context.SaveChanges();
+
+            var platformAdminRole = context.SystemRoles.First(r => r.Name == "PlatformAdmin");
+            var agencyAdminRole = context.SystemRoles.First(r => r.Name == "AgencyAdmin");
+            var brokerRole = context.SystemRoles.First(r => r.Name == "Broker");
+
+            var allPermissions = context.Permissions.ToDictionary(p => p.Key, p => p.PermissionId);
+
+            void AssignIfExists(int roleDefId, string key)
+            {
+                if (allPermissions.TryGetValue(key, out var permId))
+                {
+                    if (!context.RolePermissions.Any(rp => rp.RoleDefId == roleDefId && rp.PermissionId == permId))
+                    {
+                        context.RolePermissions.Add(new RolePermission { RoleDefId = roleDefId, PermissionId = permId });
+                    }
+                }
+            }
+
+            // PlatformAdmin gets everything
+            foreach (var key in allPermissions.Keys)
+            {
+                AssignIfExists(platformAdminRole.RoleDefId, key);
+            }
+
+            // AgencyAdmin gets agency, user, billing, and valuation permissions
+            foreach (var key in new[] { "agencies:create", "agencies:view", "agencies:edit", "agencies:delete", "users:create", "users:view", "users:edit", "users:delete", "properties:view", "units:view", "billing:view", "billing:export", "valuations:bypass" })
+            {
+                AssignIfExists(agencyAdminRole.RoleDefId, key);
+            }
+
+            // Broker gets view permissions plus property/unit create/edit
+            foreach (var key in new[] { "properties:view", "properties:create", "properties:edit", "units:view", "units:create", "units:edit", "agencies:view", "users:view", "billing:view" })
+            {
+                AssignIfExists(brokerRole.RoleDefId, key);
+            }
+
             context.SaveChanges();
 
             // 💰 Seed configurable pricing packages for the marketing website.

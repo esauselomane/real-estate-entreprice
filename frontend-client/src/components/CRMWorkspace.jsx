@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { DollarSign, TrendingUp, UserPlus, User, Loader2, Building2, Edit2, Search } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
+import { usePermission } from '../contexts/PermissionContext.jsx';
+import Can from '../components/Can.jsx';
 
 export default function CRMWorkspace() {
+  const { hasPermission } = usePermission();
 
   const [activeTab, setActiveTab] = useState('contacts');
 
@@ -241,22 +244,24 @@ export default function CRMWorkspace() {
       ) : (
         <div className="space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
-            <button
-              type="button"
-              onClick={() => {
-                setIsContactFormOpen(!isContactFormOpen);
-                if (!isContactFormOpen) {
-                  setContactForm({
-                    fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
-                    contactRoleType: 'Buyer', associatedCompanyId: '', associatedLegalEntityId: '',
-                    linkedDealIds: '', area: '', budget: ''
-                  });
-                }
-              }}
-              className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white cursor-pointer"
-            >
-              <UserPlus size={14} /> New Contact {isContactFormOpen ? '▲' : '▼'}
-            </button>
+            <Can permission="users:create">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsContactFormOpen(!isContactFormOpen);
+                  if (!isContactFormOpen) {
+                    setContactForm({
+                      fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
+                      contactRoleType: 'Buyer', associatedCompanyId: '', associatedLegalEntityId: '',
+                      linkedDealIds: '', area: '', budget: ''
+                    });
+                  }
+                }}
+                className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white cursor-pointer"
+              >
+                <UserPlus size={14} /> New Contact {isContactFormOpen ? '▲' : '▼'}
+              </button>
+            </Can>
             {isContactFormOpen && (
               <form onSubmit={handleCreateContact} className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Full Name</label><input required type="text" value={contactForm.fullName} onChange={(e) => setContactForm({ ...contactForm, fullName: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
@@ -281,7 +286,9 @@ export default function CRMWorkspace() {
                 <p className="text-xs text-slate-400 mt-1">Reg: {comp.registrationNumber || 'N/A'} • VAT: {comp.vatNumber || 'N/A'} • Credit Limit: R {comp.corporateCreditLimit.toLocaleString()}</p>
                 <p className="text-[11px] text-slate-500 mt-0.5">HQ: {comp.headOfficeAddress || 'Not Provided'}</p>
               </div>
-              <button onClick={() => setEditingCompany(comp)} className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-800 transition-colors cursor-pointer"><Edit2 size={14} /></button>
+              <Can permission="agencies:edit">
+                <button onClick={() => setEditingCompany(comp)} className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-800 transition-colors cursor-pointer"><Edit2 size={14} /></button>
+              </Can>
             </div>
           ))}
 
@@ -294,7 +301,9 @@ export default function CRMWorkspace() {
                 <p className="text-xs text-slate-400 mt-1">Structure: <span className="text-blue-400">{ent.entityTypeClassifier}</span> • Tax Ref: {ent.taxRegistrationIndex || 'N/A'} • Deeds Reg: {ent.deedsOfficeIdentifier || 'N/A'}</p>
                 {ent.companyDetails && <p className="text-[11px] text-slate-500 mt-0.5">Belongs To Company: <span className="text-slate-400 font-semibold">{ent.companyDetails.businessName}</span></p>}
               </div>
-              <button onClick={() => setEditingLegalEntity(ent)} className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-800 transition-colors cursor-pointer"><Edit2 size={14} /></button>
+              <Can permission="agencies:edit">
+                <button onClick={() => setEditingLegalEntity(ent)} className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-800 transition-colors cursor-pointer"><Edit2 size={14} /></button>
+              </Can>
             </div>
           ))}
 
@@ -321,7 +330,9 @@ export default function CRMWorkspace() {
                   <p className="text-[10px] text-slate-500 mt-0.5">Linked Deals: {con.linkedDealIds}</p>
                 )}
               </div>
-              <button onClick={() => setEditingContact(con)} className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-800 transition-colors cursor-pointer"><Edit2 size={14} /></button>
+              <Can permission="users:edit">
+                <button onClick={() => setEditingContact(con)} className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-800 transition-colors cursor-pointer"><Edit2 size={14} /></button>
+              </Can>
             </div>
           ))}
 
@@ -400,7 +411,9 @@ export default function CRMWorkspace() {
               </div>
               <div className="flex gap-3 pt-3">
                 <button type="button" onClick={() => setEditingCompany(null)} className="flex-1 py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl border border-slate-800 cursor-pointer">Cancel</button>
-                <button type="submit" className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl cursor-pointer">Save Changes</button>
+                <Can permission="agencies:edit">
+                  <button type="submit" className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl cursor-pointer">Save Changes</button>
+                </Can>
               </div>
             </form>
           </div>
@@ -432,7 +445,9 @@ export default function CRMWorkspace() {
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => { editingContact ? setEditingContact(null) : setIsContactFormOpen(false); }} className="flex-1 py-2.5 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl border border-slate-800 transition-colors cursor-pointer">Cancel</button>
-                <button type="submit" className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-md transition-colors cursor-pointer">{editingContact ? 'Save Changes' : 'Create Contact'}</button>
+                <Can permission={editingContact ? 'users:edit' : 'users:create'}>
+                  <button type="submit" className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-md transition-colors cursor-pointer">{editingContact ? 'Save Changes' : 'Create Contact'}</button>
+                </Can>
               </div>
             </form>
           </div>

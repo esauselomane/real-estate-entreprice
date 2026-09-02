@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { UserPlus, Search, Loader2, X } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
+import { usePermission } from '../contexts/PermissionContext.jsx';
+import Can from '../components/Can.jsx';
 
 const LEAD_STAGES = ['Contacted', 'Qualified', 'Negotiation', 'ProposalSent', 'ClosedWon', 'ClosedLost'];
 const LEAD_STAGE_COLORS = { Contacted: '#3b82f6', Qualified: '#14b8a6', Negotiation: '#f59e0b', ProposalSent: '#a78bfa', ClosedWon: '#22c55e', ClosedLost: '#ef4444' };
@@ -20,6 +22,7 @@ const getLeadStageValue = (lead) => {
 };
 
 export default function LeadsPage() {
+  const { hasPermission } = usePermission();
   const [leads, setLeads] = useState([]);
   const [leadTotalCount, setLeadTotalCount] = useState(0);
   const [brokers, setBrokers] = useState([]);
@@ -198,9 +201,11 @@ export default function LeadsPage() {
           <h2 className="text-2xl font-bold text-white">Leads Pipeline</h2>
           <p className="text-xs text-slate-400 mt-1">Tenant-scoped leads • {leadTotalCount} total</p>
         </div>
-        <button type="button" onClick={() => { setIsLeadFormOpen(!isLeadFormOpen); if (!isLeadFormOpen) { clearContact(); setLeadForm({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedToAgent: '' }); } }} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all">
-          <UserPlus size={14} /> New Lead
-        </button>
+        <Can permission="leads:create">
+          <button type="button" onClick={() => { setIsLeadFormOpen(!isLeadFormOpen); if (!isLeadFormOpen) { clearContact(); setLeadForm({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedToAgent: '' }); } }} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all">
+            <UserPlus size={14} /> New Lead
+          </button>
+        </Can>
       </div>
 
       {/* 📊 Summary Metrics */}
@@ -311,7 +316,9 @@ export default function LeadsPage() {
               </select>
             </div>
             <div className="lg:col-span-3 flex gap-3 pt-1">
-              <button type="submit" className="py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer">Create Lead</button>
+              <Can permission="leads:create">
+                <button type="submit" className="py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer">Create Lead</button>
+              </Can>
               <button type="button" onClick={() => { setIsLeadFormOpen(false); clearContact(); }} className="py-2.5 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl border border-slate-800 cursor-pointer">Cancel</button>
             </div>
           </form>
@@ -377,9 +384,15 @@ export default function LeadsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => { setEditingLead(lead); setNextStage(getLeadStageValue(lead)); setNotes(''); }} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Update Stage</button>
-                  <button onClick={(e) => { e.stopPropagation(); handlePromoteLead(lead, true); }} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Rent Deal</button>
-                  <button onClick={(e) => { e.stopPropagation(); handlePromoteLead(lead, false); }} className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Sale Deal</button>
+                  <Can permission="leads:edit">
+                    <button onClick={() => { setEditingLead(lead); setNextStage(getLeadStageValue(lead)); setNotes(''); }} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Update Stage</button>
+                  </Can>
+                  <Can permission="deals:create">
+                    <button onClick={(e) => { e.stopPropagation(); handlePromoteLead(lead, true); }} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Rent Deal</button>
+                  </Can>
+                  <Can permission="deals:create">
+                    <button onClick={(e) => { e.stopPropagation(); handlePromoteLead(lead, false); }} className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Sale Deal</button>
+                  </Can>
                 </div>
               </div>
             ))
@@ -467,7 +480,9 @@ export default function LeadsPage() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button type="submit" className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold">Save Changes</button>
+                <Can permission="leads:edit">
+                  <button type="submit" className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold">Save Changes</button>
+                </Can>
                 <button type="button" onClick={() => { setEditingLead(null); setNotes(''); clearEditContact(); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300">Cancel</button>
               </div>
             </form>

@@ -6,13 +6,16 @@ import App from './App.jsx'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 import { AppUiProvider } from './contexts/AppUiContext.jsx'
 import { AgencyProvider } from './contexts/AgencyContext.jsx'
+import { PermissionProvider } from './contexts/PermissionContext.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <AuthProvider>
       <AppUiProvider>
         <AgencyProvider>
-          <App />
+          <PermissionProvider>
+            <App />
+          </PermissionProvider>
         </AgencyProvider>
       </AppUiProvider>
     </AuthProvider>

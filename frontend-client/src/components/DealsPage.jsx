@@ -4,6 +4,8 @@ import { Briefcase, Search, Loader2, Layers, X, Trash2 } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
+import { usePermission } from '../contexts/PermissionContext.jsx';
+import Can from '../components/Can.jsx';
 
 const DEAL_STAGES = ['DiscoveryNeedsAnalysis', 'Presentation', 'ProposalQuoteSent', 'Negotiation', 'ClosedWon', 'ClosedLost'];
 const DEAL_STAGE_COLORS = { DiscoveryNeedsAnalysis: '#0ea5e9', Presentation: '#3b82f6', ProposalQuoteSent: '#a78bfa', Negotiation: '#f59e0b', ClosedWon: '#22c55e', ClosedLost: '#ef4444' };
@@ -24,6 +26,7 @@ const getDealStageValue = (deal) => {
 export default function DealsPage() {
   const { userRole: currentUserRole } = useAuth();
   const { setBrochureDealTarget: onOpenBrochureBuilder } = useAppUi();
+  const { hasPermission } = usePermission();
   const [deals, setDeals] = useState([]);
   const [dealTotalCount, setDealTotalCount] = useState(0);
   const [brokers, setBrokers] = useState([]);
@@ -266,15 +269,17 @@ export default function DealsPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => { setEditingDeal(deal); setNextStage(getDealStageValue(deal)); setNotes(''); }} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Progress Deal</button>
+                  <Can permission="deals:edit">
+                    <button onClick={() => { setEditingDeal(deal); setNextStage(getDealStageValue(deal)); setNotes(''); }} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Progress Deal</button>
+                  </Can>
                   {getDealStageValue(deal) === 'Presentation' && (
-                    <button onClick={() => onOpenBrochureBuilder && onOpenBrochureBuilder(deal)} className="p-2 bg-indigo-950/40 hover:bg-indigo-800 text-indigo-400 rounded-xl border border-indigo-900 cursor-pointer" title="Open brochure card"><Layers size={14} /></button>
+                    <Can permission="billing:export">
+                      <button onClick={() => onOpenBrochureBuilder && onOpenBrochureBuilder(deal)} className="p-2 bg-indigo-950/40 hover:bg-indigo-800 text-indigo-400 rounded-xl border border-indigo-900 cursor-pointer" title="Open brochure card"><Layers size={14} /></button>
+                    </Can>
                   )}
-                  {canManageDeals ? (
+                  <Can permission="deals:delete">
                     <button onClick={() => handleDeleteDeal(deal)} className="p-2 bg-red-950/40 hover:bg-red-900/40 text-red-400 rounded-xl border border-red-900 cursor-pointer" title="Delete deal"><Trash2 size={14} /></button>
-                  ) : (
-                    <span title="Restricted" className="p-2 text-slate-600 cursor-not-allowed">🚫</span>
-                  )}
+                  </Can>
                 </div>
               </div>
             ))
@@ -346,18 +351,22 @@ export default function DealsPage() {
                   )}
                   {canEditCommission && (
                     <div className="flex gap-2 pt-1">
-                      <button type="button" onClick={async () => {
-                        const evenPct = 100 / (brokers.length || 1);
-                        const commissionVal = parseFloat(editForm.commissionValue) || 0;
-                        const newSplits = brokers.map(b => ({
-                          brokerId: b.brokerId,
-                          brokerName: b.fullName,
-                          splitPercentage: Math.Round(evenPct, 2),
-                          splitAmount: Math.Round(commissionVal * evenPct / 100, 2)
-                        }));
-                        setBrokerSplits(newSplits);
-                      }} className="text-[10px] font-bold text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg">Auto-Split Evenly</button>
-                      <button type="button" onClick={handleUpsertBrokerSplits} className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 border border-emerald-900 px-2 py-1 rounded-lg">Save Splits</button>
+                      <Can permission="billing:edit">
+                        <button type="button" onClick={async () => {
+                          const evenPct = 100 / (brokers.length || 1);
+                          const commissionVal = parseFloat(editForm.commissionValue) || 0;
+                          const newSplits = brokers.map(b => ({
+                            brokerId: b.brokerId,
+                            brokerName: b.fullName,
+                            splitPercentage: Math.Round(evenPct, 2),
+                            splitAmount: Math.Round(commissionVal * evenPct / 100, 2)
+                          }));
+                          setBrokerSplits(newSplits);
+                        }} className="text-[10px] font-bold text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg">Auto-Split Evenly</button>
+                      </Can>
+                      <Can permission="billing:edit">
+                        <button type="button" onClick={handleUpsertBrokerSplits} className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 border border-emerald-900 px-2 py-1 rounded-lg">Save Splits</button>
+                      </Can>
                     </div>
                   )}
                 </div>
@@ -373,7 +382,9 @@ export default function DealsPage() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button type="submit" className="flex-1 py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold">Save Changes</button>
+                <Can permission="deals:edit">
+                  <button type="submit" className="flex-1 py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold">Save Changes</button>
+                </Can>
                 <button type="button" onClick={() => { setEditingDeal(null); setNotes(''); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300">Cancel</button>
               </div>
             </form>

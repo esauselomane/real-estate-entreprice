@@ -35,11 +35,12 @@ namespace Property.Microservice.Controllers
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         };
 
-        public PropertyController(PropertyDbContext context, KafkaPublisherService kafkaPublisher, ILogger<PropertyController> logger)
+        public PropertyController(PropertyDbContext context, KafkaPublisherService kafkaPublisher, ILogger<PropertyController> logger, PermissionCheckService permissionCheck)
         {
             _context = context;
             _kafkaPublisher = kafkaPublisher;
             _logger = logger;
+            PermissionCheck = permissionCheck;
 
             // 📁 LOCAL DISK VAULT: actual property media (images + documents) are persisted
             // to the server filesystem here so they survive beyond a single request, not
@@ -50,6 +51,8 @@ namespace Property.Microservice.Controllers
                 Directory.CreateDirectory(_storageRootPath);
             }
         }
+
+        private PermissionCheckService PermissionCheck { get; }
 
         // --- 📥 DATA TRANSFER INTERFACE MODEL BINDINGS ---
                                            
@@ -220,6 +223,12 @@ namespace Property.Microservice.Controllers
         [HttpPost("{propertyId}/units")]
         public async Task<IActionResult> AddPropertyUnit(int propertyId, [FromBody] CreatePropertyUnitPayload payload)
         {
+            if (!await PermissionCheck.HasPermissionAsync("units:create"))
+            {
+                _logger.LogWarning("AddPropertyUnit: forbidden — caller lacks units:create permission");
+                return Forbid();
+            }
+
             // 🛡️ Tenants and Owners may never add (or delete) units — that is an agency-level
             // action. Any authenticated user outside a read-only role is permitted.
             if (IsReadOnlyRole()) return Forbid();
@@ -266,6 +275,12 @@ namespace Property.Microservice.Controllers
         [HttpDelete("{propertyId}/units/{unitId}")]
         public async Task<IActionResult> DeletePropertyUnit(int propertyId, int unitId)
         {
+            if (!await PermissionCheck.HasPermissionAsync("units:delete"))
+            {
+                _logger.LogWarning("DeletePropertyUnit: forbidden — caller lacks units:delete permission");
+                return Forbid();
+            }
+
             // 🛡️ Tenants and Owners may never delete anything.
             if (IsReadOnlyRole()) return Forbid();
 
@@ -287,6 +302,12 @@ namespace Property.Microservice.Controllers
         [HttpPut("{propertyId}/units/{unitId:int}")]
         public async Task<IActionResult> UpdatePropertyUnit(int propertyId, int unitId, [FromBody] UpdatePropertyUnitPayload payload)
         {
+            if (!await PermissionCheck.HasPermissionAsync("units:edit"))
+            {
+                _logger.LogWarning("UpdatePropertyUnit: forbidden — caller lacks units:edit permission");
+                return Forbid();
+            }
+
             var unit = await GetAccessibleUnitAsync(propertyId, unitId);
             if (unit == null)
             {
@@ -540,6 +561,12 @@ namespace Property.Microservice.Controllers
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             _logger.LogInformation("CreateProperty: requested by {Caller}", caller);
 
+            if (!await PermissionCheck.HasPermissionAsync("properties:create"))
+            {
+                _logger.LogWarning("CreateProperty: forbidden — caller {Caller} lacks properties:create permission", caller);
+                return Forbid();
+            }
+
             if (payload == null || string.IsNullOrWhiteSpace(payload.CompleteAddress))
             {
                 _logger.LogWarning("CreateProperty: rejected — address missing, caller={Caller}", caller);
@@ -612,6 +639,12 @@ namespace Property.Microservice.Controllers
         [HttpPut("{propertyId}")]
         public async Task<IActionResult> UpdateProperty(int propertyId, [FromBody] UpdatePropertyPayload payload)
         {
+            if (!await PermissionCheck.HasPermissionAsync("properties:edit"))
+            {
+                _logger.LogWarning("UpdateProperty: forbidden — caller lacks properties:edit permission");
+                return Forbid();
+            }
+
             if (payload == null || string.IsNullOrWhiteSpace(payload.CompleteAddress))
                 return BadRequest(new { message = "Property address is required." });
 
@@ -673,6 +706,12 @@ namespace Property.Microservice.Controllers
         [HttpPost("search")]
         public async Task<IActionResult> SearchProperties([FromBody] PropertySearchCriteria criteria, [FromQuery] int page = 1)
         {
+            if (!await PermissionCheck.HasPermissionAsync("properties:view"))
+            {
+                _logger.LogWarning("SearchProperties: forbidden — caller lacks properties:view permission");
+                return Forbid();
+            }
+
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             _logger.LogInformation("SearchProperties: Page={Page} PropertyType={PropertyType} ListingType={ListingType} Locations={Locations} Caller={Caller}",
                 page, criteria.PropertyType, criteria.ListingType, string.Join(",", criteria.Locations ?? Enumerable.Empty<string>()), caller);
@@ -739,6 +778,12 @@ namespace Property.Microservice.Controllers
         [HttpPost("{propertyId}/upload-image")]
         public async Task<IActionResult> UploadPropertyImage(int propertyId, [FromBody] ImageUploadPayload payload)
         {
+            if (!await PermissionCheck.HasPermissionAsync("properties:edit"))
+            {
+                _logger.LogWarning("UploadPropertyImage: forbidden — caller lacks properties:edit permission");
+                return Forbid();
+            }
+
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             _logger.LogInformation("UploadPropertyImage: PropertyId={PropertyId} Caller={Caller}", propertyId, caller);
             var property = await _context.PropertyAssets.FindAsync(propertyId);
@@ -765,6 +810,12 @@ namespace Property.Microservice.Controllers
         [HttpPost("syndicate")]
         public async Task<IActionResult> ToggleSyndication([FromBody] SyndicationTogglePayload payload)
         {
+            if (!await PermissionCheck.HasPermissionAsync("properties:edit"))
+            {
+                _logger.LogWarning("ToggleSyndication: forbidden — caller lacks properties:edit permission");
+                return Forbid();
+            }
+
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             _logger.LogInformation("ToggleSyndication: PropertyId={PropertyId} PlatformId={PlatformId} Syndicate={Syndicate} Caller={Caller}",
                 payload?.PropertyId, payload?.PlatformId, payload?.SyndicateStatus, caller);
@@ -832,6 +883,12 @@ namespace Property.Microservice.Controllers
         [HttpPost("brochure/generate")]
         public async Task<IActionResult> GenerateBrochure([FromBody] GeneratedBrochurePayload payload)
         {
+            if (!await PermissionCheck.HasPermissionAsync("billing:export"))
+            {
+                _logger.LogWarning("GenerateBrochure: forbidden — caller lacks billing:export permission");
+                return Forbid();
+            }
+
             if (payload == null || payload.DealId <= 0 || !payload.SubUnits.Any())
             {
                 _logger.LogWarning("GenerateBrochure: rejected — invalid payload (DealId={DealId} Units={Units})",
@@ -888,6 +945,12 @@ namespace Property.Microservice.Controllers
     [HttpGet("{propertyId}/units/{unitId:int}/maintenance")]
     public async Task<IActionResult> GetUnitMaintenanceCalls(int propertyId, int unitId)
     {
+        if (!await PermissionCheck.HasPermissionAsync("units:view"))
+        {
+            _logger.LogWarning("GetUnitMaintenanceCalls: forbidden — caller lacks units:view permission");
+            return Forbid();
+        }
+
         var unit = await GetAccessibleUnitAsync(propertyId, unitId);
         if (unit == null)
         {
@@ -906,6 +969,12 @@ namespace Property.Microservice.Controllers
     [HttpPost("{propertyId}/units/{unitId:int}/maintenance")]
     public async Task<IActionResult> AddUnitMaintenanceCall(int propertyId, int unitId, [FromBody] MaintenanceCallPayload payload)
     {
+        if (!await PermissionCheck.HasPermissionAsync("units:edit"))
+        {
+            _logger.LogWarning("AddUnitMaintenanceCall: forbidden — caller lacks units:edit permission");
+            return Forbid();
+        }
+
         if (payload == null || string.IsNullOrWhiteSpace(payload.Title))
             return BadRequest(new { message = "A maintenance call title is required." });
 
@@ -942,6 +1011,12 @@ namespace Property.Microservice.Controllers
     [HttpDelete("{propertyId}/units/{unitId:int}/maintenance/{callId:int}")]
     public async Task<IActionResult> DeleteMaintenanceCall(int callId)
     {
+        if (!await PermissionCheck.HasPermissionAsync("units:delete"))
+        {
+            _logger.LogWarning("DeleteMaintenanceCall: forbidden — caller lacks units:delete permission");
+            return Forbid();
+        }
+
         // Tenants and Owners may never delete anything.
         if (IsReadOnlyRole()) return Forbid();
 

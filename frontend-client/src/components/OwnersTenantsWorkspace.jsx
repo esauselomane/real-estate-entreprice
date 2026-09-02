@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Users, Plus, Search, Pencil, X, Tag, MapPin } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
+import { usePermission } from '../contexts/PermissionContext.jsx';
+import Can from '../components/Can.jsx';
 
 const PROPERTY_TYPES = ['Residential', 'Commercial', 'Retail', 'Industrial'];
 
 export default function OwnersTenantsWorkspace() {
+  const { hasPermission } = usePermission();
   const [records, setRecords] = useState([]);
   const [geography, setGeography] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -182,10 +185,12 @@ export default function OwnersTenantsWorkspace() {
 
           <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Notes" rows={3} className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
 
-          <div className="flex gap-3">
-            <button type="button" onClick={() => { setEditing(null); setForm({ recordType: 'Owner', fullName: '', companyName: '', emailAddress: '', phoneNumber: '', primaryLocation: '', budgetLimit: 0, propertyTypeInterests: [], areaInterestIds: [], notes: '' }); }} className="flex-1 py-2 rounded-xl border border-slate-700 text-slate-300 text-xs font-bold">Clear</button>
-            <button type="submit" className="flex-1 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">Save</button>
-          </div>
+           <div className="flex gap-3">
+             <button type="button" onClick={() => { setEditing(null); setForm({ recordType: 'Owner', fullName: '', companyName: '', emailAddress: '', phoneNumber: '', primaryLocation: '', budgetLimit: 0, propertyTypeInterests: [], areaInterestIds: [], notes: '' }); }} className="flex-1 py-2 rounded-xl border border-slate-700 text-slate-300 text-xs font-bold">Clear</button>
+             <Can permission={editing ? 'users:edit' : 'users:create'}>
+               <button type="submit" className="flex-1 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">Save</button>
+             </Can>
+           </div>
         </form>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
@@ -225,19 +230,21 @@ export default function OwnersTenantsWorkspace() {
                       </div>
                     )}
                   </div>
-                  <button type="button"
-                    onClick={() => {
-                      setEditing(record);
-                      setForm({
-                        ...record,
-                        budgetLimit: Number(record.budgetLimit || 0),
-                        propertyTypeInterests: parseInterests(record.propertyTypeInterests),
-                        areaInterestIds: parseAreaIds(record.areaInterestIds)
-                      });
-                    }}
-                    className="p-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600">
-                    <Pencil size={14} />
-                  </button>
+                  <Can permission="users:edit">
+                    <button type="button"
+                      onClick={() => {
+                        setEditing(record);
+                        setForm({
+                          ...record,
+                          budgetLimit: Number(record.budgetLimit || 0),
+                          propertyTypeInterests: parseInterests(record.propertyTypeInterests),
+                          areaInterestIds: parseAreaIds(record.areaInterestIds)
+                        });
+                      }}
+                      className="p-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600">
+                      <Pencil size={14} />
+                    </button>
+                  </Can>
                 </div>
               ))}
               {!filtered.length && !isLoading && (

@@ -1,6 +1,7 @@
 using Property.Microservice.Data;
 using Property.Microservice.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -53,6 +54,9 @@ builder.Services.AddAuthorization();
 
 // 4. INJECT EVENT-DRIVEN KAFKA STREAMING SERVICE AS A SINGLETON
 builder.Services.AddSingleton<KafkaPublisherService>();
+builder.Services.AddHttpClient();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<PermissionCheckService>();
 
 var app = builder.Build();
 // 5. AUTOMATED DATABASE LIFECYCLE RECOVERY & DATA SEEDING LOOPS

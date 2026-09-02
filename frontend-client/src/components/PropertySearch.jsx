@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { MapPin, X, SlidersHorizontal, Building2, Loader2, Pencil } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
+import { usePermission } from '../contexts/PermissionContext.jsx';
+import Can from '../components/Can.jsx';
 
 export default function PropertySearch({ onSelectProperty }) {
+  const { hasPermission } = usePermission();
   // Search parameters states
   const [selectedLocations, setSelectedLocations] = useState([]);
   const [locationInput, setLocationInput] = useState('');
@@ -264,10 +267,12 @@ export default function PropertySearch({ onSelectProperty }) {
                      <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
                        {prop.isForSale && prop.isForRent ? 'SALE + RENT' : prop.isForSale ? 'FOR SALE' : prop.isForRent ? 'FOR RENT' : 'OFF MARKET'}
                      </span>
-                     <div className="flex items-center gap-2">
-                       <button type="button" onClick={(e) => { e.stopPropagation(); openEditProperty(prop.propertyId); }} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-colors" title="Edit property"><Pencil size={14} /></button>
-                       <span className="text-sm font-bold text-slate-300">{prop.erfSpatialSize}</span>
-                     </div>
+                      <div className="flex items-center gap-2">
+                        <Can permission="properties:edit">
+                          <button type="button" onClick={(e) => { e.stopPropagation(); openEditProperty(prop.propertyId); }} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-colors" title="Edit property"><Pencil size={14} /></button>
+                        </Can>
+                        <span className="text-sm font-bold text-slate-300">{prop.erfSpatialSize}</span>
+                      </div>
                    </div>
 
                   

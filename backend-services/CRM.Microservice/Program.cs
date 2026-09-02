@@ -1,6 +1,8 @@
 using CRM.Microservice.Data;
+using CRM.Microservice.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 
@@ -36,6 +38,8 @@ builder.Services.AddAuthentication(options =>
 // 🌐 Outbound HTTP client used by the lead→deal auto-matching engine to query the
 // Property microservice through the API gateway (tenant scoping is enforced there).
 builder.Services.AddHttpClient();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<PermissionCheckService>();
 
 
 // 2. Configure Microsoft SQL Server Enterprise Database Engine Pool Connection
