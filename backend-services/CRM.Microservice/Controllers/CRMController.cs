@@ -547,6 +547,7 @@ namespace CRM.Microservice.Controllers
             existing.ContactRoleType = updatedContact.ContactRoleType;
             existing.AssociatedCompanyId = updatedContact.AssociatedCompanyId;
             existing.AssociatedLegalEntityId = updatedContact.AssociatedLegalEntityId;
+            existing.LinkedDealIds = updatedContact.LinkedDealIds;
 
             await _context.SaveChangesAsync();
             return Ok(new { message = "Contact directory record updated successfully.", data = existing });
@@ -1093,6 +1094,8 @@ namespace CRM.Microservice.Controllers
                 clientName = card.ClientName,
                 clientEmail = card.ClientEmail,
                 clientPhone = card.ClientPhone,
+                companyName = card.CompanyName,
+                companyLogoUrl = card.CompanyLogoUrl,
                 status = card.Status.ToString(),
                 generatedFilePath = card.GeneratedFilePath,
                 createdAt = card.CreatedAt,
@@ -1105,8 +1108,11 @@ namespace CRM.Microservice.Controllers
                         unitId = l.UnitId,
                         unitNumber = l.UnitNumber,
                         unitDescription = l.UnitDescription,
+                        propertyDescription = l.PropertyDescription,
                         netRentableAreaSqM = l.NetRentableAreaSqM,
-                        imageRef = l.ImageRef
+                        selectedImageRefs = string.IsNullOrEmpty(l.SelectedImageRefs) 
+                            ? new List<string>() 
+                            : l.SelectedImageRefs.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList()
                     })
             });
         }
@@ -1177,6 +1183,8 @@ namespace CRM.Microservice.Controllers
             card.ClientName = request.ClientName;
             card.ClientEmail = request.ClientEmail;
             card.ClientPhone = request.ClientPhone;
+            card.CompanyName = request.CompanyName;
+            card.CompanyLogoUrl = request.CompanyLogoUrl;
             card.UpdatedAt = DateTime.UtcNow;
 
             foreach (var unit in request.Units.Take(5))
@@ -1188,8 +1196,11 @@ namespace CRM.Microservice.Controllers
                     UnitId = unit.UnitId,
                     UnitNumber = unit.UnitNumber ?? string.Empty,
                     UnitDescription = unit.UnitDescription ?? string.Empty,
+                    PropertyDescription = unit.PropertyDescription ?? string.Empty,
                     NetRentableAreaSqM = unit.NetRentableAreaSqM,
-                    ImageRef = unit.ImageRef ?? string.Empty
+                    SelectedImageRefs = unit.SelectedImageRefs != null && unit.SelectedImageRefs.Any() 
+                        ? string.Join(",", unit.SelectedImageRefs) 
+                        : string.Empty
                 });
             }
 
@@ -1244,6 +1255,84 @@ namespace CRM.Microservice.Controllers
                 cardId = card.CardId,
                 dealStage = deal == null ? null : deal.DealStage.ToString()
             });
+        }
+
+        // 💰 Co-brokerage split management (AgencyAdmin only).
+        [HttpGet("deals/{dealId:int}/broker-splits")]
+        public async Task<IActionResult> GetDealBrokerSplits(int dealId)
+        {
+            var tenantId = GetCurrentTenant();
+            var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            if (deal == null) return NotFound(new { message = "Deal record not found." });
+
+            var splits = await _context.DealBrokerSplits
+                .Where(s => s.DealId == dealId)
+                .OrderByDescending(s => s.SplitPercentage)
+                .ToListAsync();
+            return Ok(splits);
+        }
+
+        [HttpPut("deals/{dealId:int}/broker-splits")]
+        public async Task<IActionResult> UpsertDealBrokerSplits(int dealId, [FromBody] UpsertBrokerSplitsRequest request)
+        {
+            var callerRole = GetCurrentCanonicalRole();
+            if (callerRole != "AgencyAdmin" && callerRole != "PlatformAdmin")
+                return Forbid();
+
+            var tenantId = GetCurrentTenant();
+            var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            if (deal == null) return NotFound(new { message = "Deal record not found." });
+
+            if (request.Splits == null || !request.Splits.Any())
+            {
+                _context.DealBrokerSplits.RemoveRange(_context.DealBrokerSplits.Where(s => s.DealId == dealId));
+                await _context.SaveChangesAsync();
+                return Ok(new { message = "All broker splits cleared." });
+            }
+
+            var existing = _context.DealBrokerSplits.Where(s => s.DealId == dealId);
+            _context.DealBrokerSplits.RemoveRange(existing);
+
+            decimal totalPercentage = request.Splits.Sum(s => s.SplitPercentage);
+            decimal commissionValue = deal.CommissionValue;
+
+            foreach (var split in request.Splits)
+            {
+                _context.DealBrokerSplits.Add(new DealBrokerSplit
+                {
+                    DealId = dealId,
+                    BrokerId = split.BrokerId,
+                    BrokerName = split.BrokerName,
+                    SplitPercentage = split.SplitPercentage,
+                    SplitAmount = totalPercentage > 0 ? Math.Round(commissionValue * split.SplitPercentage / 100m, 2) : 0m
+                });
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Broker splits updated.", totalPercentage });
+        }
+
+        // 🔗 Link a contact to a deal (adds DealId to contact's LinkedDealIds CSV).
+        [HttpPost("contacts/{contactId}/link-deal/{dealId:int}")]
+        public async Task<IActionResult> LinkContactToDeal(string contactId, int dealId)
+        {
+            var tenantId = GetCurrentTenant();
+            var contact = await _context.CRMContacts.FirstOrDefaultAsync(c => c.ContactId == contactId && c.TenantId == tenantId);
+            if (contact == null) return NotFound(new { message = "Contact not found." });
+
+            var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            if (deal == null) return NotFound(new { message = "Deal not found." });
+
+            var linked = string.IsNullOrWhiteSpace(contact.LinkedDealIds)
+                ? new List<string>()
+                : contact.LinkedDealIds.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).ToList();
+
+            if (!linked.Contains(dealId.ToString()))
+                linked.Add(dealId.ToString());
+
+            contact.LinkedDealIds = string.Join(',', linked);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Contact linked to deal.", linkedDealIds = contact.LinkedDealIds });
         }
     }
 }

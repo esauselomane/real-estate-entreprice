@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
    ArrowLeft, MapPin, FileText, User, Home, CheckCircle2, 
-   ExternalLink, Image, Plus, Trash2, Layers, DollarSign, 
+   ExternalLink, Image, Plus, Trash2, Layers, 
    Building, Check, Loader2, AlertCircle, FileSignature, Wrench, FolderLock, Pencil,
    X, Save, Upload, Download
- } from 'lucide-react';
+  } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import { crmService } from '../services/crmService.js';
 import { canManageUnits } from '../services/authService.js';

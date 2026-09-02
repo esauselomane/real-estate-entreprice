@@ -22,6 +22,7 @@ namespace CRM.Microservice.Data
         public DbSet<ContactPerson> ContactPersons { get; set; }
         public DbSet<BrochureCard> BrochureCards { get; set; } = null!;
         public DbSet<BrochureCardLine> BrochureCardLines { get; set; } = null!;
+        public DbSet<DealBrokerSplit> DealBrokerSplits { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -67,6 +68,12 @@ namespace CRM.Microservice.Data
                 .HasMany(c => c.Lines)
                 .WithOne(l => l.Card)
                 .HasForeignKey(l => l.CardId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<DealBrokerSplit>()
+                .HasOne(s => s.Deal)
+                .WithMany(d => d.BrokerSplits)
+                .HasForeignKey(s => s.DealId)
                 .OnDelete(DeleteBehavior.Cascade);
         }
     }

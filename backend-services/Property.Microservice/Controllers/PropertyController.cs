@@ -832,29 +832,29 @@ namespace Property.Microservice.Controllers
         [HttpPost("brochure/generate")]
         public async Task<IActionResult> GenerateBrochure([FromBody] GeneratedBrochurePayload payload)
         {
-            if (payload == null || payload.PropertyId <= 0 || payload.DealId <= 0)
+            if (payload == null || payload.DealId <= 0 || !payload.SubUnits.Any())
             {
-                _logger.LogWarning("GenerateBrochure: rejected — invalid payload (PropertyId={PropertyId} DealId={DealId})",
-                    payload?.PropertyId, payload?.DealId);
-                return BadRequest(new { message = "A deal and property are required to generate a brochure." });
+                _logger.LogWarning("GenerateBrochure: rejected — invalid payload (DealId={DealId} Units={Units})",
+                    payload?.DealId, payload?.SubUnits?.Count ?? 0);
+                return BadRequest(new { message = "A deal and at least one unit are required to generate a brochure." });
             }
 
-            var propertyExists = await _context.PropertyAssets.AnyAsync(p => p.PropertyId == payload.PropertyId);
-            if (!propertyExists)
+            var propertyIds = payload.SubUnits.Select(u => u.PropertyId).Distinct().ToList();
+            var validPropertyCount = await _context.PropertyAssets.CountAsync(p => propertyIds.Contains(p.PropertyId));
+            if (validPropertyCount != propertyIds.Count)
             {
-                _logger.LogWarning("GenerateBrochure: property not found — PropertyId={PropertyId}", payload.PropertyId);
-                return NotFound(new { message = "Target property record not found." });
+                _logger.LogWarning("GenerateBrochure: one or more properties not found — PropertyIds={PropertyIds}", propertyIds);
+                return NotFound(new { message = "One or more target property records were not found." });
             }
 
-            // 🎯 TRIAL RESTRICTION: AgencyAdmin and Broker roles on trial agencies cannot compile brochures
             var canonicalRole = GetCurrentCanonicalRole();
             var isTrialClaim = User.FindFirst("IsTrial")?.Value;
             var trialEndDateClaim = User.FindFirst("TrialEndDate")?.Value;
 
             if (isTrialClaim == "true" && (canonicalRole == "AgencyAdmin" || canonicalRole == "Broker"))
             {
-                _logger.LogWarning("GenerateBrochure: blocked — trial restriction for Role={Role} PropertyId={PropertyId} DealId={DealId}",
-                    canonicalRole, payload.PropertyId, payload.DealId);
+                _logger.LogWarning("GenerateBrochure: blocked — trial restriction for Role={Role} DealId={DealId}",
+                    canonicalRole, payload.DealId);
                 return Forbid(new
                 {
                     message = "Brochure compilation is restricted during the trial period.",
@@ -867,7 +867,7 @@ namespace Property.Microservice.Controllers
                 payload.DealId.ToString(),
                 System.Text.Json.JsonSerializer.Serialize(payload));
 
-            _logger.LogInformation("GenerateBrochure: queued — PropertyId={PropertyId} DealId={DealId}", payload.PropertyId, payload.DealId);
+            _logger.LogInformation("GenerateBrochure: queued — DealId={DealId} Units={Units}", payload.DealId, payload.SubUnits.Count);
             return Accepted(new { message = "Brochure generation request queued." });
         }
 

@@ -40,5 +40,7 @@ namespace CRM.Microservice.Models
         public decimal CommissionValue { get; set; } = 0m;
         [Column(TypeName = "decimal(18,2)")]
         public decimal? RealisedCommission { get; set; } = null;
+
+        public ICollection<DealBrokerSplit> BrokerSplits { get; set; } = new List<DealBrokerSplit>();
     }
 }

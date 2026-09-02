@@ -16,11 +16,12 @@ namespace CRM.Microservice.Models
 
         [MaxLength(50)] public string UnitNumber { get; set; } = string.Empty;
         [MaxLength(256)] public string UnitDescription { get; set; } = string.Empty;
+        [MaxLength(512)] public string PropertyDescription { get; set; } = string.Empty;
 
         [Column(TypeName = "decimal(10,2)")]
         public decimal NetRentableAreaSqM { get; set; }
 
-        public string ImageRef { get; set; } = string.Empty;
+        public string SelectedImageRefs { get; set; } = string.Empty;
         public bool IsDeleted { get; set; } = false;
 
         [ForeignKey("CardId")]

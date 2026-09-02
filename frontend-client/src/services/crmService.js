@@ -428,5 +428,20 @@ export const crmService = {
   removeBrochureCardLine: async (cardId, lineId) => {
     const response = await apiClient.delete(`/crm/brochure-cards/${cardId}/lines/${lineId}`);
     return response.data;
+  },
+
+  getDealBrokerSplits: async (dealId) => {
+    const response = await apiClient.get(`/crm/deals/${dealId}/broker-splits`);
+    return response.data;
+  },
+
+  upsertDealBrokerSplits: async (dealId, splits) => {
+    const response = await apiClient.put(`/crm/deals/${dealId}/broker-splits`, { dealId, splits });
+    return response.data;
+  },
+
+  linkContactToDeal: async (contactId, dealId) => {
+    const response = await apiClient.post(`/crm/contacts/${contactId}/link-deal/${dealId}`);
+    return response.data;
   }
 };

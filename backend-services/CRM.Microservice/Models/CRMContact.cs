@@ -25,6 +25,8 @@ namespace CRM.Microservice.Models
         public string? AssociatedCompanyId { get; set; }
         public string? AssociatedLegalEntityId { get; set; }
 
+        public string? LinkedDealIds { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         [ForeignKey("AssociatedCompanyId")]

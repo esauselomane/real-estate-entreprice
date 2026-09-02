@@ -18,9 +18,6 @@ namespace Developer.API.Controllers
         public int PropertyTypeId { get; set; }
         public decimal ValuationPrice { get; set; }
         public decimal? SalePrice { get; set; }
-        public decimal? BaseRentalRate { get; set; }
-        public decimal? RentEscalationPercentage { get; set; }
-        public int? LeaseTermMonths { get; set; }
         public decimal TenantInstallationAllowance { get; set; }
         public decimal Latitude { get; set; }
         public decimal Longitude { get; set; }

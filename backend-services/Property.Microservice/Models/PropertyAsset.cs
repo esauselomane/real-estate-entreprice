@@ -60,6 +60,9 @@ namespace Property.Microservice.Models
         [Required]
         public string LinkedOwnerId { get; set; } = string.Empty;
 
+        [Required]
+        public string PropertyDescription { get; set; } = string.Empty;
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         // --- 🔗 RELATIONAL STRUCTURAL ANCHOR NAVIGATION PROPERTIES ---

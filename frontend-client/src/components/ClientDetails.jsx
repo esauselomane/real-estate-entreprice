@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowLeft, User, Phone, Mail, DollarSign, MapPin, Pencil, Save, Loader2, AlertCircle } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 

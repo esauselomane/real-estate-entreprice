@@ -39,9 +39,6 @@ BEGIN
         [PropertyTypeId] INT NOT NULL,
         [ValuationPrice] DECIMAL(18,2) NOT NULL,
         [SalePrice] DECIMAL(18,2) NULL,                      -- Populated if MarketClass == 'Sale'
-        [BaseRentalRate] DECIMAL(18,2) NULL,                  -- Populated if MarketClass == 'Rental'
-        [RentEscalationPercentage] DECIMAL(5,2) NULL,         -- Compound annual percentage rate
-        [LeaseTermMonths] INT NULL,                           -- Term duration allocation
         [TenantInstallationAllowance] DECIMAL(18,2) NOT NULL DEFAULT 0.00, -- Numerical incentive value
         [Latitude] DECIMAL(9,6) NOT NULL,
         [Longitude] DECIMAL(9,6) NOT NULL,
@@ -64,6 +61,9 @@ BEGIN
         [UnitNumber] NVARCHAR(20) NOT NULL,
         [UnitDescription] NVARCHAR(100) NOT NULL,
         [NetRentableAreaSqM] DECIMAL(10,2) NOT NULL,
+        [RentalRate] DECIMAL(18,2) NULL,                     -- Monthly rental rate for this unit
+        [RentEscalationPercentage] DECIMAL(5,2) NULL,        -- Annual lease compound markup e.g. 7.50%
+        [LeaseTermMonths] INT NULL,                           -- Expected contract commitment length
         [SpecificUnitRentalPrice] DECIMAL(18,2) NULL,
         [SpecificUnitSalePrice] DECIMAL(18,2) NULL,
         [UnitImagesJson] NVARCHAR(MAX) NOT NULL DEFAULT '[]',
@@ -131,24 +131,23 @@ SET IDENTITY_INSERT [PropertyAssets] ON;
 INSERT INTO [PropertyAssets] (
     [PropertyId], [TenantId], [CompleteAddress], [ErfSpatialSize], 
     [TitleDeedType], [PortfolioZoning], [MarketClass], [PropertyTypeId], 
-    [ValuationPrice], [SalePrice], [BaseRentalRate], [RentEscalationPercentage], 
-    [LeaseTermMonths], [TenantInstallationAllowance], [Latitude], [Longitude], 
+    [ValuationPrice], [SalePrice], [TenantInstallationAllowance], [Latitude], [Longitude], 
     [VerificationDocumentsJson], [LinkedOwnerId], [CreatedAt]
 ) VALUES
 (1, 'TEN-001', '42 Beach Road, Green Point, Cape Town, 8005, South Africa', '1,450 m²', 
- 'Freehold', 'Commercial Sector 2', 'Rental', 3, 
- 45000000.00, NULL, 185000.00, 8.25, 60, 450000.00, -33.905200, 18.402400, 
- '["deed_corp_beach42.pdf", "compliance_fire_2026.pdf"]', 'O-8801', GETUTCDATE()),
+  'Freehold', 'Commercial Sector 2', 'Rental', 3, 
+  45000000.00, NULL, 450000.00, -33.905200, 18.402400, 
+  '["deed_corp_beach42.pdf", "compliance_fire_2026.pdf"]', 'O-8801', GETUTCDATE()),
 
 (2, 'TEN-001', 'Building B, 156 Rivonia Road, Sandton, Johannesburg, 2196, South Africa', '4,200 m²', 
- 'Freehold', 'Industrial Heavy G1', 'Rental', 1, 
- 92000000.00, NULL, 340000.00, 7.50, 36, 1200000.00, -26.101500, 28.056700, 
- '["zoning_permit_heavy.pdf"]', 'O-4402', GETUTCDATE()),
+  'Freehold', 'Industrial Heavy G1', 'Rental', 1, 
+  92000000.00, NULL, 1200000.00, -26.101500, 28.056700, 
+  '["zoning_permit_heavy.pdf"]', 'O-4402', GETUTCDATE()),
 
 (3, 'TEN-001', 'Penthouse 902, 12 Ocean View Drive, Umhlanga, Durban, 4319, South Africa', '380 m²', 
- 'Sectional Title', 'Residential Premium', 'Sale', 4, 
- 14500000.00, 13950000.00, NULL, NULL, NULL, 0.00, -29.725400, 31.087200, 
- '["sectional_plan_u902.pdf"]', 'O-1109', GETUTCDATE());
+  'Sectional Title', 'Residential Premium', 'Sale', 4, 
+  14500000.00, 13950000.00, 0.00, -29.725400, 31.087200, 
+  '["sectional_plan_u902.pdf"]', 'O-1109', GETUTCDATE());
 SET IDENTITY_INSERT [PropertyAssets] OFF;
 GO
 -- ============================================================================
@@ -158,25 +157,26 @@ GO
 SET IDENTITY_INSERT [PropertyUnits] ON;
 INSERT INTO [PropertyUnits] (
     [PropertyUnitId], [PropertyId], [UnitNumber], [UnitDescription], 
-    [NetRentableAreaSqM], [SpecificUnitRentalPrice], [SpecificUnitSalePrice], 
+    [NetRentableAreaSqM], [RentalRate], [RentEscalationPercentage], [LeaseTermMonths],
+    [SpecificUnitRentalPrice], [SpecificUnitSalePrice], 
     [UnitImagesJson], [IsCurrentlyVacant], [CreatedAt]
 ) VALUES
 -- Multi-Tenant Pockets for Property 1 (Cape Town Commercial Office Tower)
 (1, 1, 'Suite 101-A', 'Ground floor prime corporate showroom space with premium glass curtain facade', 
- 450.00, 65000.00, NULL, '["primary_facade_hero.jpg", "reception_entrance_lobby.jpg"]', 1, GETUTCDATE()),
+  450.00, 65000.00, 8.25, 60, 65000.00, NULL, '["primary_facade_hero.jpg", "reception_entrance_lobby.jpg"]', 1, GETUTCDATE()),
 
 (2, 1, 'Suite 202-B', 'First floor open-plan execution hub equipped with central HVAC and executive boardroom pockets', 
- 600.00, 85000.00, NULL, '["interior_boardroom_hub.jpg"]', 1, GETUTCDATE()),
+  600.00, 85000.00, 8.25, 60, 85000.00, NULL, '["interior_boardroom_hub.jpg"]', 1, GETUTCDATE()),
 
 (3, 1, 'Suite 303-C', 'Penthouse tier dynamic startup tech incubator workspace carrying exclusive mountain view balcony terraces', 
- 400.00, 35000.00, NULL, '["aerial_transit_siting.jpg"]', 1, GETUTCDATE()),
+  400.00, 35000.00, 8.25, 60, 35000.00, NULL, '["aerial_transit_siting.jpg"]', 1, GETUTCDATE()),
 
 -- Multi-Tenant Pockets for Property 2 (Sandton Heavy Logistics & Industrial Hub)
 (4, 2, 'Bay 1-Alpha', 'Double-volume fulfillment center warehouse floor featuring 9m internal eave heights and 3 automated dock levelers', 
- 2500.00, 210000.00, NULL, '["warehouse_clear_span.jpg", "dock_dispatch_bays.jpg"]', 1, GETUTCDATE()),
+  2500.00, 210000.00, 7.50, 36, 210000.00, NULL, '["warehouse_clear_span.jpg", "dock_dispatch_bays.jpg"]', 1, GETUTCDATE()),
 
 (5, 2, 'Bay 2-Bravo', 'Adjoining manufacturing bay configured with a high-load floor grid plate and 150-amp three-phase power supply taps', 
- 1700.00, 130000.00, NULL, '["warehouse_clear_span.jpg"]', 1, GETUTCDATE());
+  1700.00, 130000.00, 7.50, 36, 130000.00, NULL, '["warehouse_clear_span.jpg"]', 1, GETUTCDATE());
 SET IDENTITY_INSERT [PropertyUnits] OFF;
 GO
 
@@ -297,9 +297,26 @@ BEGIN
         [SellerClientId] NVARCHAR(50) NOT NULL,
         [TransactionValue] DECIMAL(18,2) NOT NULL,
         [DealNotes] NVARCHAR(MAX) NOT NULL DEFAULT '',
+        [LinkedDealIds] NVARCHAR(MAX) NOT NULL DEFAULT '',
         [LastStageUpdatedAt] DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
         [CreatedAt] DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
         CONSTRAINT [PK_DealRecords] PRIMARY KEY CLUSTERED ([DealId] ASC)
+    );
+END
+GO
+
+-- 6. Create Deal Broker Splits Junction Table
+IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[DealBrokerSplits]') AND type in (N'U'))
+BEGIN
+    CREATE TABLE [dbo].[DealBrokerSplits] (
+        [DealBrokerSplitId] INT IDENTITY(1,1) NOT NULL,
+        [DealId] INT NOT NULL,
+        [BrokerUserId] NVARCHAR(50) NOT NULL,
+        [SplitPercentage] DECIMAL(5,2) NOT NULL,
+        [CreatedAt] DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+        CONSTRAINT [PK_DealBrokerSplits] PRIMARY KEY CLUSTERED ([DealBrokerSplitId] ASC),
+        CONSTRAINT [FK_DealBrokerSplits_DealRecords] FOREIGN KEY ([DealId]) 
+            REFERENCES [dbo].[DealRecords] ([DealId]) ON DELETE CASCADE
     );
 END
 GO
@@ -362,12 +379,19 @@ GO
 -- E. Seed Live CRM Sales Workflow Deal Trackers (Presentation Phase Hooks)
 INSERT INTO [DealRecords] (
     [TenantId], [AllocatedToAgent], [DealStage], [LinkedPropertyId], 
-    [BuyerClientId], [SellerClientId], [TransactionValue], [DealNotes], 
+    [BuyerClientId], [SellerClientId], [TransactionValue], [DealNotes], [LinkedDealIds],
     [LastStageUpdatedAt], [CreatedAt]
 ) VALUES
 ('TEN-001', 'Sarah Jenkins', 'Presentation', 2, 
- 'CON-CUST01', 'CON-BROK01', 92000000.00, '[Presentation Cycle Active]: Client expressing intent on renting Sandton Heavy Industrial Bay 1-Alpha for a 36-month timeline. Brochure payload compiler initialized.', 
+ 'CON-CUST01', 'CON-BROK01', 92000000.00, '[Presentation Cycle Active]: Client expressing intent on renting Sandton Heavy Industrial Bay 1-Alpha for a 36-month timeline. Brochure payload compiler initialized.', '', 
  GETUTCDATE(), GETUTCDATE());
+GO
+
+-- F. Seed Deal Broker Splits
+INSERT INTO [DealBrokerSplits] (
+    [DealId], [BrokerUserId], [SplitPercentage], [CreatedAt]
+) VALUES
+(1, 'CON-BROK01', 100.00, GETUTCDATE());
 GO
 
 -- Display summary log of seeded values
@@ -375,4 +399,5 @@ SELECT 'Companies Seeded' = COUNT(*) FROM [CRMCompanies];
 SELECT 'Legal Entities Mapped' = COUNT(*) FROM [CRMLegalEntities];
 SELECT 'Human Contacts Registered' = COUNT(*) FROM [CRMContacts];
 SELECT 'Active Live Deals Seeding Profile' = COUNT(*) FROM [DealRecords] WHERE [DealStage] = 'Presentation';
+SELECT 'Broker Splits Mapped' = COUNT(*) FROM [DealBrokerSplits];
 GO

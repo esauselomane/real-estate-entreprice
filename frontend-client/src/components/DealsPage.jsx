@@ -36,9 +36,12 @@ export default function DealsPage() {
   const [nextStage, setNextStage] = useState('');
   const [notes, setNotes] = useState('');
   const [editForm, setEditForm] = useState({ buyerClientId: '', sellerClientId: '', dealStage: 'DiscoveryNeedsAnalysis', transactionValue: '', commissionType: 'Percent', commissionValue: '', realisedCommission: '', linkedPropertyId: '', dealNotes: '', allocatedToAgent: '' });
+  const [brokerSplits, setBrokerSplits] = useState([]);
+  const [isLoadingSplits, setIsLoadingSplits] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   const canManageDeals = currentUserRole === 'PlatformAdmin' || currentUserRole === 'AgencyAdmin';
+  const canEditCommission = currentUserRole === 'PlatformAdmin' || currentUserRole === 'AgencyAdmin';
 
   const loadData = async () => {
     setIsLoading(true);
@@ -65,6 +68,12 @@ export default function DealsPage() {
   };
 
   useEffect(() => { loadData(); }, []);
+
+  useEffect(() => {
+    if (editingDeal) {
+      loadBrokerSplits(editingDeal.dealId);
+    }
+  }, [editingDeal]);
 
   const activeCardDealIds = new Set(activeCards.map((c) => c.dealId));
 
@@ -94,6 +103,30 @@ export default function DealsPage() {
       await loadData();
     } catch (err) {
       alert(err || 'Failed to update deal.');
+    }
+  };
+
+  const loadBrokerSplits = async (dealId) => {
+    setIsLoadingSplits(true);
+    try {
+      const splits = await crmService.getDealBrokerSplits(dealId);
+      setBrokerSplits(splits || []);
+    } catch {
+      setBrokerSplits([]);
+    } finally {
+      setIsLoadingSplits(false);
+    }
+  };
+
+  const handleUpsertBrokerSplits = async (e) => {
+    e.preventDefault();
+    if (!editingDeal) return;
+    try {
+      await crmService.upsertDealBrokerSplits(editingDeal.dealId, brokerSplits);
+      alert('Commission split updated.');
+      await loadBrokerSplits(editingDeal.dealId);
+    } catch (err) {
+      alert(err || 'Failed to update commission split.');
     }
   };
 
@@ -222,8 +255,13 @@ export default function DealsPage() {
                   <p className="text-xs text-slate-400 font-medium">Buyer: <span className="text-blue-400 font-semibold">{contacts.find((c) => c.contactId === deal.buyerClientId)?.fullName || deal.buyerClientId}</span> • Seller: <span className="text-purple-400 font-semibold">{contacts.find((c) => c.contactId === deal.sellerClientId)?.fullName || deal.sellerClientId}</span></p>
                   {deal.commissionValue > 0 && (
                     <p className="text-[10px] text-slate-500 mt-1">
-                      Commission: {deal.commissionType === 'Percent' ? `${deal.commissionValue}%` : `R ${deal.commissionValue.toLocaleString()}`}
+                      💰 Commission: {deal.commissionType === 'Percent' ? `${deal.commissionValue}%` : `R ${deal.commissionValue.toLocaleString()}`}
                        {getDealStageValue(deal) === 'ClosedWon' && deal.realisedCommission != null && ` → realised R ${Number(deal.realisedCommission).toLocaleString()}`}
+                    </p>
+                  )}
+                  {deal.brokerSplits && deal.brokerSplits.length > 0 && (
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      🤝 Split: {deal.brokerSplits.map(s => `${s.brokerName} (${s.splitPercentage}%)`).join(', ')}
                     </p>
                   )}
                 </div>
@@ -284,6 +322,44 @@ export default function DealsPage() {
                     <option value="">Unassigned Pool</option>
                     {brokers.map((b) => <option key={b.brokerId || b.emailAddress} value={b.fullName || b.emailAddress}>{b.fullName} ({b.emailAddress})</option>)}
                   </select>
+                </div>
+
+                {/* 🤝 CO-BROKERAGE COMMISSION SPLIT (AgencyAdmin only) */}
+                <div className="md:col-span-2 p-3 bg-slate-950/40 border border-slate-800 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold">Commission Split</span>
+                    {!canEditCommission && <span className="text-[10px] text-slate-500">Read-only</span>}
+                  </div>
+                  {isLoadingSplits ? (
+                    <p className="text-xs text-slate-500">Loading splits...</p>
+                  ) : brokerSplits.length > 0 ? (
+                    <div className="space-y-1">
+                      {brokerSplits.map((split) => (
+                        <div key={split.splitId} className="flex items-center justify-between text-xs bg-slate-900/60 p-2 rounded-lg">
+                          <span className="text-slate-300">{split.brokerName}</span>
+                          <span className="text-slate-400 font-mono">{split.splitPercentage}% — R {split.splitAmount.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">No broker splits configured. Commission goes to the primary allocated agent.</p>
+                  )}
+                  {canEditCommission && (
+                    <div className="flex gap-2 pt-1">
+                      <button type="button" onClick={async () => {
+                        const evenPct = 100 / (brokers.length || 1);
+                        const commissionVal = parseFloat(editForm.commissionValue) || 0;
+                        const newSplits = brokers.map(b => ({
+                          brokerId: b.brokerId,
+                          brokerName: b.fullName,
+                          splitPercentage: Math.Round(evenPct, 2),
+                          splitAmount: Math.Round(commissionVal * evenPct / 100, 2)
+                        }));
+                        setBrokerSplits(newSplits);
+                      }} className="text-[10px] font-bold text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg">Auto-Split Evenly</button>
+                      <button type="button" onClick={handleUpsertBrokerSplits} className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 border border-emerald-900 px-2 py-1 rounded-lg">Save Splits</button>
+                    </div>
+                  )}
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-[10px] text-slate-400 uppercase">Stage</label>

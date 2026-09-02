@@ -17,7 +17,7 @@ export const authService = {
       const message = error.response?.data?.message 
         || error.message 
         || 'Authentication framework link failed.';
-      throw new Error(message);
+      throw new Error(message, { cause: error });
     }
   },
 

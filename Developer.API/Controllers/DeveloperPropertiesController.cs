@@ -30,6 +30,7 @@ namespace Developer.API.Controllers
             _logger.LogInformation("GetProperties: AgencyId={AgencyId}", agencyId);
             var properties = await _propertyDb.PropertyAssets
                 .AsNoTracking()
+                .Include(p => p.SubUnits)
                 .Where(p => p.TenantId == agencyId)
                 .OrderByDescending(p => p.CreatedAt)
                 .Select(p => new DeveloperPropertyDto
@@ -46,9 +47,6 @@ namespace Developer.API.Controllers
                     PropertyTypeId = p.PropertyTypeId,
                     ValuationPrice = p.ValuationPrice,
                     SalePrice = p.SalePrice,
-                    BaseRentalRate = p.BaseRentalRate,
-                    RentEscalationPercentage = p.RentEscalationPercentage,
-                    LeaseTermMonths = p.LeaseTermMonths,
                     TenantInstallationAllowance = p.TenantInstallationAllowance,
                     Latitude = p.Latitude,
                     Longitude = p.Longitude,
@@ -78,6 +76,7 @@ namespace Developer.API.Controllers
             _logger.LogInformation("GetProperty: PropertyId={PropertyId} AgencyId={AgencyId}", id, agencyId);
             var property = await _propertyDb.PropertyAssets
                 .AsNoTracking()
+                .Include(p => p.SubUnits)
                 .FirstOrDefaultAsync(p => p.PropertyId == id && p.TenantId == agencyId);
 
             if (property == null)
@@ -97,9 +96,6 @@ namespace Developer.API.Controllers
                 PropertyTypeId = property.PropertyTypeId,
                 ValuationPrice = property.ValuationPrice,
                 SalePrice = property.SalePrice,
-                BaseRentalRate = property.BaseRentalRate,
-                RentEscalationPercentage = property.RentEscalationPercentage,
-                LeaseTermMonths = property.LeaseTermMonths,
                 TenantInstallationAllowance = property.TenantInstallationAllowance,
                 Latitude = property.Latitude,
                 Longitude = property.Longitude,

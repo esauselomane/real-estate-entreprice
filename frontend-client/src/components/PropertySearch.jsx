@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, MapPin, X, SlidersHorizontal, Building2, Loader2, Pencil } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { MapPin, X, SlidersHorizontal, Building2, Loader2, Pencil } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 
 export default function PropertySearch({ onSelectProperty }) {

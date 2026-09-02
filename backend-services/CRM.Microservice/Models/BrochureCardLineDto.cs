@@ -11,7 +11,8 @@ namespace CRM.Microservice.Models
         public int UnitId { get; set; }
         public string UnitNumber { get; set; } = string.Empty;
         public string UnitDescription { get; set; } = string.Empty;
+        public string PropertyDescription { get; set; } = string.Empty;
         public decimal NetRentableAreaSqM { get; set; }
-        public string ImageRef { get; set; } = string.Empty;
+        public List<string> SelectedImageRefs { get; set; } = new();
     }
 }

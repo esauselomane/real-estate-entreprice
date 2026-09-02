@@ -15,6 +15,22 @@ using System.Threading.Tasks;
 
 namespace BrochureGeneration.Worker
 {
+    internal record BrochureSubUnit
+    {
+        public int PropertyId { get; set; }
+        public string PropertyDescription { get; set; } = string.Empty;
+        public decimal Latitude { get; set; }
+        public decimal Longitude { get; set; }
+        public string UnitNumber { get; set; } = string.Empty;
+        public string UnitDescription { get; set; } = string.Empty;
+        public decimal NetRentableAreaSqM { get; set; }
+        public decimal? RentalRate { get; set; }
+        public decimal? RentEscalationPercentage { get; set; }
+        public int? LeaseTermMonths { get; set; }
+        public decimal? SalePrice { get; set; }
+        public List<string> SelectedImageRefs { get; set; } = new();
+    }
+
     public class BrochureKafkaConsumerWorker : BackgroundService
     {
         private readonly ILogger<BrochureKafkaConsumerWorker> _logger;
@@ -37,6 +53,53 @@ namespace BrochureGeneration.Worker
             };
             QuestPDF.Settings.License = LicenseType.Community;
         }
+
+        private static async Task<byte[]?> DownloadImageBytesAsync(string url, int maxRetries = 3)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            for (var attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    using var response = await _http.GetAsync(url);
+                    if (!response.IsSuccessStatusCode) return null;
+                    return await response.Content.ReadAsByteArrayAsync();
+                }
+                catch
+                {
+                    if (attempt == maxRetries) return null;
+                    await Task.Delay(500);
+                }
+            }
+            return null;
+        }
+
+        private static async Task<byte[]?> DownloadMapTileAsync(decimal lat, decimal lon, int maxRetries = 4)
+        {
+            var mapUrl = BuildStaticMapUrl(lat, lon);
+            for (var attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                var bytes = await DownloadImageBytesAsync(mapUrl);
+                if (bytes != null && bytes.Length > 1024) return bytes;
+                await Task.Delay(600);
+            }
+            return null;
+        }
+
+        private static string BuildStaticMapUrl(decimal lat, decimal lon, int width = 600, int height = 400, int zoom = 14)
+        {
+            return $"https://static-maps.yandex.ru/1.x/?ll={lon},{lat}&z={zoom}&l=map&size={width},{height}";
+        }
+
+        private static readonly TextStyle _titleStyle = TextStyle.Default.FontSize(24).FontColor("#0F172A").SemiBold();
+        private static readonly TextStyle _metaStyle = TextStyle.Default.FontSize(10).FontColor("#94A3B8");
+        private static readonly TextStyle _subTitleStyle = TextStyle.Default.FontSize(16).FontColor("#0F172A").Bold();
+        private static readonly TextStyle _headerStyle = TextStyle.Default.FontSize(14).FontColor("#0F172A").Bold();
+        private static readonly TextStyle _bodyStyle = TextStyle.Default.FontSize(11).FontColor("#334155");
+        private static readonly TextStyle _sectionHeaderStyle = TextStyle.Default.FontSize(12).FontColor("#0F172A").Bold();
+        private static readonly TextStyle _alertHeaderStyle = TextStyle.Default.FontSize(12).FontColor("#1E40AF").Bold();
+        private static readonly TextStyle _alertPriceStyle = TextStyle.Default.FontSize(14).FontColor("#1E40AF").Bold();
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             using var consumer = new ConsumerBuilder<string, string>(_consumerConfig).Build();
@@ -80,20 +143,47 @@ namespace BrochureGeneration.Worker
                 string brokerName = root.GetProperty("BrokerName").GetString() ?? "Unassigned broker";
                 string brokerEmail = root.GetProperty("BrokerEmail").GetString() ?? "s.jenkins@apexluxury.co.za";
                 string brokerPhone = root.GetProperty("BrokerPhone").GetString() ?? "+27118845000";
-                string companyRef = root.GetProperty("CompanyReferenceNumber").GetString() ?? "PROP-REF-991";
-                string marketClass = root.GetProperty("MarketClass").GetString() ?? "Rental"; 
+                string companyName = root.GetProperty("CompanyName").GetString() ?? "Agency";
+                string companyLogoUrl = root.GetProperty("CompanyLogoUrl").GetString() ?? string.Empty;
+                string clientName = root.GetProperty("ClientName").GetString() ?? "Valued Client";
+                string clientEmail = root.GetProperty("ClientEmail").GetString() ?? string.Empty;
+                string clientPhone = root.GetProperty("ClientPhone").GetString() ?? string.Empty;
+                string marketClass = root.GetProperty("MarketClass").GetString() ?? "Rental";
                 decimal tenantAllowance = root.GetProperty("TenantInstallationAllowance").GetDecimal();
-                string addressStr = root.GetProperty("CompleteAddress").GetString() ?? "Unknown Address Link";
-                decimal latCoord = root.GetProperty("Latitude").GetDecimal();
-                decimal lngCoord = root.GetProperty("Longitude").GetDecimal();
+                int brochureCardId = root.TryGetProperty("BrochureCardId", out var bcProp) ? bcProp.GetInt32() : 0;
 
-                var selectedImages = root.GetProperty("SelectedImages").EnumerateArray()
-                    .Select(img => img.GetString() ?? string.Empty)
-                    .Where(str => !string.IsNullOrEmpty(str))
-                    .Take(5)
+                var subUnits = root.GetProperty("SubUnits").EnumerateArray()
+                    .Select(u => new BrochureSubUnit
+                    {
+                        PropertyId = u.GetProperty("PropertyId").GetInt32(),
+                        PropertyDescription = u.GetProperty("PropertyDescription").GetString() ?? string.Empty,
+                        Latitude = u.TryGetProperty("Latitude", out var latEl) && latEl.ValueKind != JsonValueKind.Null ? latEl.GetDecimal() : 0,
+                        Longitude = u.TryGetProperty("Longitude", out var lonEl) && lonEl.ValueKind != JsonValueKind.Null ? lonEl.GetDecimal() : 0,
+                        UnitNumber = u.GetProperty("UnitNumber").GetString() ?? "Suite",
+                        UnitDescription = u.GetProperty("UnitDescription").GetString() ?? string.Empty,
+                        NetRentableAreaSqM = u.GetProperty("NetRentableAreaSqM").GetDecimal(),
+                        RentalRate = u.TryGetProperty("RentalRate", out var rEl) && rEl.ValueKind != JsonValueKind.Null ? rEl.GetDecimal() : (decimal?)null,
+                        RentEscalationPercentage = u.TryGetProperty("RentEscalationPercentage", out var eEl) && eEl.ValueKind != JsonValueKind.Null ? eEl.GetDecimal() : (decimal?)null,
+                        LeaseTermMonths = u.TryGetProperty("LeaseTermMonths", out var tEl) && tEl.ValueKind != JsonValueKind.Null ? tEl.GetInt32() : (int?)null,
+                        SalePrice = u.TryGetProperty("SalePrice", out var sEl) && sEl.ValueKind != JsonValueKind.Null ? sEl.GetDecimal() : (decimal?)null,
+                        SelectedImageRefs = u.TryGetProperty("SelectedImageRefs", out var iEl) && iEl.ValueKind == JsonValueKind.Array
+                            ? iEl.EnumerateArray().Select(img => img.GetString() ?? string.Empty).Where(str => !string.IsNullOrEmpty(str)).Take(5).ToList()
+                            : new List<string>()
+                     })
+                     .ToList();
+
+                var groupedByProperty = subUnits
+                    .GroupBy(u => u.PropertyId)
                     .ToList();
 
-                var subUnits = root.GetProperty("SubUnits").EnumerateArray().ToList();
+                var logoBytes = !string.IsNullOrEmpty(companyLogoUrl) ? await DownloadImageBytesAsync(companyLogoUrl) : null;
+                var mapImagesByProperty = new Dictionary<int, byte[]>();
+                foreach (var group in groupedByProperty)
+                {
+                    var sample = group.First();
+                    var mapBytes = await DownloadMapTileAsync(sample.Latitude, sample.Longitude);
+                    if (mapBytes != null) mapImagesByProperty[group.Key] = mapBytes;
+                }
 
                 // 2. ORCHESTRATE ASYNC MULTI-PAGE QUESTPDF COMPILER DESK
                 var compiledDocumentBytes = Document.Create(container =>
@@ -103,134 +193,162 @@ namespace BrochureGeneration.Worker
                     {
                         page.Size(PageSizes.A4);
                         page.Margin(2, Unit.Centimetre);
-                        page.Background("#0F172A"); 
+                        page.PageColor("#0F172A");
 
                         page.Content().Column(col =>
                         {
                             col.Spacing(20);
                             col.Item().Text("REAL ESTATE PORTFOLIO PROPOSAL").Style(_titleStyle);
-                            col.Item().Text($"Ecosystem System Broker Index: {companyRef}").Style(_metaStyle);
 
-                            col.Item().PaddingTop(100).BorderTop(1).BorderColor("#334155").Column(bCol =>
+                            // Company logo with fallback placeholder
+                            col.Item().Column(logoCol =>
+                            {
+                                logoCol.Spacing(12);
+                                if (logoBytes != null)
+                                {
+                                    logoCol.Item().Height(60).Width(60).Image(logoBytes);
+                                }
+                                else
+                                {
+                                    logoCol.Item().Height(60).Width(60).Background("#1E293B").Border(1).BorderColor("#334155").AlignCenter().Column(inner =>
+                                    {
+                                        inner.Item().AlignCenter().Text(companyName.Split(' ').Select(w => w[0]).Take(3).Aggregate("", (a, b) => a + b)).Style(_headerStyle);
+                                    });
+                                }
+                                logoCol.Item().Text(companyName).Style(_subTitleStyle);
+                            });
+
+                            col.Item().PaddingTop(60).BorderTop(1).BorderColor("#334155").Column(bCol =>
                             {
                                 bCol.Spacing(6);
-                                bCol.Item().Text("PREPARED BY REGISTERED OPERATIONAL HANDLER:").Style(_metaStyle);
+                                bCol.Item().Text("PREPARED BY:").Style(_metaStyle);
                                 bCol.Item().Text(brokerName).Style(_subTitleStyle);
-                                bCol.Item().Text($"Direct Email Line: {brokerEmail}").Style(_metaStyle);
-                                bCol.Item().Text($"Direct Contact Str: {brokerPhone}").Style(_metaStyle);
+                                bCol.Item().Text(brokerEmail).Style(_metaStyle);
+                                bCol.Item().Text(brokerPhone).Style(_metaStyle);
+                            });
+
+                            col.Item().PaddingTop(40).BorderTop(1).BorderColor("#334155").Column(bCol =>
+                            {
+                                bCol.Spacing(6);
+                                bCol.Item().Text("PREPARED FOR:").Style(_metaStyle);
+                                bCol.Item().Text(clientName).Style(_subTitleStyle);
+                                if (!string.IsNullOrEmpty(clientEmail)) bCol.Item().Text(clientEmail).Style(_metaStyle);
+                                if (!string.IsNullOrEmpty(clientPhone)) bCol.Item().Text(clientPhone).Style(_metaStyle);
                             });
                         });
                     });
 
-                    // --- PAGE 2: TRANSIT GRID GEOSPATIAL MAP RECEPTACLE SHEET ---
+                    // --- PAGE 2: LOCATION & MAPPING ---
                     container.Page(page =>
                     {
                         page.Size(PageSizes.A4);
                         page.Margin(1.5f, Unit.Centimetre);
-                        page.Background("#F8FAFC");
+                        page.PageColor("#F8FAFC");
 
-                        page.Header().PaddingBottom(10).Text("GEOSPATIAL SITUATIONAL SITING MAP").Style(_headerStyle);
-                        
-                        page.Content().Column(col =>
-                        {
-                            col.Spacing(15);
-                            col.Item().Text($"Master Asset Location Target: {addressStr}").Style(_bodyStyle);
-                            
-                            col.Item().Height(300).Background("#CBD5E1").Border(1).BorderColor("#94A3B8").Column(mapCol =>
-                            {
-                                // Fix: Alignment modifiers placed securely directly on the structural grid items
-                                mapCol.Item().Padding(10).AlignCenter().Text("[Interactive Multi-Pin Placement Render Engine Canvas Area]").Style(_sectionHeaderStyle);
-                                mapCol.Item().PaddingTop(100).AlignCenter().Text($"📌 Active Pin Plot Point Array Context Path: Lat {latCoord} / Lng {lngCoord}").Style(_headerStyle);
-                            });
-                            col.Item().Text("* Brochures grouped with multiple selection entries will render localized markers across this placement box area.").Style(_metaStyle);
-                        });
-                    });
-                    // --- PAGE 3: MASTER ASSET FINANCIAL CONDITIONS INCENTIVES ---
-                    container.Page(page =>
-                    {
-                        page.Size(PageSizes.A4);
-                        page.Margin(1.5f, Unit.Centimetre);
-                        page.Background("#FFFFFF");
-
-                        page.Header().PaddingBottom(10).Text("FINANCIAL MATRIX & STRUCTURAL SPECIFICATIONS").Style(_headerStyle);
+                        page.Header().PaddingBottom(10).Text("LOCATION & MAPPING").Style(_headerStyle);
 
                         page.Content().Column(col =>
                         {
                             col.Spacing(15);
-                            col.Item().Text($"Asset Classification Context: FOR {marketClass.ToUpper()}").Style(_subTitleStyle);
+                            col.Item().Text("Properties included in this proposal:").Style(_bodyStyle);
 
-                            // Renders New Numerical Tenant Installation Fit-Out Incentive Box
-                            col.Item().Background("#EFF6FF").Border(1).BorderColor("#BFDBFE").Padding(12).Column(tiCol =>
+                            foreach (var group in groupedByProperty)
                             {
-                                tiCol.Item().Text("TENANT INSTALLATION (TI) ALLOWANCE INCENTIVE").Style(_alertHeaderStyle);
-                                tiCol.Item().Text($"R {tenantAllowance.ToString("N2")} Total Incentive Budget Allocation").Style(_alertPriceStyle);
-                            });
-
-                            // --- 🔀 CONDITIONAL LAYOUT FINANCIAL DATA FORKING PIPELINE ---
-                            if (marketClass.Equals("Rental", StringComparison.OrdinalIgnoreCase))
-                            {
-                                decimal rentRate = root.TryGetProperty("BaseRentalRate", out var rProp) ? rProp.GetDecimal() : 0;
-                                decimal escalation = root.TryGetProperty("RentEscalationPercentage", out var eProp) ? eProp.GetDecimal() : 0;
-                                int terms = root.TryGetProperty("LeaseTermMonths", out var tProp) ? tProp.GetInt32() : 12;
-
-                                col.Item().Text($"Baseline Monthly Rental: R {rentRate.ToString("N2")} /month").Style(_bodyStyle);
-                                col.Item().Text($"Annual Compound Escalation Rate: {escalation.ToString("F2")}% per Annum").Style(_bodyStyle);
-                                col.Item().Text($"Mandated Initial Lease Commitment Duration: {terms} Months").Style(_bodyStyle);
-                            }
-                            else 
-                            {
-                                decimal saleCost = root.TryGetProperty("SalePrice", out var sProp) ? sProp.GetDecimal() : 0;
-                                col.Item().Text($"Total Structural Acquisition Purchase Price: R {saleCost.ToString("N2")} (Excl VAT)").Style(_headerStyle);
-                            }
-
-                            // Output image choice thumbnails loop grid container inside the brochure canvas sheet
-                            if (selectedImages.Any())
-                            {
-                                col.Item().PaddingTop(20).Text("AGENCY REGISTERED IMAGE ATTACHMENTS (MAX 5)").Style(_sectionHeaderStyle);
-                                col.Item().Grid(grid =>
+                                var sampleUnit = group.First();
+                                col.Item().Padding(10).Background("#EFF6FF").Border(1).BorderColor("#BFDBFE").Column(propCol =>
                                 {
-                                    grid.Spacing(10);
-                                    grid.Columns(3);
-                                    foreach (var imgName in selectedImages)
+                                    propCol.Spacing(4);
+                                    propCol.Item().Text($"Property {group.Key}").Style(_sectionHeaderStyle);
+                                    if (!string.IsNullOrEmpty(sampleUnit.PropertyDescription))
                                     {
-                                        grid.Item().Height(80).Background("#E2E8F0").Border(1).BorderColor("#CBD5E1").Padding(5).AlignCenter().Text(imgName).Style(_bodyStyle);
+                                        propCol.Item().Text(sampleUnit.PropertyDescription).Style(_bodyStyle);
                                     }
+                                    propCol.Item().Text($"Coordinates: {sampleUnit.Latitude:F6}, {sampleUnit.Longitude:F6}").Style(_metaStyle);
                                 });
                             }
-                        });
-                    });
-                    // --- PAGE 4+: GRANULAR SUB-UNIT INDIVIDUAL BREAKDOWN MATRIX SHEETS ---
-                    foreach (var unit in subUnits)
-                    {
-                        container.Page(page =>
-                        {
-                            page.Size(PageSizes.A4);
-                            page.Margin(1.5f, Unit.Centimetre);
-                            page.Background("#F8FAFC");
 
-                            string uNumber = unit.GetProperty("UnitNumber").GetString() ?? "Suite";
-                            string uDesc = unit.GetProperty("UnitDescription").GetString() ?? "No Space Log Description Provided";
-                            decimal uArea = unit.GetProperty("NetRentableAreaSqM").GetDecimal();
-
-                            page.Header().PaddingBottom(10).Text($"SUB-UNIT OVERVIEW DISCLOSURE: {uNumber}").Style(_headerStyle);
-
-                            page.Content().Column(col =>
+                            col.Item().PaddingTop(20).Column(mapCol =>
                             {
-                                col.Spacing(12);
-                                col.Item().Text($"Net Rentable Area Space Dimension (NRA): {uArea.ToString("F2")} m²").Style(_bodyStyle);
-                                col.Item().PaddingTop(40).Text("Functional Configuration Specifications Description:").Style(_sectionHeaderStyle);
-                                col.Item().Text(uDesc).Style(_bodyStyle);
-
-                                col.Item().PaddingTop(40).Height(150).Background("#E2E8F0").Border(1).BorderColor("#CBD5E1").Padding(10)
-                                    .AlignCenter().Text($"[Sub-Unit Specific Architectural Image Frame for {uNumber}]").Style(_metaStyle);
+                                mapCol.Spacing(10);
+                                foreach (var group in groupedByProperty)
+                                {
+                                    var sampleUnit = group.First();
+                                    mapCol.Item().Text($"Property {group.Key} — Lat {sampleUnit.Latitude:F6}, Lon {sampleUnit.Longitude:F6}").Style(_sectionHeaderStyle);
+                                    if (mapImagesByProperty.TryGetValue(group.Key, out var mapBytes))
+                                    {
+                                        mapCol.Item().Height(220).Image(mapBytes);
+                                    }
+                                    else
+                                    {
+                                        mapCol.Item().Height(220).Background("#CBD5E1").Border(1).BorderColor("#94A3B8").AlignCenter().Text($"[Map tile for Property {group.Key} could not be loaded]").Style(_metaStyle);
+                                    }
+                                }
                             });
                         });
+                    });
+
+                    // --- PAGE 3+: UNIT-LEVEL BREAKDOWN BY PROPERTY ---
+                    foreach (var group in groupedByProperty)
+                    {
+                        var propertyUnits = group.ToList();
+                        var sampleUnit = propertyUnits.First();
+
+                        foreach (var unit in propertyUnits)
+                        {
+                            container.Page(page =>
+                            {
+                                page.Size(PageSizes.A4);
+                                page.Margin(1.5f, Unit.Centimetre);
+                                page.PageColor("#F8FAFC");
+
+                                page.Header().PaddingBottom(10).Text($"UNIT: {unit.UnitNumber}").Style(_headerStyle);
+
+                                page.Content().Column(col =>
+                                {
+                                    col.Spacing(12);
+                                    col.Item().Text($"Unit Description: {unit.UnitDescription}").Style(_bodyStyle);
+                                    col.Item().Text($"Net Rentable Area: {unit.NetRentableAreaSqM:F2} m²").Style(_bodyStyle);
+
+                                    if (marketClass.Equals("Rental", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        col.Item().PaddingTop(20).Text("RENTAL TERMS").Style(_sectionHeaderStyle);
+                                        col.Item().Text($"Monthly Rental Rate: R {unit.RentalRate?.ToString("N2") ?? "0.00"}").Style(_bodyStyle);
+                                        col.Item().Text($"Annual Escalation: {unit.RentEscalationPercentage?.ToString("F2") ?? "0.00"}%").Style(_bodyStyle);
+                                        col.Item().Text($"Lease Term: {unit.LeaseTermMonths?.ToString() ?? "12"} months").Style(_bodyStyle);
+                                    }
+                                    else
+                                    {
+                                        col.Item().PaddingTop(20).Text("SALE DETAILS").Style(_sectionHeaderStyle);
+                                        col.Item().Text($"Purchase Price: R {unit.SalePrice?.ToString("N2") ?? "0.00"} (Excl VAT)").Style(_headerStyle);
+                                        if (unit.SalePrice.HasValue)
+                                        {
+                                            var bondEstimate = unit.SalePrice.Value * 0.8m * 0.11m / 12;
+                                            col.Item().Text($"Estimated Bond Repayment (80% over 20 yrs): R {bondEstimate.ToString("N2")} /month").Style(_bodyStyle);
+                                        }
+                                    }
+
+                                    if (unit.SelectedImageRefs.Any())
+                                    {
+                                        col.Item().PaddingTop(20).Text("UNIT IMAGES").Style(_sectionHeaderStyle);
+                                        col.Item().Grid(grid =>
+                                        {
+                                            grid.Spacing(10);
+                                            grid.Columns(3);
+                                            foreach (var img in unit.SelectedImageRefs)
+                                            {
+                                                grid.Item().Height(70).Background("#E2E8F0").Border(1).BorderColor("#CBD5E1").Padding(5).AlignCenter().Text(img).Style(_bodyStyle);
+                                            }
+                                        });
+                                    }
+                                });
+                            });
+                        }
                     }
                 }).GeneratePdf();
 
                  // 3. PERSIST THE COMPILED BINARY STORAGE ARTIFACT RECORD ONTO DISK VOLUMES
                  // The server "brochure" drop folder is relative to the worker process root.
-                 string destinationDirectory = Path.Combine(AppContext.BaseDirectory, "brochure");
+                 string destinationDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "GeneratedBrochures"));
                  if (!Directory.Exists(destinationDirectory)) Directory.CreateDirectory(destinationDirectory);
 
                  string finalFilePath = Path.Combine(destinationDirectory, $"Brochure_Deal_{dealId}.pdf");
@@ -241,8 +359,7 @@ namespace BrochureGeneration.Worker
                  // 4. CALLBACK THE CRM to soft-delete the brochure card and advance the deal
                  //    to the next pipeline stage (Presentation -> ProposalQuoteSent). Best-effort:
                  //    a gateway failure must never roll back an already-produced document.
-                 int brochureCardId = root.TryGetProperty("BrochureCardId", out var bcProp) ? bcProp.GetInt32() : 0;
-                 if (brochureCardId > 0)
+                  if (brochureCardId > 0)
                  {
                      var callbackPayload = new
                      {
@@ -254,7 +371,7 @@ namespace BrochureGeneration.Worker
                      try
                      {
                          var httpContent = new StringContent(JsonSerializer.Serialize(callbackPayload), Encoding.UTF8, "application/json");
-                         var callbackUri = $"{GatewayUrl}/crm/brochure-cards/{brochureCardId}/generated";
+                          var callbackUri = $"{_gatewayUrl}/crm/brochure-cards/{brochureCardId}/generated";
                          var callbackResponse = await _http.PostAsync(callbackUri, httpContent);
                          _logger.LogInformation($"[CALLBACK OK]: CRM notified of brochure completion for card {brochureCardId}. HTTP {(int)callbackResponse.StatusCode}");
                      }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, PieChart, TrendingUp, CalendarRange, DollarSign } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 

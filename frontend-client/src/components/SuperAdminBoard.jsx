@@ -1,4 +1,3 @@
-import React from 'react';
 import SystemAdminWorkspace from './SystemAdminWorkspace.jsx';
 
 // Kept as a compatibility entry point; administration now always uses the

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ReceiptText, ClipboardCheck, MessageSquare, Gavel, Scale, Pencil, Plus, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ReceiptText, ClipboardCheck, MessageSquare, Gavel, Scale, Pencil, Loader2 } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 
 const modules = [

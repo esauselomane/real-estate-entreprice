@@ -245,12 +245,5 @@ export const propertyService = {
     }
   },
 
-  updateProperty: async (propertyId, payload) => {
-    try {
-      const response = await apiClient.put(`/properties/${propertyId}`, payload);
-      return response.data;
-    } catch (error) {
-      throw error.response?.data?.message || 'Failed to update property.';
-    }
-  }
+
 };

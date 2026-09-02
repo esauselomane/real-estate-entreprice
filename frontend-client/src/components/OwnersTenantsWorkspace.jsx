@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Users, Plus, UserCheck, Building2, Search, Pencil, X, Tag, MapPin } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Users, Plus, Search, Pencil, X, Tag, MapPin } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 
 const PROPERTY_TYPES = ['Residential', 'Commercial', 'Retail', 'Industrial'];
