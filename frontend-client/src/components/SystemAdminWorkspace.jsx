@@ -8,11 +8,13 @@ import { authService } from '../services/authService.js';
 import { leadCaptureService } from '../services/leadCaptureService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
+import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
 
 export default function SystemAdminWorkspace({ defaultTab }) {
   const { userRole: currentUserRole } = useAuth();
   const { hasPermission } = usePermission();
+  const { activeTenantId, activeAgency, isAllTenants } = useTenant();
   const isSuperAdmin = currentUserRole === 'PlatformAdmin';
   const [activeTab, setActiveTab] = useState(defaultTab || (isSuperAdmin ? 'agencies' : 'users'));
 
@@ -26,7 +28,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
   const [agencyForm, setAgencyForm] = useState({
     name: '', tradingName: '', registrationNumber: '', companyLogoUrl: '',
     contactEmail: '', headquartersAddress: '',
-    adminFullName: '', adminEmail: '', adminPassword: ''
+    adminFullName: '', adminEmail: '', adminPassword: '',
+    parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: ''
   });
   const [userForm, setUserForm] = useState({ fullName: '', email: '', password: '', systemRole: 'Broker' });
   const [editingUser, setEditingUser] = useState(null);
@@ -138,17 +141,19 @@ export default function SystemAdminWorkspace({ defaultTab }) {
   const handleAgencySubmit = async (e) => {
     e.preventDefault();
     try {
-      if (editingAgency) await crmService.updateAgency(editingAgency.agencyId, { ...editingAgency, ...agencyForm });
-      else {
-        await crmService.createAgency(agencyForm);
+      if (editingAgency) {
+        await crmService.updateAgency(editingAgency.agencyId, { ...editingAgency, ...agencyForm });
+      } else {
+        const created = await crmService.createAgency(agencyForm);
         // 🚀 On agency creation, automatically provision an AgencyAdmin user bound to the
         // same tenant, so the new agency has an accountable administrator login.
-        if (!editingAgency && agencyForm.adminEmail) {
+        if (agencyForm.adminEmail) {
           try {
             await authService.registerUser({
               fullName: agencyForm.adminFullName || agencyForm.contactEmail,
               email: agencyForm.adminEmail,
               systemRole: 'AgencyAdmin',
+              tenantId: created?.tenantId || created?.TenantId,
               passwordHash: agencyForm.adminPassword || 'ChangeMeNow!'
             });
           } catch {
@@ -156,7 +161,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
           }
         }
       }
-      setAgencyForm({ name: '', tradingName: '', registrationNumber: '', companyLogoUrl: '', contactEmail: '', headquartersAddress: '', adminFullName: '', adminEmail: '', adminPassword: '' });
+      setAgencyForm({ name: '', tradingName: '', registrationNumber: '', companyLogoUrl: '', contactEmail: '', headquartersAddress: '', adminFullName: '', adminEmail: '', adminPassword: '', parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: '' });
       setEditingAgency(null);
       await loadAgencies();
     } catch (err) { alert(err || 'Agency creation failed.'); }
@@ -179,7 +184,11 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     setAgencyForm({
       name: agency.name || '', tradingName: agency.tradingName || '', registrationNumber: agency.registrationNumber || '',
       companyLogoUrl: agency.companyLogoUrl || '', contactEmail: agency.contactEmail || '', headquartersAddress: agency.headquartersAddress || '',
-      adminFullName: '', adminEmail: '', adminPassword: ''
+      adminFullName: '', adminEmail: '', adminPassword: '',
+      parentAgencyId: agency.parentAgencyId || '',
+      isTrial: !!agency.isTrial,
+      trialStartDate: agency.trialStartDate || '',
+      trialEndDate: agency.trialEndDate || ''
     });
   };
 
@@ -313,7 +322,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       loadReports();
     }
-  }, [activeTab, isSuperAdmin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isSuperAdmin, activeTenantId]);
 
 
   return (
@@ -388,6 +398,18 @@ export default function SystemAdminWorkspace({ defaultTab }) {
          </Can>
       </div>
 
+      {activeTenantId && (
+        <div className="text-[11px] text-slate-300 bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 flex items-center gap-2">
+          <Building2 size={12} className="text-blue-400" />
+          <span>
+            Tenant scope: <strong className="text-white">{isAllTenants ? 'All Tenants' : (activeAgency?.tradingName || activeAgency?.name || activeTenantId)}</strong>
+            {activeAgency?.agencyId && !isAllTenants && <span className="text-slate-500 ml-1">#{activeAgency.agencyId}</span>}
+            {activeAgency?.isTrial && !isAllTenants && <span className="ml-2 text-amber-300 text-[10px]">TRIAL</span>}
+          </span>
+          {isAllTenants && <span className="text-[10px] text-slate-500">— reports aggregate across every visible agency</span>}
+        </div>
+      )}
+
       {activeTab === 'agencies' && (
         <>
           <div className="grid gap-6 xl:grid-cols-2">
@@ -414,6 +436,26 @@ export default function SystemAdminWorkspace({ defaultTab }) {
 
                   <input value={agencyForm.contactEmail} onChange={(e) => setAgencyForm({ ...agencyForm, contactEmail: e.target.value })} type="email" placeholder="Contact email" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
                   <input value={agencyForm.headquartersAddress} onChange={(e) => setAgencyForm({ ...agencyForm, headquartersAddress: e.target.value })} placeholder="Headquarters address" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+
+                  {/* 🧬 PARENT AGENCY — PlatformAdmin may nest this agency under an existing parent to model a sub-brand / branch */}
+                  <select value={agencyForm.parentAgencyId} onChange={(e) => setAgencyForm({ ...agencyForm, parentAgencyId: e.target.value })} className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+                    <option value="">(No parent — top-level agency)</option>
+                    {agencies.filter(a => !editingAgency || a.agencyId !== editingAgency.agencyId).map(a => (
+                      <option key={a.agencyId} value={a.agencyId}>{a.name} ({a.agencyId})</option>
+                    ))}
+                  </select>
+
+                  {/* 🎯 TRIAL ONBOARDING — flag this agency as a trial and pre-fill the trial window */}
+                  <label className="col-span-2 flex items-center gap-2 text-[11px] text-slate-300">
+                    <input type="checkbox" checked={agencyForm.isTrial} onChange={(e) => setAgencyForm({ ...agencyForm, isTrial: e.target.checked })} className="accent-amber-500" />
+                    Onboard as trial agency (read-only access until trial ends)
+                  </label>
+                  {agencyForm.isTrial && (
+                    <>
+                      <input type="date" value={agencyForm.trialStartDate ? agencyForm.trialStartDate.substring(0, 10) : ''} onChange={(e) => setAgencyForm({ ...agencyForm, trialStartDate: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                      <input type="date" value={agencyForm.trialEndDate ? agencyForm.trialEndDate.substring(0, 10) : ''} onChange={(e) => setAgencyForm({ ...agencyForm, trialEndDate: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                    </>
+                  )}
 
                   {/* 👤 Auto-provisioned AgencyAdmin login (only required when creating) */}
                   {!editingAgency && (
@@ -474,7 +516,13 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                         <span className="text-white font-bold">{agency.tradingName || agency.name}</span>
                       </div>
                       <span className="text-[10px] text-slate-500 font-mono">#{agency.agencyId}</span>
-                      <span className={`text-[10px] px-2 py-1 rounded-md border R{agency.operationalStatus === 'Active' ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300' : 'border-amber-900 bg-amber-950/40 text-amber-300'}`}>{agency.operationalStatus || 'Active'}</span>
+                      <span className={`text-[10px] px-2 py-1 rounded-md border ${agency.operationalStatus === 'Active' ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300' : 'border-amber-900 bg-amber-950/40 text-amber-300'}`}>{agency.operationalStatus || 'Active'}</span>
+                      {agency.isTrial && <span className="text-[10px] px-2 py-1 rounded-md border border-amber-900 bg-amber-950/40 text-amber-300">TRIAL</span>}
+                      {agency.parentAgencyId && <span className="text-[10px] px-2 py-1 rounded-md border border-indigo-900 bg-indigo-950/40 text-indigo-300">↳ child of #{agency.parentAgencyId}</span>}
+                      {(() => {
+                        const childCount = agencies.filter(a => a.parentAgencyId === agency.agencyId).length;
+                        return childCount > 0 ? <span className="text-[10px] px-2 py-1 rounded-md border border-blue-900 bg-blue-950/40 text-blue-300">{childCount} child{childCount === 1 ? '' : 'ren'}</span> : null;
+                      })()}
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-500">{agency.registrationNumber || 'Reg: —'}</span>

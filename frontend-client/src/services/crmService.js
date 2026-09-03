@@ -1,9 +1,37 @@
 import apiClient from './apiClient.js';
 
+const ACTIVE_TENANT_STORAGE_KEY = 'active_tenant_override';
+
+// 🌐 Resolve the tenant override the user picked in the top-right TenantSwitcher.
+// PlatformAdmin may pick "__all__" (no filter) or a single agencyId.
+// AgencyAdmin's override is always a single agencyId inside their subtree.
+// Broker/Owner/Tenant never reach this path.
+function resolveActiveTenantOverride() {
+  try {
+    const raw = localStorage.getItem(ACTIVE_TENANT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed.tenantId || parsed || null;
+  } catch {
+    return null;
+  }
+}
+
 export const crmService = {
    getOperationalRecords: async (module, page = 1) => {
      const response = await apiClient.get('/crm/operations', { params: { module, page } });
      return Object.assign(response.data, { totalCount: Number(response.headers['x-total-count'] || 0) });
+   },
+
+   // 🌐 Returns axios params reflecting the active-tenant override, if any.
+   // Reports will read ?tenantId=<agencyId> (single-tenant mode) or no param
+   // (PlatformAdmin's "All Tenants" mode, which means the server returns the
+   // union across the caller's full visible subtree).
+   _tenantQueryParams: () => {
+     const override = resolveActiveTenantOverride();
+     if (!override || override === '__all__') return {};
+     return { tenantId: override };
    },
 
    // --- 🔗 UNIT-SCOPED OPERATIONAL RECORDS (leases / maintenance / document vault) ---
@@ -106,7 +134,7 @@ export const crmService = {
 
   getCRMReportOverview: async (year = new Date().getFullYear()) => {
     try {
-      const response = await apiClient.get('/crm/report/overview', { params: { year } });
+      const response = await apiClient.get('/crm/report/overview', { params: { year, ...crmService._tenantQueryParams() } });
       return response.data;
     } catch (error) {
       throw error.response?.data?.message || 'Metrics overview could not be loaded.';
@@ -115,7 +143,7 @@ export const crmService = {
 
   getAgencies: async (page = 1) => {
     try {
-      const response = await apiClient.get('/crm/agencies', { params: { page } });
+      const response = await apiClient.get('/crm/agencies', { params: { page, ...crmService._tenantQueryParams() } });
       const data = Array.isArray(response.data) ? response.data : (response.data.items || []);
       return Object.assign(data, { totalCount: Number(response.headers['x-total-count'] || 0) });
     } catch (error) {
@@ -324,7 +352,7 @@ export const crmService = {
 
   getPipelineReportSummary: async () => {
     try {
-      const response = await apiClient.get('/crm/report/summary', { params: {} });
+      const response = await apiClient.get('/crm/report/summary', { params: crmService._tenantQueryParams() });
       return response.data;
     } catch (error) {
       throw error.response?.data?.message || 'Analytics metrics retrieval failed.';
@@ -334,7 +362,7 @@ export const crmService = {
   // 📊 Commission realised per deal stage (only ClosedWon carries realised commission).
   getCommissionByStage: async () => {
     try {
-      const response = await apiClient.get('/crm/report/commission-by-stage');
+      const response = await apiClient.get('/crm/report/commission-by-stage', { params: crmService._tenantQueryParams() });
       return response.data;
     } catch (error) {
       throw error.response?.data?.message || 'Commission stage report unavailable.';
@@ -344,7 +372,7 @@ export const crmService = {
   // 📊 Broker leaderboard: deal count + pipeline value, ranked.
   getBrokerLeaderboard: async () => {
     try {
-      const response = await apiClient.get('/crm/report/broker-leaderboard');
+      const response = await apiClient.get('/crm/report/broker-leaderboard', { params: crmService._tenantQueryParams() });
       return response.data;
     } catch (error) {
       throw error.response?.data?.message || 'Broker leaderboard unavailable.';

@@ -14,6 +14,7 @@ import RolePermissionsPage from './components/RolePermissionsPage.jsx';
 import SetPassword from './components/SetPassword.jsx';
 import LeadsPage from './components/LeadsPage.jsx';
 import DealsPage from './components/DealsPage.jsx';
+import TenantSwitcher from './components/TenantSwitcher.jsx';
 
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useAppUi } from './contexts/AppUiContext.jsx';
@@ -227,6 +228,7 @@ export default function App() {
             </h2>
             <p className="text-slate-400 text-sm">Multi-tenant spatial intelligence portal for {currentAgency.name}</p>
           </div>
+          <TenantSwitcher />
         </header>
 
         {/* 🎯 TRIAL BANNER — prominently shown at the top for trial accounts */}

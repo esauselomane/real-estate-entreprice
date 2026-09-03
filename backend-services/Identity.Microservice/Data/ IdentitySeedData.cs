@@ -22,6 +22,16 @@ namespace Identity.Microservice.Data
 
             context.Database.EnsureCreated();
 
+            // Backfill ParentTenantId column for existing TenantAgencies tables.
+            var parentTenantColumnExists = context.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'TenantAgencies' AND COLUMN_NAME = 'ParentTenantId'")
+                .AsEnumerable().FirstOrDefault();
+            if (parentTenantColumnExists == 0)
+            {
+                context.Database.ExecuteSqlRaw(
+                    "ALTER TABLE [TenantAgencies] ADD [ParentTenantId] nvarchar(64) NULL;");
+            }
+
             // EnsureCreated is a no-op against a pre-existing database, so provision our
             // configurable role-definitions table via raw DDL when it is missing.
              var rolesTableExists = context.Database.SqlQueryRaw<int>(

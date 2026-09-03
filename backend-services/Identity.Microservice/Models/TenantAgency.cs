@@ -26,5 +26,9 @@ namespace Identity.Microservice.Models
         public bool IsTrial { get; set; } = false;
         public DateTime? TrialStartDate { get; set; }
         public DateTime? TrialEndDate { get; set; }
+
+        // 🧬 PARENT-AGENCY HIERARCHY (parent tenant this agency rolls up to)
+        [MaxLength(64)]
+        public string? ParentTenantId { get; set; }
     }
 }

@@ -132,10 +132,21 @@ namespace Identity.Microservice.Controllers
                 return Forbid();
 
             // Tenant isolation: an agency admin may only provision users into its own
-            // tenant; a platform admin may provision into any tenant.
+            // tenant or a direct child agency under their subtree; a platform admin may
+            // provision into any tenant.
             var callerTenantId = User.FindFirst("TenantId")?.Value;
-            if (callerRole == "AgencyAdmin" && newUser.TenantId != callerTenantId)
-                return Forbid();
+            if (callerRole == "AgencyAdmin")
+            {
+                var allowedTenants = await GetAgencySubtreeTenantIdsAsync(callerTenantId);
+                if (callerTenantId != null && !allowedTenants.Contains(callerTenantId))
+                    allowedTenants.Add(callerTenantId);
+                if (newUser.TenantId == null || !allowedTenants.Contains(newUser.TenantId))
+                {
+                    _logger.LogWarning("RegisterUser: AgencyAdmin {Caller} attempted to provision into tenant {Target} outside subtree {Allowed}",
+                        callerTenantId, newUser.TenantId, string.Join(",", allowedTenants));
+                    return Forbid();
+                }
+            }
 
             // 1. Verify that email structures do not collide inside the relational database engine
             var exists = await _context.UserAccounts.AnyAsync(u => u.Email == newUser.Email);
@@ -522,6 +533,40 @@ namespace Identity.Microservice.Controllers
                 "Agent" => "Broker",
                 _ => role
             };
+        }
+
+        // 🌳 BFS over TenantAgencies.ParentTenantId — return all child tenant ids
+        // reachable from the supplied root tenant. Used by AgencyAdmin provisioning
+        // to restrict user-creation to their visible subtree.
+        private async Task<List<string>> GetAgencySubtreeTenantIdsAsync(string? rootTenantId)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrWhiteSpace(rootTenantId)) return result;
+            var allAgencies = await _context.TenantAgencies
+                .Select(t => new { t.TenantId, t.ParentTenantId })
+                .ToListAsync();
+            var byParent = allAgencies
+                .Where(a => !string.IsNullOrWhiteSpace(a.ParentTenantId))
+                .GroupBy(a => a.ParentTenantId!)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.TenantId).ToList());
+            var queue = new Queue<string>();
+            queue.Enqueue(rootTenantId);
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                if (byParent.TryGetValue(current, out var children))
+                {
+                    foreach (var child in children)
+                    {
+                        if (!result.Contains(child))
+                        {
+                            result.Add(child);
+                            queue.Enqueue(child);
+                        }
+                    }
+                }
+            }
+            return result;
         }
     }
 }

@@ -28,6 +28,14 @@ namespace CRM.Microservice.Data
             }
         }
 
+        private static void EnsureAgencyParentColumn(CRMDbContext context)
+        {
+            BackfillColumn(context, "AgencyRecords", "ParentAgencyId", "nvarchar(64) NULL");
+            BackfillColumn(context, "AgencyRecords", "IsTrial", "bit NOT NULL DEFAULT 0");
+            BackfillColumn(context, "AgencyRecords", "TrialStartDate", "datetime2 NULL");
+            BackfillColumn(context, "AgencyRecords", "TrialEndDate", "datetime2 NULL");
+        }
+
         public static void EnsureSeeded(CRMDbContext context)
         {
             if (context == null)
@@ -38,6 +46,8 @@ namespace CRM.Microservice.Data
             context.Database.EnsureCreated();
 
             EnsureSchemaBackfill(context);
+
+            EnsureAgencyParentColumn(context);
 
             if (context.AgencyRecords.Count() < 1000)
             {

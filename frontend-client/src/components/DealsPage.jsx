@@ -5,6 +5,7 @@ import { crmService } from '../services/crmService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
+import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
 
 const DEAL_STAGES = ['DiscoveryNeedsAnalysis', 'Presentation', 'ProposalQuoteSent', 'Negotiation', 'ClosedWon', 'ClosedLost'];
@@ -27,6 +28,7 @@ export default function DealsPage() {
   const { userRole: currentUserRole } = useAuth();
   const { setBrochureDealTarget: onOpenBrochureBuilder } = useAppUi();
   const { hasPermission } = usePermission();
+  const { activeTenantId } = useTenant();
   const [deals, setDeals] = useState([]);
   const [dealTotalCount, setDealTotalCount] = useState(0);
   const [brokers, setBrokers] = useState([]);
@@ -70,7 +72,7 @@ export default function DealsPage() {
     }
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [activeTenantId]);
 
   useEffect(() => {
     if (editingDeal) {

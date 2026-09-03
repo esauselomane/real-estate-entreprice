@@ -57,6 +57,96 @@ namespace CRM.Microservice.Controllers
             };
         }
 
+        // 🌳 Returns the caller's tenant + all child-agency tenant IDs.
+        //   - PlatformAdmin: empty (caller sees everything via unfiltered query)
+        //   - AgencyAdmin: own tenant + any tenant whose AgencyRecord has ParentAgencyId
+        //     pointing into the caller's agency subtree.
+        //   - Other roles: only their own tenant.
+        //   - overrideTenantId: when provided, narrows the returned list to a single
+        //     tenant (must still be inside the caller's visible subtree; the helper
+        //     drops the override for callers that aren't allowed to switch).
+        private async Task<List<string>> GetVisibleTenantIdsAsync(string? overrideTenantId = null)
+        {
+            var tenant = GetCurrentTenant();
+            var role = GetCurrentCanonicalRole();
+
+            // Resolve base visibility (no override applied).
+            List<string> baseVisible;
+            if (string.IsNullOrEmpty(tenant) || role == "PlatformAdmin")
+            {
+                baseVisible = new List<string>();
+            }
+            else
+            {
+                var visible = new HashSet<string> { tenant };
+
+                if (role == "AgencyAdmin")
+                {
+                    var callerAgencyIds = await _context.AgencyRecords
+                        .Where(a => a.TenantId == tenant)
+                        .Select(a => a.AgencyId)
+                        .ToListAsync();
+
+                    if (callerAgencyIds.Count == 0)
+                    {
+                        return visible.ToList();
+                    }
+
+                    var frontier = new Queue<string>(callerAgencyIds);
+                    var visited = new HashSet<string>(callerAgencyIds);
+
+                    while (frontier.Count > 0)
+                    {
+                        var batch = frontier.Dequeue();
+                        var childAgencyIds = await _context.AgencyRecords
+                            .Where(a => a.ParentAgencyId == batch)
+                            .Select(a => new { a.AgencyId, a.TenantId })
+                            .ToListAsync();
+
+                        foreach (var child in childAgencyIds)
+                        {
+                            if (!visited.Contains(child.AgencyId))
+                            {
+                                visited.Add(child.AgencyId);
+                                if (!string.IsNullOrEmpty(child.TenantId))
+                                {
+                                    visible.Add(child.TenantId);
+                                }
+                                frontier.Enqueue(child.AgencyId);
+                            }
+                        }
+                    }
+                }
+
+                baseVisible = visible.ToList();
+            }
+
+            // 🛰️ Apply the top-right TenantSwitcher override (single-tenant scope).
+            // "__all__" / empty / null = no narrowing — caller keeps base visibility.
+            if (string.IsNullOrWhiteSpace(overrideTenantId) || overrideTenantId == "__all__")
+                return baseVisible;
+
+            // PlatformAdmin may scope to any single tenant they know about.
+            if (role == "PlatformAdmin")
+            {
+                var exists = await _context.AgencyRecords
+                    .AnyAsync(a => a.TenantId == overrideTenantId);
+                if (!exists)
+                {
+                    _logger.LogWarning("Tenant override rejected: tenant {Override} not found in agency roster", overrideTenantId);
+                    return baseVisible;
+                }
+                return new List<string> { overrideTenantId };
+            }
+
+            // Other roles may only narrow to a tenant inside their visible subtree.
+            if (baseVisible.Count > 0 && baseVisible.Contains(overrideTenantId))
+                return new List<string> { overrideTenantId };
+
+            _logger.LogWarning("Tenant override rejected for role {Role}: {Override} not in visible subtree", role, overrideTenantId);
+            return baseVisible;
+        }
+
         private const int PAGE_SIZE = 20;
         private int GetPage([FromQuery] int page) => page > 0 ? page : 1;
 
@@ -183,8 +273,11 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
-            var query = _context.CRMCompanies.Where(c => c.TenantId == tenantId).OrderBy(c => c.BusinessName);
+            var visibleTenants = await GetVisibleTenantIdsAsync();
+            IQueryable<CRMCompany> query = _context.CRMCompanies;
+            if (visibleTenants.Count > 0)
+                query = query.Where(c => visibleTenants.Contains(c.TenantId));
+            query = query.OrderBy(c => c.BusinessName);
             var (items, total) = await PageAsync(query, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
             return Ok(items);
@@ -199,8 +292,11 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
-            var query = _context.OwnerTenantRecords.Where(r => r.TenantId == tenantId).OrderByDescending(r => r.CreatedAt);
+            var visibleTenants = await GetVisibleTenantIdsAsync();
+            IQueryable<OwnerTenantRecord> query = _context.OwnerTenantRecords;
+            if (visibleTenants.Count > 0)
+                query = query.Where(r => visibleTenants.Contains(r.TenantId));
+            query = query.OrderByDescending(r => r.CreatedAt);
             var (items, total) = await PageAsync(query, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
             return Ok(items);
@@ -306,7 +402,7 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("agencies")]
-        public async Task<IActionResult> GetAgencies([FromQuery] int page)
+        public async Task<IActionResult> GetAgencies([FromQuery] int page, [FromQuery] string? tenantId)
         {
             if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
             {
@@ -314,17 +410,22 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenant = GetCurrentTenant();
             var callerRole = GetCurrentCanonicalRole();
-            _logger.LogInformation("GetAgencies: Page={Page} Tenant={Tenant} Role={Role}", page, tenant, callerRole);
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            _logger.LogInformation("GetAgencies: Page={Page} Role={Role} Override={Override} VisibleTenants={TenantCount}",
+                page, callerRole, tenantId ?? "(default)", visibleTenants.Count);
 
-            var query = _context.AgencyRecords
-                .Where(a => string.IsNullOrWhiteSpace(tenant) || a.TenantId == tenant)
-                .OrderBy(a => a.Name);
+            IQueryable<AgencyRecord> query = _context.AgencyRecords;
+            if (visibleTenants.Count > 0)
+            {
+                query = query.Where(a => visibleTenants.Contains(a.TenantId));
+            }
+            query = query.OrderBy(a => a.Name);
+
             var (items, total) = await PageAsync(query, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
-            _logger.LogInformation("GetAgencies: Returned {Count} agencies (page {Page}) out of {Total} total for tenant {Tenant}",
-                items.Count, page, total, tenant);
+            _logger.LogInformation("GetAgencies: Returned {Count} agencies (page {Page}) out of {Total} total",
+                items.Count, page, total);
             return Ok(items);
         }
 
@@ -355,11 +456,22 @@ namespace CRM.Microservice.Controllers
                 agency.AgencyId = "TEN-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
             agency.TenantId = GetCurrentTenant();
             agency.CreatedAt = DateTime.UtcNow;
+
+            if (!string.IsNullOrWhiteSpace(agency.ParentAgencyId))
+            {
+                var parentExists = await _context.AgencyRecords.AnyAsync(a => a.AgencyId == agency.ParentAgencyId);
+                if (!parentExists)
+                {
+                    _logger.LogWarning("CreateAgency: rejected — ParentAgencyId={ParentId} not found, caller={Caller}", agency.ParentAgencyId, caller);
+                    return BadRequest(new { message = $"ParentAgencyId '{agency.ParentAgencyId}' not found." });
+                }
+            }
+
             _context.AgencyRecords.Add(agency);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("CreateAgency: created AgencyId={AgencyId} Name={Name} Tenant={Tenant} By={Caller}",
-                agency.AgencyId, agency.Name, agency.TenantId, caller);
+            _logger.LogInformation("CreateAgency: created AgencyId={AgencyId} Name={Name} Tenant={Tenant} Parent={Parent} By={Caller}",
+                agency.AgencyId, agency.Name, agency.TenantId, agency.ParentAgencyId ?? "(root)", caller);
             return Ok(agency);
         }
 
@@ -383,6 +495,18 @@ namespace CRM.Microservice.Controllers
             agency.ContactEmail = updatedAgency.ContactEmail;
             agency.HeadquartersAddress = updatedAgency.HeadquartersAddress;
             agency.OperationalStatus = updatedAgency.OperationalStatus;
+            agency.IsTrial = updatedAgency.IsTrial;
+            agency.TrialStartDate = updatedAgency.TrialStartDate;
+            agency.TrialEndDate = updatedAgency.TrialEndDate;
+            if (!string.IsNullOrWhiteSpace(updatedAgency.ParentAgencyId))
+            {
+                if (updatedAgency.ParentAgencyId == agencyId)
+                    return BadRequest(new { message = "An agency cannot be its own parent." });
+                var parentExists = await _context.AgencyRecords.AnyAsync(a => a.AgencyId == updatedAgency.ParentAgencyId);
+                if (!parentExists)
+                    return BadRequest(new { message = $"ParentAgencyId '{updatedAgency.ParentAgencyId}' not found." });
+                agency.ParentAgencyId = updatedAgency.ParentAgencyId;
+            }
             await _context.SaveChangesAsync();
             return Ok(agency);
         }
@@ -504,10 +628,11 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
-            var query = _context.BrokerRecords
-                .Where(b => b.TenantId == tenantId)
-                .OrderBy(b => b.AgencyId).ThenBy(b => b.FullName);
+            var visibleTenants = await GetVisibleTenantIdsAsync();
+            IQueryable<BrokerRecord> query = _context.BrokerRecords;
+            if (visibleTenants.Count > 0)
+                query = query.Where(b => visibleTenants.Contains(b.TenantId));
+            query = query.OrderBy(b => b.AgencyId).ThenBy(b => b.FullName);
             var (items, total) = await PageAsync(query, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
             return Ok(items);
@@ -607,11 +732,11 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
-            var query = _context.CRMLegalEntities
-                .Include(e => e.CompanyDetails)
-                .Where(e => e.TenantId == tenantId)
-                .OrderBy(e => e.RegisteredLegalName);
+            var visibleTenants = await GetVisibleTenantIdsAsync();
+            IQueryable<CRMLegalEntity> query = _context.CRMLegalEntities.Include(e => e.CompanyDetails);
+            if (visibleTenants.Count > 0)
+                query = query.Where(e => visibleTenants.Contains(e.TenantId));
+            query = query.OrderBy(e => e.RegisteredLegalName);
             var (items, total) = await PageAsync(query, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
             return Ok(items);
@@ -667,12 +792,13 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
-            var query = _context.CRMContacts
+            var visibleTenants = await GetVisibleTenantIdsAsync();
+            IQueryable<CRMContact> query = _context.CRMContacts
                 .Include(c => c.CompanyDetails)
-                .Include(c => c.LegalEntityDetails)
-                .Where(c => c.TenantId == tenantId)
-                .OrderBy(c => c.FullName);
+                .Include(c => c.LegalEntityDetails);
+            if (visibleTenants.Count > 0)
+                query = query.Where(c => visibleTenants.Contains(c.TenantId));
+            query = query.OrderBy(c => c.FullName);
             var (items, total) = await PageAsync(query, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
             return Ok(items);
@@ -760,13 +886,18 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
+            var visibleTenants = await GetVisibleTenantIdsAsync();
             // 🔐 Scoping is authoritative from the JWT, never from a client-supplied role string.
             var callerRole = GetCurrentCanonicalRole();
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? agentName ?? string.Empty;
 
-            var leadsQuery = _context.LeadRecords.Where(l => l.TenantId == tenantId && !l.IsConvertedToDeal);
-            var dealsQuery = _context.DealRecords.Where(d => d.TenantId == tenantId);
+            IQueryable<LeadRecord> leadsQuery = _context.LeadRecords.Where(l => !l.IsConvertedToDeal);
+            IQueryable<DealRecord> dealsQuery = _context.DealRecords;
+            if (visibleTenants.Count > 0)
+            {
+                leadsQuery = leadsQuery.Where(l => visibleTenants.Contains(l.TenantId));
+                dealsQuery = dealsQuery.Where(d => visibleTenants.Contains(d.TenantId));
+            }
 
             // Only a Broker (agent) is restricted to their own records; admins see the full tenant pipeline.
             if (callerRole == "Broker")
@@ -1210,7 +1341,7 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("report/summary")]
-        public async Task<IActionResult> GetPipelineReportSummary()
+        public async Task<IActionResult> GetPipelineReportSummary([FromQuery] string? tenantId)
         {
             if (!await _permissionCheck.HasPermissionAsync("billing:view"))
             {
@@ -1218,17 +1349,20 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
 
-            var baseLeadQuery = _context.LeadRecords
-                .Where(l => l.TenantId == tenantId && !l.IsConvertedToDeal)
+            IQueryable<LeadRecord> baseLeadQuery = _context.LeadRecords
+                .Where(l => !l.IsConvertedToDeal)
                 .Where(l => !isBroker || l.AllocatedToAgent == callerName);
-
-            var baseDealQuery = _context.DealRecords
-                .Where(d => d.TenantId == tenantId)
+            IQueryable<DealRecord> baseDealQuery = _context.DealRecords
                 .Where(d => !isBroker || d.AllocatedToAgent == callerName);
+            if (visibleTenants.Count > 0)
+            {
+                baseLeadQuery = baseLeadQuery.Where(l => visibleTenants.Contains(l.TenantId));
+                baseDealQuery = baseDealQuery.Where(d => visibleTenants.Contains(d.TenantId));
+            }
 
             var summaryReport = new PipelineSummaryReport
             {
@@ -1239,14 +1373,14 @@ namespace CRM.Microservice.Controllers
                 TotalPipelineEstimatedValue = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.DiscoveryNeedsAnalysis || d.DealStage == DealWorkflowStage.Presentation || d.DealStage == DealWorkflowStage.ProposalQuoteSent || d.DealStage == DealWorkflowStage.Negotiation).SumAsync(d => d.TransactionValue)
             };
 
-            _logger.LogInformation("GetPipelineReportSummary: tenant={Tenant} | ActiveLeads={Active} Valuations={Valuations} Conveyancing={Conveyancing} ClosedWon={ClosedWon} PipelineValue={PipelineValue}",
-                tenantId, summaryReport.ActiveLeadsCount, summaryReport.ValuationsInProcessCount, summaryReport.ConveyancingAtDeedsCount, summaryReport.FinalizedClosedCount, summaryReport.TotalPipelineEstimatedValue);
+            _logger.LogInformation("GetPipelineReportSummary: overrideTenant={Override} effectiveTenants={TenantCount} | ActiveLeads={Active} Valuations={Valuations} Conveyancing={Conveyancing} ClosedWon={ClosedWon} PipelineValue={PipelineValue}",
+                tenantId ?? "(default)", visibleTenants.Count, summaryReport.ActiveLeadsCount, summaryReport.ValuationsInProcessCount, summaryReport.ConveyancingAtDeedsCount, summaryReport.FinalizedClosedCount, summaryReport.TotalPipelineEstimatedValue);
 
             return Ok(summaryReport);
         }
 
         [HttpGet("report/overview")]
-        public async Task<IActionResult> GetReportOverview([FromQuery] int? year)
+        public async Task<IActionResult> GetReportOverview([FromQuery] int? year, [FromQuery] string? tenantId)
         {
             if (!await _permissionCheck.HasPermissionAsync("billing:view"))
             {
@@ -1254,23 +1388,29 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var activeYear = year ?? DateTime.UtcNow.Year;
-            _logger.LogInformation("GetReportOverview: Year={Year} Tenant={Tenant}", activeYear, tenantId);
+            _logger.LogInformation("GetReportOverview: Year={Year} overrideTenant={Override} Tenants={TenantCount}", activeYear, tenantId ?? "(default)", visibleTenants.Count);
 
             var yearStart = new DateTime(activeYear, 1, 1);
             var yearEnd = new DateTime(activeYear + 1, 1, 1);
 
-            var tenantLeads = await _context.LeadRecords
-                .Where(l => l.TenantId == tenantId && l.CreatedAt >= yearStart && l.CreatedAt < yearEnd)
-                .Where(l => !isBroker || l.AllocatedToAgent == callerName)
-                .ToListAsync();
-            var tenantDeals = await _context.DealRecords
-                .Where(d => d.TenantId == tenantId && d.CreatedAt >= yearStart && d.CreatedAt < yearEnd)
-                .Where(d => !isBroker || d.AllocatedToAgent == callerName)
-                .ToListAsync();
+            IQueryable<LeadRecord> tenantLeadsQuery = _context.LeadRecords
+                .Where(l => l.CreatedAt >= yearStart && l.CreatedAt < yearEnd)
+                .Where(l => !isBroker || l.AllocatedToAgent == callerName);
+            IQueryable<DealRecord> tenantDealsQuery = _context.DealRecords
+                .Where(d => d.CreatedAt >= yearStart && d.CreatedAt < yearEnd)
+                .Where(d => !isBroker || d.AllocatedToAgent == callerName);
+            if (visibleTenants.Count > 0)
+            {
+                tenantLeadsQuery = tenantLeadsQuery.Where(l => visibleTenants.Contains(l.TenantId));
+                tenantDealsQuery = tenantDealsQuery.Where(d => visibleTenants.Contains(d.TenantId));
+            }
+
+            var tenantLeads = await tenantLeadsQuery.ToListAsync();
+            var tenantDeals = await tenantDealsQuery.ToListAsync();
 
             var monthlyBreakdown = Enumerable.Range(1, 12)
                 .Select(month => new ReportDrilldownRow
@@ -1294,7 +1434,7 @@ namespace CRM.Microservice.Controllers
 
         // 📊 Commission realised per deal stage — only ClosedWon carries a realised amount.
         [HttpGet("report/commission-by-stage")]
-        public async Task<IActionResult> GetCommissionByStage()
+        public async Task<IActionResult> GetCommissionByStage([FromQuery] string? tenantId)
         {
             if (!await _permissionCheck.HasPermissionAsync("billing:view"))
             {
@@ -1302,13 +1442,14 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
 
-            var query = _context.DealRecords
-                .Where(d => d.TenantId == tenantId)
+            IQueryable<DealRecord> query = _context.DealRecords
                 .Where(d => !isBroker || d.AllocatedToAgent == callerName);
+            if (visibleTenants.Count > 0)
+                query = query.Where(d => visibleTenants.Contains(d.TenantId));
 
             var rows = await query
                 .GroupBy(d => d.DealStage)
@@ -1324,7 +1465,7 @@ namespace CRM.Microservice.Controllers
 
         // 📊 Broker leaderboard — deal count + pipeline value, ranked.
         [HttpGet("report/broker-leaderboard")]
-        public async Task<IActionResult> GetBrokerLeaderboard()
+        public async Task<IActionResult> GetBrokerLeaderboard([FromQuery] string? tenantId)
         {
             if (!await _permissionCheck.HasPermissionAsync("billing:view"))
             {
@@ -1332,9 +1473,13 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
-            var rows = await _context.DealRecords
-                .Where(d => d.TenantId == tenantId && d.AllocatedToAgent != null && d.AllocatedToAgent != "")
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            IQueryable<DealRecord> query = _context.DealRecords
+                .Where(d => d.AllocatedToAgent != null && d.AllocatedToAgent != "");
+            if (visibleTenants.Count > 0)
+                query = query.Where(d => visibleTenants.Contains(d.TenantId));
+
+            var rows = await query
                 .GroupBy(d => d.AllocatedToAgent)
                 .Select(g => new
                 {
@@ -1359,13 +1504,17 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
+            var visibleTenants = await GetVisibleTenantIdsAsync();
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
 
-            var card = await _context.BrochureCards
+            IQueryable<BrochureCard> cardQuery = _context.BrochureCards
                 .Include(c => c.Lines)
-                .FirstOrDefaultAsync(c => c.DealId == dealId && c.TenantId == tenantId && !c.IsDeleted);
+                .Where(c => c.DealId == dealId && !c.IsDeleted);
+            if (visibleTenants.Count > 0)
+                cardQuery = cardQuery.Where(c => visibleTenants.Contains(c.TenantId));
+
+            var card = await cardQuery.FirstOrDefaultAsync();
             if (card == null) return NotFound(new { message = "No brochure card found for this deal." });
             if (isBroker && card.BrokerAgentId != callerName) return Forbid();
 

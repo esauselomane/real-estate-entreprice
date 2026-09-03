@@ -24,6 +24,14 @@ namespace CRM.Microservice.Models
         public string OperationalStatus { get; set; } = "Active"; // Active, TrialPending, TrialExpired, De-registered
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        // 🧬 HIERARCHICAL AGENCY TREE — null for root agencies; otherwise the parent AgencyId
+        public string? ParentAgencyId { get; set; }
+
+        [ForeignKey("ParentAgencyId")]
+        public AgencyRecord? ParentAgency { get; set; }
+
+        public ICollection<AgencyRecord> ChildAgencies { get; set; } = new List<AgencyRecord>();
+
         // 🎯 TRIAL ONBOARDING FIELDS
         public bool IsTrial { get; set; } = false;
         public DateTime? TrialStartDate { get; set; }

@@ -7,6 +7,7 @@ import { AuthProvider } from './contexts/AuthContext.jsx'
 import { AppUiProvider } from './contexts/AppUiContext.jsx'
 import { AgencyProvider } from './contexts/AgencyContext.jsx'
 import { PermissionProvider } from './contexts/PermissionContext.jsx'
+import { TenantProvider } from './contexts/TenantContext.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -14,7 +15,9 @@ createRoot(document.getElementById('root')).render(
       <AppUiProvider>
         <AgencyProvider>
           <PermissionProvider>
-            <App />
+            <TenantProvider>
+              <App />
+            </TenantProvider>
           </PermissionProvider>
         </AgencyProvider>
       </AppUiProvider>
