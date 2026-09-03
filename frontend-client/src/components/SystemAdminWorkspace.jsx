@@ -99,7 +99,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
 
   const loadData = async () => { await Promise.all([loadAgencies(), loadBrokers(), loadUsers(), isSuperAdmin && loadRoles(), isSuperAdmin && loadPermissions()]); };
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData, activeTenantId]);
 
   // Roles an admin may assign: PlatformAdmin gets the full palette; AgencyAdmin only agency-scoped roles.
   const assignableRoles = isSuperAdmin ? ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] : ['Broker', 'Owner', 'Tenant'];
@@ -363,17 +363,6 @@ export default function SystemAdminWorkspace({ defaultTab }) {
             <ShieldCheck size={12} className="inline mr-1.5" /> User Access
           </button>
         </Can>
-         <Can permission="system:roles:manage">
-           <button
-             onClick={() => setActiveTab('roles')}
-             type="button"
-             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
-               activeTab === 'roles' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-             }`}
-           >
-            <Settings size={12} className="inline mr-1.5" /> System Roles
-           </button>
-         </Can>
          <Can permission="billing:view">
            <button
              onClick={() => setActiveTab('reports')}
@@ -716,73 +705,6 @@ export default function SystemAdminWorkspace({ defaultTab }) {
         </div>
       )}
 
-      {activeTab === 'roles' && (
-        <div className="grid gap-6 xl:grid-cols-2">
-          {/* 🛠️ ROLE DEFINITIONS CRUD FORM (PlatformAdmin only) */}
-          <form onSubmit={handleRoleSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px]">
-              <Settings size={14} className="text-violet-500" /> {editingRole ? 'Edit Role Definition' : 'Add Role Definition'}
-            </div>
-            <input value={roleForm.name} onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })} placeholder="Role name (e.g. ResellerPartner)" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
-              <textarea value={roleForm.description} onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })} placeholder="Description" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white h-20" />
-              <div className="grid grid-cols-2 gap-3">
-                <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-300"><input type="checkbox" checked={roleForm.isPlatformScoped} onChange={(e) => setRoleForm({ ...roleForm, isPlatformScoped: e.target.checked })} disabled={!isSuperAdmin} /> Platform-scoped (assignable by PlatformAdmin)</label>
-                <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-300"><input type="checkbox" checked={roleForm.isAgencyScoped} onChange={(e) => setRoleForm({ ...roleForm, isAgencyScoped: e.target.checked })} disabled={!isSuperAdmin} /> Agency-scoped (assignable by AgencyAdmin)</label>
-                <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-300"><input type="checkbox" checked={roleForm.isActive} onChange={(e) => setRoleForm({ ...roleForm, isActive: e.target.checked })} /> Active</label>
-                <div className="col-span-2">
-                  <div className="text-[10px] text-slate-400 uppercase tracking-wider mb-2">Permissions</div>
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto bg-slate-950 border border-slate-700 rounded-xl p-3">
-                    {allPermissions.length === 0 && <div className="text-[11px] text-slate-500">Loading permissions...</div>}
-                    {allPermissions.map((perm) => {
-                      const checked = roleForm.permissionIds.includes(perm.permissionId);
-                      return (
-                        <label key={perm.permissionId} className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
-                          <input type="checkbox" checked={checked} onChange={(e) => setRoleForm({ ...roleForm, permissionIds: e.target.checked ? [...roleForm.permissionIds, perm.permissionId] : roleForm.permissionIds.filter(id => id !== perm.permissionId) })} />
-                          <span className="flex-1">{perm.description || perm.key}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            <div className="flex gap-2">
-              <Can permission="system:roles:manage">
-                <button type="submit" disabled={!isSuperAdmin} className={`py-2.5 rounded-xl text-xs font-bold R{isSuperAdmin ? 'bg-violet-600 text-white' : 'bg-slate-700 text-slate-400 cursor-not-allowed'}`}>{editingRole ? 'Save role' : 'Create role definition'}</button>
-              </Can>
-              {editingRole && <button type="button" onClick={() => { setEditingRole(null); setRoleForm({ name: '', description: '', isPlatformScoped: false, isAgencyScoped: false, permissionIds: [], isActive: true }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
-            </div>
-          </form>
-
-          {/* 🛠️ ROLE DEFINITIONS TABLE */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4"><Settings size={14} className="text-violet-500" /> Role definitions</div>
-            <div className="space-y-3">
-              {roles.map((role) => (
-                <div key={role.roleDefId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 flex justify-between items-center">
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-white font-bold text-sm">{role.name}</h4>
-                    <p className="text-xs text-slate-400 truncate">{role.description || 'No description'}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      {role.isPlatformScoped && <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-950 text-blue-300 border border-blue-900">Platform admin</span>}
-                      {role.isAgencyScoped && <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-950 text-emerald-300 border border-emerald-900">Agency admin</span>}
-                      <span className={`text-[10px] px-2 py-0.5 rounded-md border R{role.isActive ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300' : 'border-slate-700 bg-slate-800 text-slate-400'}`}>{role.isActive ? 'Active' : 'Inactive'}</span>
-                    </div>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <Can permission="system:roles:manage">
-                      <button type="button" onClick={() => resetRole(role)} disabled={!isSuperAdmin} className={`p-2 rounded R{isSuperAdmin ? 'bg-slate-800 text-slate-300 hover:text-white' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`} title="Edit"><Pencil size={13} /></button>
-                    </Can>
-                    <Can permission="system:roles:manage">
-                      <button type="button" onClick={() => handleRoleDelete(role)} disabled={!isSuperAdmin} className={`p-2 rounded R{isSuperAdmin ? 'bg-red-950/30 text-red-300 border border-red-900 hover:text-white' : 'bg-slate-900 text-slate-600 cursor-not-allowed'}`} title="Deactivate"><Trash2 size={13} /></button>
-                    </Can>
-                  </div>
-                </div>
-              ))}
-              {roles.length === 0 && <div className="text-[11px] text-slate-500">No role definitions loaded.</div>}
-            </div>
-          </div>
-        </div>
-      )}
 
       {activeTab === 'reports' && isSuperAdmin && (
         <div className="space-y-6">

@@ -1,5 +1,4 @@
 using Confluent.Kafka;
-using Microsoft.Extensions.Configuration;
 
 namespace Property.Microservice.Services
 {
@@ -16,7 +15,12 @@ namespace Property.Microservice.Services
             {
                 BootstrapServers = _bootstrapServers,
                 AllowAutoCreateTopics = true,
-                Acks = Acks.All
+                Acks = Acks.All,
+                // 📐 Raise the per-message ceiling to 25 MB so legitimate
+                // event payloads (audit logs, large documents) can flow.
+                // The broker's `message.max.bytes` MUST also be raised
+                // server-side — this just makes the producer match.
+                MessageMaxBytes = 25 * 1024 * 1024
             };
 
             _producer = new ProducerBuilder<string, string>(_config).Build();

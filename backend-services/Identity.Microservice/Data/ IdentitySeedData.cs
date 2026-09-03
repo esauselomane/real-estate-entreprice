@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Identity.Microservice.Models;
 using Microsoft.EntityFrameworkCore;
 

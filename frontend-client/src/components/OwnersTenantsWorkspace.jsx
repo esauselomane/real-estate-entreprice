@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { Users, Plus, Search, Pencil, X, Tag, MapPin } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 import { usePermission } from '../contexts/PermissionContext.jsx';
+import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
 
 const PROPERTY_TYPES = ['Residential', 'Commercial', 'Retail', 'Industrial'];
 
 export default function OwnersTenantsWorkspace() {
   const { hasPermission } = usePermission();
+  const { activeTenantId } = useTenant();
   const [records, setRecords] = useState([]);
   const [geography, setGeography] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -46,7 +48,7 @@ export default function OwnersTenantsWorkspace() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [activeTenantId]);
 
   const toggleType = (type) => {
     const next = form.propertyTypeInterests.includes(type)

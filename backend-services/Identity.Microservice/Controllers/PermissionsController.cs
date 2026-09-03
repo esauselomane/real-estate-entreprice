@@ -4,7 +4,6 @@ using Microsoft.EntityFrameworkCore;
 using Identity.Microservice.Data;
 using Identity.Microservice.Models;
 using Identity.Microservice.Authorization;
-using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 namespace Identity.Microservice.Controllers
 {

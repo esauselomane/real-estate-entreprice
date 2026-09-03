@@ -1,18 +1,3 @@
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Property.Microservice.Data;
-using Property.Microservice.Models;
-using Property.Microservice.Services;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.IO;
-using System.Linq;
-using System.Security.Claims;
-using System.Text.Json;
-using System.Threading.Tasks;
-
 namespace Property.Microservice.Controllers
 {
         public class CreatePropertyPayload
@@ -29,6 +14,11 @@ namespace Property.Microservice.Controllers
             public decimal Latitude { get; set; } = -33.9249m;
             public decimal Longitude { get; set; } = 18.4241m;
             public string LinkedOwnerId { get; set; } = "OT-0001";
+            // 🧬 Independent listing eligibility flags — a property may be marketed
+            // for SALE and/or RENT at the same time. If both are null/false the
+            // backend infers them from MarketClass for backward compatibility.
+            public bool? IsForSale { get; set; }
+            public bool? IsForRent { get; set; }
             public List<CreatePropertyUnitPayload> SubUnits { get; set; } = new List<CreatePropertyUnitPayload>();
         }
 }

@@ -1,5 +1,47 @@
 import apiClient from './apiClient.js';
 
+const ACTIVE_TENANT_STORAGE_KEY = 'active_tenant_override';
+const ACTIVE_TENANT_STORAGE_MARKER = 'view-override';
+const USER_PROFILE_STORAGE_KEY = 'user_profile_data';
+
+function resolveActiveTenantOverride() {
+  try {
+    const raw = localStorage.getItem(ACTIVE_TENANT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (parsed.__source !== ACTIVE_TENANT_STORAGE_MARKER) return null;
+    if (parsed.__all__) return '__all__';
+    return parsed.tenantId || null;
+  } catch { return null; }
+}
+
+function resolveLoggedInTenantId() {
+  try {
+    const raw = localStorage.getItem(USER_PROFILE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.tenantId || null;
+  } catch { return null; }
+}
+
+// 🌐 Read params: prefer the active-tenant override; fall back to the
+// logged-in user's tenant so backend filters always see a tenant id.
+function tenantQueryParams() {
+  const override = resolveActiveTenantOverride();
+  if (override && override !== '__all__') return { tenantId: override };
+  const fallback = resolveLoggedInTenantId();
+  return fallback ? { tenantId: fallback } : {};
+}
+
+// 🛰️ Resolve the tenant id a write should be stamped with. "__all__" is
+// never a valid stamp — that mode is read-only.
+function resolveWriteTenantId() {
+  const override = resolveActiveTenantOverride();
+  if (override && override !== '__all__') return override;
+  return resolveLoggedInTenantId();
+}
+
 export const authService = {
   
   // --- 🔐 MULTI-TENANT SECURE AUTHENTICATION TRANSFERS ---
@@ -33,12 +75,12 @@ export const authService = {
   // --- 🏢 ROLE-RESTRICTED REAL ESTATE USER PROVISIONING ---
   registerUser: async (newUserPayload) => {
     try {
-      // Pull active BA profile metadata to append multi-tenant context validation
-      const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
-      
+      // Active tenant override wins over the logged-in user's tenantId,
+      // so a PlatformAdmin/AgencyAdmin can provision a new user into the
+      // currently-selected subtree agency rather than their own tenant.
       const payload = {
         ...newUserPayload,
-        tenantId: userProfile.tenantId // Automatically force-inject parent agency sandbox identifier
+        tenantId: newUserPayload.tenantId || resolveWriteTenantId()
       };
 
       const response = await apiClient.post('/auth/register-user', payload);
@@ -51,7 +93,7 @@ export const authService = {
   // --- 👥 USER ROLE ADMINISTRATION (add / remove / reassign a SystemRole on an account) ---
   getUsers: async () => {
     try {
-      const response = await apiClient.get('/auth/users');
+      const response = await apiClient.get('/auth/users', { params: tenantQueryParams() });
       return response.data;
     } catch (error) {
       throw error.response?.data?.message || 'User directory sync failed.';

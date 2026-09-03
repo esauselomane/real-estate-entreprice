@@ -418,7 +418,17 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         valuationPrice: Number(propertyForm.valuationPrice || 0),
         salePrice: propertyForm.salePrice === '' ? null : Number(propertyForm.salePrice),
         tenantInstallationAllowance: Number(propertyForm.tenantInstallationAllowance || 0),
-        latitude: Number(propertyForm.latitude || 0), longitude: Number(propertyForm.longitude || 0)
+        latitude: Number(propertyForm.latitude || 0), longitude: Number(propertyForm.longitude || 0),
+        // 🧬 Listing flags — preserve the user's checkbox selection through
+        // the save call. Coerce to strict booleans for the backend.
+        isForSale: !!propertyForm.isForSale,
+        isForRent: !!propertyForm.isForRent,
+        // 🧬 Derive the legacy MarketClass string for any consumer that still
+        // reads it (search criteria, syndication rules, etc).
+        marketClass: (() => {
+          const s = !!propertyForm.isForSale, r = !!propertyForm.isForRent;
+          return s && r ? 'Both' : s ? 'Sale' : r ? 'Rental' : 'Off Market';
+        })()
       });
       setProperty(saved); setSubUnits(saved.subUnits || subUnits); setIsEditingProperty(false);
       setActionSuccessMessage('Property details saved to the backend.');
@@ -1031,7 +1041,30 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               {[
                 ['completeAddress', 'Address'], ['erfSpatialSize', 'Erf size'], ['titleDeedType', 'Title deed type'], ['portfolioZoning', 'Zoning'], ['linkedOwnerId', 'Owner record ID'], ['valuationPrice', 'Valuation'], ['salePrice', 'Sale price'], ['tenantInstallationAllowance', 'TI allowance'], ['latitude', 'Latitude'], ['longitude', 'Longitude']
               ].map(([key, label]) => <label key={key} className="text-[10px] text-slate-400 uppercase">{label}<input value={propertyForm[key] ?? ''} onChange={e => setPropertyForm({ ...propertyForm, [key]: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case" /></label>)}
-              <label className="text-[10px] text-slate-400 uppercase">Market class<select value={propertyForm.marketClass || 'Sale'} onChange={e => setPropertyForm({ ...propertyForm, marketClass: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case"><option>Sale</option><option>Rental</option></select></label>
+              <div className="md:col-span-2 text-[10px] text-slate-400 uppercase">
+                Listing Type
+                <div className="mt-1 flex gap-4 p-3 bg-slate-950 border border-slate-700 rounded-lg normal-case">
+                  <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!propertyForm.isForSale}
+                      onChange={(e) => setPropertyForm({ ...propertyForm, isForSale: e.target.checked })}
+                      className="rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    For Sale
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!propertyForm.isForRent}
+                      onChange={(e) => setPropertyForm({ ...propertyForm, isForRent: e.target.checked })}
+                      className="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
+                    />
+                    To Rent
+                  </label>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">Tick both to market the property as For Sale and To Rent.</p>
+              </div>
             </div>
              <div className="flex gap-3"><button type="button" onClick={() => setIsEditingProperty(false)} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Cancel</button><Can permission="properties:edit"><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">Save property</button></Can></div>
           </form>

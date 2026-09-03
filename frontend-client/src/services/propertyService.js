@@ -1,6 +1,79 @@
 import apiClient from './apiClient.js';
 
+const ACTIVE_TENANT_STORAGE_KEY = 'active_tenant_override';
+const ACTIVE_TENANT_STORAGE_MARKER = 'view-override';
+const USER_PROFILE_STORAGE_KEY = 'user_profile_data';
+
+function resolveActiveTenantOverride() {
+  try {
+    const raw = localStorage.getItem(ACTIVE_TENANT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (parsed.__source !== ACTIVE_TENANT_STORAGE_MARKER) return null;
+    if (parsed.__all__) return '__all__';
+    return parsed.tenantId || null;
+  } catch { return null; }
+}
+
+function resolveLoggedInTenantId() {
+  try {
+    const raw = localStorage.getItem(USER_PROFILE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.tenantId || null;
+  } catch { return null; }
+}
+
+// 🌳 The property service is partition-by-TenantId but doesn't know about
+// the agency hierarchy. The CRM expands the active agency's subtree
+// (parent + descendants for a top-level, just itself for a child) and
+// TenantContext caches the resulting TenantId list keyed by agencyId. We
+// read that cache here so the property search can be sent a
+// comma-separated ?tenantId= list. Returns null when the override is
+// "__all__" / unset (PlatformAdmin unfiltered) or the cache hasn't been
+// populated yet.
+function resolvePropertyTenantIdList() {
+  try {
+    const overrideRaw = localStorage.getItem(ACTIVE_TENANT_STORAGE_KEY);
+    if (!overrideRaw) return null;
+    const override = JSON.parse(overrideRaw);
+    if (!override || override.__source !== ACTIVE_TENANT_STORAGE_MARKER) return null;
+    if (override.__all__) return null;
+    if (override.agencyId == null) return null;
+    const cachedRaw = localStorage.getItem('property_subtree_cache');
+    if (!cachedRaw) return null;
+    const cached = JSON.parse(cachedRaw) || {};
+    const list = cached[override.agencyId];
+    if (!Array.isArray(list) || list.length === 0) return null;
+    return list.join(',');
+  } catch { return null; }
+}
+
 export const propertyService = {
+  // 🌐 Read params: prefer the active-tenant override; fall back to the
+  // logged-in user's tenant so backend filters always see a tenant id.
+  // When the override is a specific agency, the property service receives
+  // a comma-separated list of TenantIds covering the agency's full
+  // subtree (parent + descendants for a top-level, just itself for a
+  // child) so dashboard aggregates reflect the right scope.
+  _tenantQueryParams: () => {
+    const override = resolveActiveTenantOverride();
+    if (override === '__all__') return {};
+    const subtreeList = resolvePropertyTenantIdList();
+    if (subtreeList) return { tenantId: subtreeList };
+    if (override) return { tenantId: override };
+    const fallback = resolveLoggedInTenantId();
+    return fallback ? { tenantId: fallback } : {};
+  },
+
+  // 🛰️ Resolve the tenant id a write should be stamped with. "__all__" is
+  // never a valid stamp — that mode is read-only.
+  _resolveWriteTenantId: () => {
+    const override = resolveActiveTenantOverride();
+    if (override && override !== '__all__') return override;
+    return resolveLoggedInTenantId();
+  },
 
   // --- 🔍 MULTI-CRITERIA REAL ESTATE SEARCH PIPELINE ---
   searchProperties: async (locationsArray, propertyType, minSize, maxSize, listingType = 'All', page = 1) => {
@@ -13,7 +86,23 @@ export const propertyService = {
         listingType: listingType
       };
 
-      const response = await apiClient.post('/properties/search?page=' + page, criteriaPayload);
+      // 🛰️ TenantSwitcher override: the comma-separated subtree list (or
+      // single TenantId) belongs on the URL as a query string, not in the
+      // body. The backend reads it from HttpContext.Request.Query so the
+      // URL is the only place it can be read. If this is empty, the
+      // property service unfiltered-queries (PlatformAdmin sees every
+      // property, which is why the map never appeared to change).
+      const overrideParams = propertyService._tenantQueryParams();
+      const queryString = new URLSearchParams({ page, ...overrideParams }).toString();
+      // 🪵 DEBUG — leave in for the next round of troubleshooting. Will
+      // show: (1) the raw override from localStorage, (2) the subtree
+      // cache, (3) the final URL we're POSTing to.
+      console.debug('[propertyService.searchProperties] override=', resolveActiveTenantOverride(),
+        'subtreeCache=', localStorage.getItem('property_subtree_cache'),
+        'finalUrl=', `/properties/search?${queryString}`,
+        'body=', criteriaPayload);
+
+      const response = await apiClient.post(`/properties/search?${queryString}`, criteriaPayload);
       const data = response.data;
       return Object.assign(data, { totalCount: Number(response.headers['x-total-count'] || 0) });
     } catch (error) {
@@ -24,10 +113,18 @@ export const propertyService = {
   // --- 🔍 GET SINGLE PROPERTY WITH LINKED UNITS ---
   getPropertyById: async (propertyId) => {
     try {
+      // 🎯 Single-record fetch — no tenant override. The list view
+      // (searchProperties) is the one that respects the active tenant
+      // filter; once a user clicks a property they should be able to
+      // open it regardless of the current switcher state. The backend
+      // still applies the role-based visibility rules (a Tenant can
+      // only open properties they have a lease on, etc.), so this is
+      // safe — the override was only ever used as a *scope-narrowing*
+      // signal, not an *authorization* signal.
       const response = await apiClient.get(`/properties/${propertyId}`);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to fetch property details.';
+      throw error.response?.data?.message || 'Failed to load the property asset.';
     }
   },
 
@@ -43,6 +140,10 @@ export const propertyService = {
   // --- 🏢 GET SUB-UNITS LINKED TO PROPERTY ---
   getPropertyUnits: async (propertyId) => {
     try {
+      // No override here either — once a property is open the user
+      // should be able to see its sub-units, period. The backend
+      // already enforces the per-unit visibility rules (Tenants only
+      // see units they have an active lease on, etc.).
       const response = await apiClient.get(`/properties/${propertyId}/units`);
       return response.data;
     } catch (error) {
@@ -53,6 +154,8 @@ export const propertyService = {
   // --- 📋 LIST A UNIT'S STORED DOCUMENTS (read-only; role-scoped) ---
   getUnitDocuments: async (propertyId, unitId) => {
     try {
+      // See getPropertyById — once a property/unit is open the user
+      // should be able to see its records.
       const response = await apiClient.get(`/properties/${propertyId}/units/${unitId}/documents`);
       return response.data;
     } catch (error) {
@@ -137,6 +240,8 @@ export const propertyService = {
     // --- 🛠️ MAINTENANCE CALLS ON A UNIT (tenant-logged) ---
     getUnitMaintenanceCalls: async (propertyId, unitId) => {
       try {
+        // See getPropertyById — single-record fetches don't carry the
+        // tenant override so the user isn't blocked by switcher state.
         const response = await apiClient.get(`/properties/${propertyId}/units/${unitId}/maintenance`);
         return response.data;
       } catch (error) {
@@ -166,7 +271,7 @@ export const propertyService = {
   // --- 📋 GET SYNDICATION PLATFORMS ---
   getPlatforms: async () => {
     try {
-      const response = await apiClient.get('/properties/platforms');
+      const response = await apiClient.get('/properties/platforms', { params: propertyService._tenantQueryParams() });
       return response.data;
     } catch (error) {
       throw error.response?.data?.message || 'Failed to fetch platforms.';
@@ -176,11 +281,11 @@ export const propertyService = {
   // --- 🏠 REGISTER NEW PROPERTY INVENTORY RECORD ---
   createProperty: async (propertyData) => {
     try {
-      const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
-      
       const payload = {
         ...propertyData,
-        tenantId: userProfile.tenantId // Enforce parent multi-tenant sandbox boundary
+        // Enforce parent multi-tenant sandbox boundary: active override wins
+        // over the logged-in user's tenantId, "__all__" mode is read-only.
+        tenantId: propertyService._resolveWriteTenantId() || propertyData.tenantId
       };
 
       const response = await apiClient.post('/properties/create', payload);

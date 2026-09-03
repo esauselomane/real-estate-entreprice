@@ -20,6 +20,7 @@ import { useAuth } from './contexts/AuthContext.jsx';
 import { useAppUi } from './contexts/AppUiContext.jsx';
 import { useAgency } from './contexts/AgencyContext.jsx';
 import { usePermission } from './contexts/PermissionContext.jsx';
+import { useTenant } from './contexts/TenantContext.jsx';
 import { isTrialUser, getTrialExpiry } from './services/authService.js';
 import './index.css';
 
@@ -48,6 +49,7 @@ export default function App() {
 
   const { currentAgency } = useAgency();
   const { hasPermission } = usePermission();
+  const { isAllTenants } = useTenant();
 
   const activationToken = !isLoggedIn ? new URLSearchParams(window.location.search).get('token') : null;
 
@@ -226,7 +228,11 @@ export default function App() {
               {currentView === 'admin' && "SuperAdmin Control Board"}
               {currentView === 'roles' && "Role & Permission Management"}
             </h2>
-            <p className="text-slate-400 text-sm">Multi-tenant spatial intelligence portal for {currentAgency.name}</p>
+            <p className="text-slate-400 text-sm">
+              {isAllTenants
+                ? 'Multi-tenant spatial intelligence portal — viewing all tenants'
+                : `Multi-tenant spatial intelligence portal for ${currentAgency.name}`}
+            </p>
           </div>
           <TenantSwitcher />
         </header>

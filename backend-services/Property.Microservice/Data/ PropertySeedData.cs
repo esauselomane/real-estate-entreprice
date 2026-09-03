@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
 namespace Property.Microservice.Data
@@ -50,7 +46,10 @@ namespace Property.Microservice.Data
                     var isRental = i % 2 == 0;
                     assets.Add(new Property.Microservice.Models.PropertyAsset
                     {
-                        TenantId = "TEN-001",
+                        // 🧬 Each property is stamped with a tenant matching the
+                        // CRM roster (TEN-0001 … TEN-1000) so the TenantSwitcher
+                        // can scope the property map / list to a single agency.
+                        TenantId = $"TEN-{(i % 1000) + 1:0000}",
                         CompleteAddress = $"{i} {GetStreetName(i)}, {GetCityInfo(i).City}, South Africa",
                         ErfSpatialSize = $"{(220 + (i % 180))} m²",
                         TitleDeedType = i % 3 == 0 ? "Sectional Title" : "Freehold",
@@ -219,6 +218,20 @@ namespace Property.Microservice.Data
             }
 
             context.SaveChanges();
+
+            // 🧬 One-shot backfill: re-stamp legacy "TEN-001" property rows
+            // into the per-agency tenant distribution so the TenantSwitcher
+            // actually narrows the property list. Idempotent: once no rows
+            // carry TEN-001 the loop is a no-op.
+            var legacyStale = context.PropertyAssets
+                .Where(p => p.TenantId == "TEN-001" || p.TenantId == "")
+                .ToList();
+            foreach (var p in legacyStale)
+            {
+                var slot = (Math.Abs(p.PropertyId) % 1000) + 1;
+                p.TenantId = $"TEN-{slot:0000}";
+            }
+            if (legacyStale.Count > 0) context.SaveChanges();
         }
 
         private static string GetStreetName(int index)

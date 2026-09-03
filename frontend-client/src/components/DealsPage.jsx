@@ -142,6 +142,8 @@ export default function DealsPage() {
   });
 
   const stageCounts = DEAL_STAGES.reduce((acc, stage) => { acc[stage] = deals.filter((d) => getDealStageValue(d) === stage).length; return acc; }, {});
+  
+  debugger;
   const chartData = DEAL_STAGES.map((stage) => ({ name: stage.replace(/([A-Z])/g, ' $1').trim(), value: stageCounts[stage], color: DEAL_STAGE_COLORS[stage] })).filter((d) => d.value > 0);
 
   const pipelineValue = deals.filter((d) => { const stage = getDealStageValue(d); return stage !== 'ClosedWon' && stage !== 'ClosedLost'; }).reduce((sum, d) => sum + (Number(d.transactionValue) || 0), 0);

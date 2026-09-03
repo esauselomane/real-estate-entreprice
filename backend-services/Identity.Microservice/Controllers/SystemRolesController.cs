@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Identity.Microservice.Data;
 using Identity.Microservice.Models;
 using Identity.Microservice.Authorization;

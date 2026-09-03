@@ -1,5 +1,3 @@
-using System;
-
 namespace CRM.Microservice.Models
 {
     public class BrochureCardGeneratedDto

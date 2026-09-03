@@ -1,9 +1,5 @@
-using System.Text.Json;
 using Developer.API.Data;
-using Developer.API.Models;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Developer.API.Middleware
 {

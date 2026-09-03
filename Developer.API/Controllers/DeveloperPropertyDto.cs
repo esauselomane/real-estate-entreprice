@@ -1,7 +1,3 @@
-using Developer.API.Data;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-
 namespace Developer.API.Controllers
 {
     public class DeveloperPropertyDto

@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { MapPin, X, SlidersHorizontal, Building2, Loader2, Pencil } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import Can from '../components/Can.jsx';
+
+const PAGE_SIZE = 20;
 
 export default function PropertySearch({ onSelectProperty }) {
   const { hasPermission } = usePermission();
@@ -16,7 +18,11 @@ export default function PropertySearch({ onSelectProperty }) {
 
   // Live data fetching lifecycle states
   const [properties, setProperties] = useState([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [editingProperty, setEditingProperty] = useState(null);
   const [propertyForm, setPropertyForm] = useState({ completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold', portfolioZoning: '', marketClass: 'Sale', propertyTypeId: '', valuationPrice: '', salePrice: '', latitude: '', longitude: '', linkedOwnerId: '' });
@@ -25,30 +31,69 @@ export default function PropertySearch({ onSelectProperty }) {
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
   const addressDebounceRef = useRef(null);
+  const sentinelRef = useRef(null);
+  const observerRef = useRef(null);
+  const criteriaKey = `${selectedLocations.join('|')}::${propertyType}::${minSize}::${maxSize}::${listingType}`;
 
-  // 🔄 LIVE BACKEND SYNCHRONIZATION PIPELINE: Fetches filtered rows directly from SQL Server
-  useEffect(() => {
-    const fetchLiveProperties = async () => {
+  // 📜 Fetch a single page; replaces the loaded list when `reset` is true,
+  // otherwise appends. Owns pagination/hasMore bookkeeping so the IntersectionObserver
+  // callback can call it without thinking about it.
+  const fetchPage = useCallback(async (pageToLoad, reset) => {
+    if (reset) {
       setIsLoading(true);
-      setErrorMessage('');
-      try {
-        const liveInventory = await propertyService.searchProperties(
-          selectedLocations,
-          propertyType,
-          minSize,
-          maxSize,
-          listingType
-        );
-        setProperties(liveInventory);
-      } catch (err) {
-        setErrorMessage(err || 'Failed to sync spatial data metrics from backend clusters.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    } else {
+      setIsLoadingMore(true);
+    }
+    setErrorMessage('');
+    try {
+      const liveInventory = await propertyService.searchProperties(
+        selectedLocations,
+        propertyType,
+        minSize,
+        maxSize,
+        listingType,
+        pageToLoad
+      );
+      const incoming = Array.isArray(liveInventory) ? liveInventory : [];
+      setProperties((prev) => (reset ? incoming : [...prev, ...incoming]));
+      const total = Number(liveInventory?.totalCount || 0);
+      setTotalCount(total);
+      setPage(pageToLoad);
+      setHasMore((reset ? incoming.length : properties.length + incoming.length) < total && incoming.length > 0);
+    } catch (err) {
+      setErrorMessage(err || 'Failed to sync spatial data metrics from backend clusters.');
+    } finally {
+      setIsLoading(false);
+      setIsLoadingMore(false);
+    }
+  }, [selectedLocations, propertyType, minSize, maxSize, listingType, properties.length]);
 
-    fetchLiveProperties();
-    }, [selectedLocations, propertyType, minSize, maxSize, listingType]); // Re-fires instantly on layout modifications
+  // 🔄 LIVE BACKEND SYNCHRONIZATION PIPELINE: Reset to page 1 on any filter change.
+  useEffect(() => {
+    fetchPage(1, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLocations, propertyType, minSize, maxSize, listingType]);
+
+  // 👁️ INFINITE SCROLL: observe the sentinel div; when it enters the viewport
+  // (with 200px pre-fetch margin), request the next page.
+  useEffect(() => {
+    if (!sentinelRef.current) return;
+    if (observerRef.current) observerRef.current.disconnect();
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && hasMore && !isLoading && !isLoadingMore) {
+            fetchPage(page + 1, false);
+          }
+        });
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(sentinelRef.current);
+    observerRef.current = observer;
+    return () => observer.disconnect();
+  }, [fetchPage, hasMore, isLoading, isLoadingMore, page, criteriaKey]);
 
   useEffect(() => () => { if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current); }, []);
 
@@ -238,7 +283,9 @@ export default function PropertySearch({ onSelectProperty }) {
       {/* 📊 Matching Results Output Grid */}
       <div className="space-y-3">
         <div className="flex justify-between items-center px-1">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Matched System Assets ({properties.length})</span>
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
+            Matched System Assets ({totalCount || properties.length}{hasMore ? ` — showing ${properties.length}` : ''})
+          </span>
         </div>
 
         {/* ❌ Network Error Messages Alert Row */}
@@ -305,6 +352,17 @@ export default function PropertySearch({ onSelectProperty }) {
               <div className="col-span-full py-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-sm">
                 No active property assets found matching the selected search criteria inside database records.
               </div>
+            )}
+          </div>
+        )}
+
+        {/* 👁️ IntersectionObserver sentinel — pre-fetches 200px before the user sees it */}
+        {!isLoading && hasMore && properties.length > 0 && (
+          <div ref={sentinelRef} className="h-10 flex items-center justify-center text-[10px] text-slate-600 uppercase tracking-widest">
+            {isLoadingMore ? (
+              <span className="flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Loading more…</span>
+            ) : (
+              <span>Scroll to load more</span>
             )}
           </div>
         )}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
+import { useTenant } from '../contexts/TenantContext.jsx';
 import { Building2, Users, Briefcase, Home, Bell, ShieldCheck, Layers, BarChart2, DollarSign, TrendingUp, PieChart as PieIcon, Award } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { crmService } from '../services/crmService.js';
@@ -88,6 +89,7 @@ const PROPERTY_TYPES = ['Residential', 'Commercial', 'Retail', 'Industrial'];
 export default function RoleDashboard() {
   const { activeProfile: profile } = useAuth();
   const { navigateTo: onNavigate } = useAppUi();
+  const { activeTenantId } = useTenant();
   const role = profile?.role || 'Broker';
   const [metrics, setMetrics] = useState([]);
   const [charts, setCharts] = useState([]);
@@ -110,8 +112,13 @@ export default function RoleDashboard() {
             { label: 'Platform controls', value: 'Active', icon: ShieldCheck },
             { label: 'Closed-won commission', value: `R ${Number(overview.totalRealisedCommission || 0).toLocaleString()}`, icon: DollarSign }
           ]);
-          setCharts([
-            { title: 'Agency operational status', icon: ShieldCheck, kind: 'pie', data: Object.entries((agencies || []).reduce((a, x) => { const k = x.operationalStatus || 'Active'; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([name, value]) => ({ name, value })), colors: STATUS_COLORS },
+            // 📊 Server-side aggregates (operationalStatus, isTrial, hasParent) are
+            // computed over the ENTIRE filtered universe, not the 20-row page.
+            // The pie chart below must reflect every agency, not just page 1.
+            const agencyAggregates = agencies.aggregates || {};
+            const statusBuckets = agencyAggregates.operationalStatus || {};
+            setCharts([
+              { title: 'Agency operational status', icon: ShieldCheck, kind: 'pie', data: Object.entries(statusBuckets).map(([name, value]) => ({ name, value })), colors: STATUS_COLORS },
             { title: 'Property type market share', icon: PieIcon, kind: 'pie', data: marketShare, colors: TYPE_COLORS, colorKey: true },
             { title: 'Monthly platform revenue', icon: TrendingUp, kind: 'bar', data: (overview.monthlyBreakdown || []).map((m) => ({ name: m.period, value: Number(m.revenue || 0) })), colors: { default: '#3b82f6' } },
             { title: 'Commission realised by stage', icon: BarChart2, kind: 'bar', data: commissionStages, colors: DEAL_COLORS }
@@ -138,8 +145,13 @@ export default function RoleDashboard() {
             finalizedClosedCount: summary.finalizedClosedCount,
             totalPipelineEstimatedValue: summary.totalPipelineEstimatedValue
           });
-          setCharts([
-            { title: 'Broker role distribution', icon: Users, kind: 'pie', data: Object.entries((brokers || []).reduce((a, b) => { const k = b.role || 'Broker'; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([name, value]) => ({ name, value })), colors: ROLE_COLORS },
+            // 📊 Broker role distribution uses server-side aggregates so the pie
+            // reflects every broker in the active tenant scope, not just the
+            // 20 returned for the current page.
+            const brokerAggregates = brokers.aggregates || {};
+            const brokerRoleBuckets = brokerAggregates.role || {};
+            setCharts([
+              { title: 'Broker role distribution', icon: Users, kind: 'pie', data: Object.entries(brokerRoleBuckets).map(([name, value]) => ({ name, value })), colors: ROLE_COLORS },
             { title: 'Broker leaderboard (pipeline value)', icon: Award, kind: 'bar', data: (leaderboard || []).map((b) => ({ name: b.agent, value: Number(b.totalValue) })), colors: { default: '#3b82f6' } },
             { title: 'Pipeline funnel', icon: Layers, kind: 'bar', data: [
               { name: 'Active Leads', value: summary.activeLeadsCount },
@@ -162,28 +174,37 @@ export default function RoleDashboard() {
             { label: 'Available properties', value: properties.totalCount || properties.length, icon: Home },
             { label: 'Closed-won commission', value: `R ${Number((commissionStages || []).find((c) => c.period === 'ClosedWon')?.revenue || 0).toLocaleString()}`, icon: DollarSign }
           ]);
-          setCharts([
-            { title: 'My deal pipeline stages', icon: Briefcase, kind: 'pie', data: Object.entries((boards.verifiedDeals || []).reduce((a, d) => { const k = d.dealStage || 'Open'; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([name, value]) => ({ name, value })), colors: DEAL_COLORS },
+            // 📊 Deal-stage distribution uses server-side aggregates so the pie
+            // reflects every deal the broker owns in the active tenant scope,
+            // not just the 20 returned for the current page.
+            const dealStageBuckets = boards.aggregates?.dealStage || {};
+            setCharts([
+              { title: 'My deal pipeline stages', icon: Briefcase, kind: 'pie', data: Object.entries(dealStageBuckets).map(([name, value]) => ({ name: formatTitle(name), value })), colors: DEAL_COLORS },
             { title: 'Commission by stage', icon: DollarSign, kind: 'donut', data: (commissionStages || []).map((c) => ({ name: formatTitle(c.period), value: Number(c.revenue || 0) })) },
             { title: 'My deal value pipeline', icon: Home, kind: 'bar', data: (boards.verifiedDeals || []).slice(0, 8).map((d) => ({ name: `DL-${d.dealId}`, value: Number(d.transactionValue || 0) })), colors: DEAL_COLORS }
           ]);
         } else if (role === 'Owner') {
           const ots = await crmService.getOwnerTenantRecords();
-          const typeCount = {};
-          ots.forEach((o) => {
-            const interests = o.propertyTypeInterests ? JSON.parse(o.propertyTypeInterests) : [];
-            (Array.isArray(interests) ? interests : [interests]).forEach((t) => { if (t) typeCount[t] = (typeCount[t] || 0) + 1; });
-          });
+          // 📊 Server-side aggregates (recordType, primaryLocation) reflect every
+          // record in the active tenant scope, not just the 20 returned for the
+          // current page — keeps the chart consistent with the rest of the app.
+          const otsAggregates = ots.aggregates || {};
+          const recordTypeBuckets = otsAggregates.recordType || {};
+          const locationBuckets = otsAggregates.primaryLocation || {};
           setMetrics([{ label: 'Interested parties', value: ots.totalCount || ots.length, icon: Users }, { label: 'Property operations', value: 'Active', icon: Home }]);
           setCharts([
-            { title: 'Property type interests', icon: PieIcon, kind: 'pie', data: PROPERTY_TYPES.map((t) => ({ name: t, value: typeCount[t] || 0 })), colors: TYPE_COLORS },
-            { title: 'Portfolio size by type', icon: Home, kind: 'bar', data: PROPERTY_TYPES.map((t) => ({ name: t, value: typeCount[t] || 0 })), colors: TYPE_COLORS }
+            { title: 'Record type distribution', icon: Users, kind: 'pie', data: Object.entries(recordTypeBuckets).map(([name, value]) => ({ name, value })), colors: TYPE_COLORS },
+            { title: 'Primary location breakdown', icon: Home, kind: 'bar', data: Object.entries(locationBuckets).map(([name, value]) => ({ name, value })), colors: { default: '#3b82f6' } }
           ]);
         } else {
           const ops = await crmService.getOperationalRecords('maintenance');
+          // 📊 Request status breakdown uses server-side aggregates (status) so
+          // the pie reflects every maintenance call in the active tenant scope,
+          // not just the 20 returned for the current page.
+          const statusBuckets = ops.aggregates?.status || {};
           setMetrics([{ label: 'Lease access', value: 'Active', icon: Home }, { label: 'Requests', value: ops.totalCount || ops.length, icon: Bell }]);
           setCharts([
-            { title: 'Request status breakdown', icon: Bell, kind: 'pie', data: Object.entries(ops.reduce((a, o) => { const k = o.status || 'Open'; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([name, value]) => ({ name, value })), colors: STATUS_COLORS }
+            { title: 'Request status breakdown', icon: Bell, kind: 'pie', data: Object.entries(statusBuckets).map(([name, value]) => ({ name, value })), colors: STATUS_COLORS }
           ]);
         }
       } catch {
@@ -193,7 +214,7 @@ export default function RoleDashboard() {
       }
     };
     load();
-  }, [role]);
+  }, [role, activeTenantId]);
 
   return (
     <div className="space-y-6">

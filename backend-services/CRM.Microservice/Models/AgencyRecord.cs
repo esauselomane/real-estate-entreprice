@@ -1,7 +1,6 @@
-using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization;
 
 namespace CRM.Microservice.Models
 {
@@ -28,8 +27,10 @@ namespace CRM.Microservice.Models
         public string? ParentAgencyId { get; set; }
 
         [ForeignKey("ParentAgencyId")]
+        [JsonIgnore]
         public AgencyRecord? ParentAgency { get; set; }
 
+        [JsonIgnore]
         public ICollection<AgencyRecord> ChildAgencies { get; set; } = new List<AgencyRecord>();
 
         // 🎯 TRIAL ONBOARDING FIELDS
@@ -37,6 +38,7 @@ namespace CRM.Microservice.Models
         public DateTime? TrialStartDate { get; set; }
         public DateTime? TrialEndDate { get; set; }
 
+        [JsonIgnore]
         public ICollection<ContactPerson> ContactPersons { get; set; } = new List<ContactPerson>();
     }
 }

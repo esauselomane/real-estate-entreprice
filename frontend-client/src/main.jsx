@@ -13,13 +13,13 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <AuthProvider>
       <AppUiProvider>
-        <AgencyProvider>
+        <TenantProvider>
           <PermissionProvider>
-            <TenantProvider>
+            <AgencyProvider>
               <App />
-            </TenantProvider>
+            </AgencyProvider>
           </PermissionProvider>
-        </AgencyProvider>
+        </TenantProvider>
       </AppUiProvider>
     </AuthProvider>
   </StrictMode>,

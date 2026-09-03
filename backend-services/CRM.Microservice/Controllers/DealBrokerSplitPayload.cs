@@ -1,12 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using CRM.Microservice.Data;
-using CRM.Microservice.Models;
-using Microsoft.EntityFrameworkCore;
-
 namespace CRM.Microservice.Controllers
 {
     public class DealBrokerSplitDto

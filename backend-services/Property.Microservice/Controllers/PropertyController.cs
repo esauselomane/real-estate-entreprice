@@ -1,18 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Property.Microservice.Data;
 using Property.Microservice.Models;
 using Property.Microservice.Services;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.IO;
-using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
-using System.Threading.Tasks;
 
 namespace Property.Microservice.Controllers
 {
@@ -202,7 +195,27 @@ namespace Property.Microservice.Controllers
             if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
 
             var propertyQuery = _context.PropertyAssets.Where(p => p.PropertyId == propertyId);
-            if (role != "PlatformAdmin") propertyQuery = propertyQuery.Where(p => p.TenantId == userTenantId);
+            var overrideTenantId = HttpContext?.Request?.Query["tenantId"].ToString();
+            var usingOverride = (role == "PlatformAdmin" || role == "AgencyAdmin")
+                && !string.IsNullOrWhiteSpace(overrideTenantId)
+                && overrideTenantId != "__all__";
+            if (usingOverride)
+            {
+                // 🌳 Comma-separated subtree support: a PlatformAdmin viewing
+                // a record while a parent-agency subtree is active should be
+                // able to see records owned by any descendant.
+                var tenantIds = overrideTenantId
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (tenantIds.Count == 1) propertyQuery = propertyQuery.Where(p => p.TenantId == tenantIds[0]);
+                else if (tenantIds.Count > 1) propertyQuery = propertyQuery.Where(p => tenantIds.Contains(p.TenantId));
+            }
+            else
+            {
+                if (role != "PlatformAdmin") propertyQuery = propertyQuery.Where(p => p.TenantId == userTenantId);
+            }
             if (role == "Owner" && !string.IsNullOrWhiteSpace(userId))
                 propertyQuery = propertyQuery.Where(p => p.LinkedOwnerId == userId);
             if (!await propertyQuery.AnyAsync()) return NotFound(new { message = "Target property record not found." });
@@ -460,11 +473,31 @@ namespace Property.Microservice.Controllers
             var role = GetCurrentCanonicalRole();
             var userTenantId = User.FindFirst("TenantId")?.Value;
             var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrWhiteSpace(userTenantId)) return null;
+            if (string.IsNullOrWhiteSpace(userTenantId) && role != "PlatformAdmin") return null;
+
+            var overrideTenantId = HttpContext?.Request?.Query["tenantId"].ToString();
+            var usingOverride = (role == "PlatformAdmin" || role == "AgencyAdmin")
+                && !string.IsNullOrWhiteSpace(overrideTenantId)
+                && overrideTenantId != "__all__";
+            var effectiveTenantId = usingOverride ? overrideTenantId : userTenantId;
 
             var isPlatformAdmin = role == "PlatformAdmin";
             var propertyQuery = _context.PropertyAssets.Where(p => p.PropertyId == propertyId);
-            if (!isPlatformAdmin) propertyQuery = propertyQuery.Where(p => p.TenantId == userTenantId);
+            if (usingOverride)
+            {
+                // 🌳 Subtree override = comma-separated list of allowed tenants.
+                var tenantIds = overrideTenantId
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (tenantIds.Count == 1) propertyQuery = propertyQuery.Where(p => p.TenantId == tenantIds[0]);
+                else if (tenantIds.Count > 1) propertyQuery = propertyQuery.Where(p => tenantIds.Contains(p.TenantId));
+            }
+            else if (!isPlatformAdmin)
+            {
+                propertyQuery = propertyQuery.Where(p => p.TenantId == userTenantId);
+            }
 
             // Owner may only touch units under a property they actually own.
             if (role == "Owner" && !string.IsNullOrWhiteSpace(userId))
@@ -512,11 +545,41 @@ namespace Property.Microservice.Controllers
         private bool IsReadOnlyRole() => ReadOnlyRoles.Contains(GetCurrentCanonicalRole() ?? string.Empty);
 
         // Apply role + tenant scoping to a PropertyAsset queryable so search / look-ups
-        // only surface properties a role is entitled to see.
+        // only surface properties a role is entitled to see. When the caller is a
+        // PlatformAdmin/AgencyAdmin and supplies ?tenantId=<id>, that override is
+        // honored in place of the JWT-bound tenantId (the JWT tenant itself is
+        // never mutated). The override value is a real TenantId drawn from the
+        // AgencyRecord.TenantId of the selected agency.
+        //
+        // 🌳 Subtree support: the override may also be a comma-separated list
+        // of TenantIds (e.g. ?tenantId=TEN-0001,TEN-0010,TEN-0100). This is
+        // how the CRM hands a parent-agency's full subtree down to the
+        // property service for dashboard aggregation — the property service
+        // doesn't know about agency hierarchy on its own, so the CRM expands
+        // the subtree and the property service filters on the resulting set.
         private IQueryable<PropertyAsset> ApplyPropertyVisibility(IQueryable<PropertyAsset> query)
         {
             var role = GetCurrentCanonicalRole();
-            if (role == "PlatformAdmin") return query;
+            var overrideTenantId = HttpContext?.Request?.Query["tenantId"].ToString();
+            var usingOverride = (role == "PlatformAdmin" || role == "AgencyAdmin")
+                && !string.IsNullOrWhiteSpace(overrideTenantId)
+                && overrideTenantId != "__all__";
+
+            if (role == "PlatformAdmin" && !usingOverride) return query;
+
+            if (usingOverride)
+            {
+                // 🧬 Comma-separated list = subtree filter (parent + descendants).
+                var tenantIds = overrideTenantId
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (tenantIds.Count == 0) return query.Where(p => false);
+                if (tenantIds.Count == 1) query = query.Where(p => p.TenantId == tenantIds[0]);
+                else query = query.Where(p => tenantIds.Contains(p.TenantId));
+                return query;
+            }
 
             var tenantId = User.FindFirst("TenantId")?.Value;
             if (string.IsNullOrWhiteSpace(tenantId)) return query.Where(p => false);
@@ -586,6 +649,16 @@ namespace Property.Microservice.Controllers
                 return Forbid();
             }
 
+            var isForSale = payload.IsForSale ?? string.Equals(payload.MarketClass, "Sale", StringComparison.OrdinalIgnoreCase) || string.Equals(payload.MarketClass, "Both", StringComparison.OrdinalIgnoreCase);
+            var isForRent = payload.IsForRent ?? string.Equals(payload.MarketClass, "Rental", StringComparison.OrdinalIgnoreCase) || string.Equals(payload.MarketClass, "Both", StringComparison.OrdinalIgnoreCase);
+            // 🧬 If the client passed explicit booleans (or the legacy string
+            // maps cleanly to a single side), surface the dual-listing case in
+            // the legacy MarketClass field so search and syndication see "Both".
+            var marketClass = payload.MarketClass ?? "Sale";
+            if (payload.IsForSale == true && payload.IsForRent == true) marketClass = "Both";
+            else if (payload.IsForSale == true) marketClass = "Sale";
+            else if (payload.IsForRent == true) marketClass = "Rental";
+
             var newProp = new PropertyAsset
             {
                 TenantId = userTenantId,
@@ -593,7 +666,7 @@ namespace Property.Microservice.Controllers
                 ErfSpatialSize = payload.ErfSpatialSize ?? "200 m²",
                 TitleDeedType = payload.TitleDeedType ?? "Freehold",
                 PortfolioZoning = payload.PortfolioZoning ?? "Commercial Zone",
-                MarketClass = payload.MarketClass ?? "Sale",
+                MarketClass = marketClass,
                 PropertyTypeId = payload.PropertyTypeId > 0 ? payload.PropertyTypeId : 1,
                 ValuationPrice = payload.ValuationPrice,
                 SalePrice = payload.SalePrice,
@@ -602,7 +675,11 @@ namespace Property.Microservice.Controllers
                 Longitude = payload.Longitude != 0 ? payload.Longitude : 18.4241m,
                 LinkedOwnerId = payload.LinkedOwnerId ?? "OT-0001",
                 VerificationDocumentsJson = "[]",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                // 🧬 Listing flags — if the payload didn't specify them, infer
+                // from the legacy MarketClass for backward compatibility.
+                IsForSale = isForSale,
+                IsForRent = isForRent
             };
 
             if (payload.SubUnits != null && payload.SubUnits.Any())
@@ -688,6 +765,14 @@ namespace Property.Microservice.Controllers
             property.Latitude = payload.Latitude;
             property.Longitude = payload.Longitude;
             property.LinkedOwnerId = payload.LinkedOwnerId ?? string.Empty;
+            // 🧬 Update listing flags — null leaves the existing value alone.
+            if (payload.IsForSale.HasValue) property.IsForSale = payload.IsForSale.Value;
+            if (payload.IsForRent.HasValue) property.IsForRent = payload.IsForRent.Value;
+            // 🧬 Re-synthesize the legacy MarketClass string so any consumer
+            // that still reads it sees a value consistent with the two flags.
+            if (property.IsForSale && property.IsForRent) property.MarketClass = "Both";
+            else if (property.IsForSale) property.MarketClass = "Sale";
+            else if (property.IsForRent) property.MarketClass = "Rental";
 
             // Re-assert the tenant scope on the entity so a malicious payload cannot
             // override or clear the TenantId isolation key during a cross-tenant attempt.
@@ -769,12 +854,40 @@ namespace Property.Microservice.Controllers
             var results = await query.OrderBy(p => p.PropertyId)
                 .Skip((page - 1) * PAGE_SIZE).Take(PAGE_SIZE).ToListAsync();
                          HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+
+            // 📊 Chart-friendly aggregates over the ENTIRE filtered universe
+            // (not the 20-row page) so the listing market-share donut on the
+            // dashboard reflects every property in scope.
+            var propertyTypeGroups = await query
+                .Where(p => p.PropertyTypeDetails != null)
+                .GroupBy(p => p.PropertyTypeDetails!.Name)
+                .Select(g => new { Name = g.Key, Count = g.Count() })
+                .ToListAsync();
+            var listingGroups = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ForSale"] = await query.CountAsync(p => p.IsForSale),
+                ["ForRent"] = await query.CountAsync(p => p.IsForRent)
+            };
+            var propertyAggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["propertyType"] = propertyTypeGroups.ToDictionary(g => g.Name ?? "Unknown", g => g.Count),
+                ["listingEligibility"] = listingGroups
+            };
+            HttpContext.Response.Headers["X-Aggregates"] = System.Text.Json.JsonSerializer.Serialize(propertyAggregates);
+
             _logger.LogInformation("SearchProperties: returned {Count} results (page {Page}) out of {Total} for caller {Caller}",
                 results.Count, page, total, caller);
             return Ok(results);
         }
 
-        // --- 🖼️ ENDPOINT B: KAFKA-BACKED IMAGE STREAMING UPLOADER ---
+        // --- 🖼️ ENDPOINT B: IMAGE UPLOADER ---
+        // Persists the uploaded picture as a data-URL entry inside the
+        // property's `VerificationDocumentsJson` and emits a tiny Kafka
+        // event (just the property id + filename) so downstream
+        // optimisation/OCR pipelines can react. Sending the raw base64
+        // through Kafka was rejected by the broker with
+        // "Message size too large" — blobs belong in storage, not in event
+        // streams.
         [HttpPost("{propertyId}/upload-image")]
         public async Task<IActionResult> UploadPropertyImage(int propertyId, [FromBody] ImageUploadPayload payload)
         {
@@ -798,13 +911,58 @@ namespace Property.Microservice.Controllers
                 return BadRequest(new { message = "Invalid picture data payload." });
             }
 
-            // Construct transactional message payload envelope
-            string messageValue = $"{{\"PropertyId\":{propertyId},\"FileName\":\"{payload.FileName}\",\"Base64Data\":\"{payload.Base64DataString}\"}}";
-            
-            // Dispatch asynchronously directly onto your Kafka clusters media pipeline
-            await _kafkaPublisher.PublishMessageAsync("property-images", propertyId.ToString(), messageValue);
+            // 🖼️ Persist as a data-URL alongside the existing image refs the
+            // brochure builder already renders. Append (don't replace) so the
+            // gallery grows over time. A hard cap of 50 keeps the row sane.
+            var current = string.IsNullOrWhiteSpace(property.VerificationDocumentsJson)
+                ? new List<string>()
+                : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.VerificationDocumentsJson) ?? new List<string>());
 
-            return Ok(new { message = "Media payload successfully dispatched to Kafka event streams for optimization." });
+            var mime = payload.FileName?.ToLowerInvariant() switch
+            {
+                var n when n != null && n.EndsWith(".png") => "image/png",
+                var n when n != null && n.EndsWith(".webp") => "image/webp",
+                var n when n != null && (n.EndsWith(".jpg") || n.EndsWith(".jpeg")) => "image/jpeg",
+                _ => "image/jpeg"
+            };
+            var dataUrl = $"data:{mime};base64,{payload.Base64DataString}";
+            current.Add(dataUrl);
+            if (current.Count > 50) current = current.GetRange(current.Count - 50, 50);
+            property.VerificationDocumentsJson = System.Text.Json.JsonSerializer.Serialize(current);
+
+            await _context.SaveChangesAsync();
+
+            // 🛰️ Notify downstream optimisers (OCR, image resizing, ML
+            // tagging) via Kafka. The event payload is intentionally tiny —
+            // just the id + filename — so it stays well under the broker's
+            // 1 MB default message size limit.
+            var eventEnvelope = new
+            {
+                PropertyId = propertyId,
+                FileName = payload.FileName,
+                DataUrlLength = dataUrl.Length,
+                TenantId = property.TenantId
+            };
+            try
+            {
+                await _kafkaPublisher.PublishMessageAsync(
+                    "property-images",
+                    propertyId.ToString(),
+                    System.Text.Json.JsonSerializer.Serialize(eventEnvelope));
+            }
+            catch (Exception ex)
+            {
+                // The image is already persisted — a Kafka publish failure
+                // shouldn't fail the user-visible upload. Just log it so the
+                // optimisation pipeline can be re-triggered later.
+                _logger.LogWarning(ex, "UploadPropertyImage: Kafka notify failed for PropertyId={PropertyId} (image still saved)", propertyId);
+            }
+
+            return Ok(new
+            {
+                message = "Image persisted to property gallery and optimisers notified.",
+                imageCount = current.Count
+            });
         }
         // --- 🔗 ENDPOINT C: PORTAL SYNDICATION CHECKBOX TRACKER TOGGLE ---
         [HttpPost("syndicate")]

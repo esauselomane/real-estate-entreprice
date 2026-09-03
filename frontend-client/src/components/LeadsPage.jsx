@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import { UserPlus, Search, Loader2, X } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 import { usePermission } from '../contexts/PermissionContext.jsx';
+import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
 
 const LEAD_STAGES = ['Contacted', 'Qualified', 'Negotiation', 'ProposalSent', 'ClosedWon', 'ClosedLost'];
@@ -23,6 +24,7 @@ const getLeadStageValue = (lead) => {
 
 export default function LeadsPage() {
   const { hasPermission } = usePermission();
+  const { activeTenantId } = useTenant();
   const [leads, setLeads] = useState([]);
   const [leadTotalCount, setLeadTotalCount] = useState(0);
   const [brokers, setBrokers] = useState([]);
@@ -64,7 +66,7 @@ export default function LeadsPage() {
     }
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [activeTenantId]);
 
   const handleContactSearch = async (value) => {
     setContactSearch(value);

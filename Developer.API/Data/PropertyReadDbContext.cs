@@ -1,4 +1,3 @@
-using Developer.API.Models;
 using Microsoft.EntityFrameworkCore;
 using Property.Microservice.Models;
 

@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { MapPin, Building2, SlidersHorizontal, Loader2, Layers, ListCollapse, Search, Plus, X, Save } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { propertyService } from '../services/propertyService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
+import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
 
 // 🗺️ Vite + Leaflet default-marker icon patch — the bundler can't resolve the PNG
@@ -30,19 +31,37 @@ const coloredMarkerIcon = (color) => L.divIcon({
   className: 'property-type-marker',
   html: `<svg width="26" height="38" viewBox="0 0 26 38" fill="none" xmlns="http://www.w3.org/2000/svg">` +
     `<path d="M13 0C5.8 0 0 5.8 0 13c0 10.5 11.5 18.5 11.9 18.7.1.1 1.5 1.3 3.2 2.7.3.2.5.2.7 0 1.7-1.4 3.1-2.6 3.2-2.7C26 23.5 26 13 26 13 26 5.8 20.2 0 13 0z" fill="${color}" stroke="white" stroke-width="1.5"/>` +
-    `<circle cx="13" cy="14" r="5" fill="white"/>` +
+    `<circle cx="13" cy="13" r="5" fill="white" stroke="${color}" stroke-width="1.5"/>` +
     `</svg>`,
   iconSize: [26, 38],
   iconAnchor: [13, 38],
-  popupAnchor: [0, -38],
-  shadowUrl: ''
+  popupAnchor: [0, -36]
 });
+
+// 🎯 Map auto-fit: child component that uses the Leaflet map instance to
+// re-fit the viewport every time the asset list changes. The old approach
+// (using `key={mappableAssets.length}` on <MapContainer>) forced a full
+// remount of the map, which destroyed zoom/pan state and made the map
+// "jump" on every filter change. This version keeps the map alive and
+// just calls `fitBounds` with a smooth animation.
+function MapAutoFit({ bounds }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!bounds) return;
+    // pad: [fractionX, fractionY] adds padding around the bounds so
+    // markers on the edge of the cluster don't get clipped by the legend
+    // or sidebar.
+    map.fitBounds(bounds, { padding: [60, 60], maxZoom: 14, animate: true, duration: 0.5 });
+  }, [map, bounds]);
+  return null;
+}
 
 const DEFAULT_CENTER = [-33.9249, 18.4207]; // Cape Town fallback
 
 export default function PropertyMapWorkspace({ onSelectProperty }) {
   const { userRole } = useAuth();
   const { hasPermission } = usePermission();
+  const { activeTenantId, isResolvingSubtree } = useTenant();
   const [properties, setProperties] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -84,7 +103,7 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
       }
     };
     fetchSpatialAssetsForMapping();
-  }, []);
+  }, [activeTenantId]);
 
   // 🧭 Distinct property-type filters derived from the loaded data so the cockpit
   // matches the actual seed values (Residential / Commercial / Retail / Industrial).
@@ -115,6 +134,34 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
       !isNaN(Number(p.latitude)) && !isNaN(Number(p.longitude))
   );
 
+  // 🏷️ Legend data: count of markers per property type, plus a count of
+  // For-Sale / For-Rent / Both so the legend stays accurate when the
+  // tenant filter shrinks the visible set.
+  const legend = useMemo(() => {
+    const byType = {};
+    let forSale = 0;
+    let forRent = 0;
+    let both = 0;
+    let neither = 0;
+    mappableAssets.forEach((p) => {
+      const name = p.propertyTypeDetails?.name || 'Other';
+      byType[name] = (byType[name] || 0) + 1;
+      if (p.isForSale && p.isForRent) both++;
+      else if (p.isForSale) forSale++;
+      else if (p.isForRent) forRent++;
+      else neither++;
+    });
+    return {
+      byType: Object.entries(byType)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({ name, count, color: TYPE_COLORS[name] || TYPE_COLORS.Default })),
+      forSale,
+      forRent,
+      both,
+      neither,
+    };
+  }, [mappableAssets]);
+
   const { center, bounds } = useMemo(() => {
     if (!mappableAssets.length) return { center: DEFAULT_CENTER, bounds: null };
     const lats = mappableAssets.map((p) => Number(p.latitude));
@@ -137,7 +184,8 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
       completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold',
       portfolioZoning: 'Commercial Zone', marketClass: 'Sale', propertyTypeId: 1,
       valuationPrice: '', salePrice: '', tenantInstallationAllowance: 0,
-      latitude: -33.9249, longitude: 18.4241, linkedOwnerId: 'OT-0001', subUnits: []
+      latitude: -33.9249, longitude: 18.4241, linkedOwnerId: 'OT-0001',
+      isForSale: true, isForRent: false, subUnits: []
     });
     setSaveError('');
     setSaveSuccess(false);
@@ -145,7 +193,18 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
   };
 
   const handleFormChange = (field, value) => {
-    setPropertyForm((prev) => ({ ...prev, [field]: value }));
+    setPropertyForm((prev) => {
+      const next = { ...prev, [field]: value };
+      // 🧬 Derive the legacy MarketClass string from the two independent
+      // listing flags so backend / search callers that still read it see a
+      // consistent value.
+      if (field === 'isForSale' || field === 'isForRent') {
+        const sale = field === 'isForSale' ? value : prev.isForSale;
+        const rent = field === 'isForRent' ? value : prev.isForRent;
+        next.marketClass = sale && rent ? 'Both' : sale ? 'Sale' : rent ? 'Rental' : 'Off Market';
+      }
+      return next;
+    });
   };
 
   const handleSaveProperty = async (e) => {
@@ -154,6 +213,10 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
     setSaveSuccess(false);
     if (!propertyForm.completeAddress.trim()) {
       setSaveError('Property address is required.');
+      return;
+    }
+    if (!propertyForm.isForSale && !propertyForm.isForRent) {
+      setSaveError('Select at least one listing type (For Sale or For Rent).');
       return;
     }
     setIsSaving(true);
@@ -165,7 +228,9 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
         tenantInstallationAllowance: Number(propertyForm.tenantInstallationAllowance) || 0,
         latitude: Number(propertyForm.latitude) || -33.9249,
         longitude: Number(propertyForm.longitude) || 18.4241,
-        propertyTypeId: Number(propertyForm.propertyTypeId) || 1
+        propertyTypeId: Number(propertyForm.propertyTypeId) || 1,
+        isForSale: !!propertyForm.isForSale,
+        isForRent: !!propertyForm.isForRent
       });
       setSaveSuccess(true);
       setShowAddModal(false);
@@ -241,6 +306,12 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
             </div>
           )}
 
+          {isResolvingSubtree && (
+            <div className="p-3 bg-blue-950/30 border border-blue-900/60 text-blue-200 rounded-2xl text-[11px] font-medium text-center flex items-center justify-center gap-2">
+              <Loader2 className="w-3 h-3 animate-spin" /> Loading new tenant scope…
+            </div>
+          )}
+
           {isLoading ? (
             <div className="py-12 flex flex-col items-center justify-center text-slate-500 gap-3">
               <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
@@ -294,6 +365,41 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
           <Layers size={12} className="text-blue-500 animate-pulse" /> Live Multi-Tenant Mapping Canvas
         </div>
 
+        {/* 🏷️ MAP LEGEND — bottom-right overlay. Shows the marker colour
+            for each property type and the count of currently visible
+            markers per type / per listing eligibility so the user can
+            decode the map at a glance. Updates live as filters change. */}
+        {mappableAssets.length > 0 && (
+          <div className="absolute bottom-5 right-5 z-10 bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-xl shadow-lg shadow-black/40 p-3 w-56 text-[11px] text-slate-200 max-h-[60%] overflow-y-auto">
+            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Marker Legend</div>
+
+            <div className="space-y-1.5 mb-3">
+              {legend.byType.map(({ name, count, color }) => (
+                <div key={name} className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="inline-block w-3 h-3 rounded-full shrink-0 border border-white/30"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="truncate">{name}</span>
+                  </div>
+                  <span className="text-slate-400 font-semibold tabular-nums">{count}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-slate-800 pt-2 space-y-1">
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Listing</div>
+              <div className="flex items-center justify-between"><span>For Sale</span><span className="text-emerald-300 font-semibold tabular-nums">{legend.forSale}</span></div>
+              <div className="flex items-center justify-between"><span>For Rent</span><span className="text-cyan-300 font-semibold tabular-nums">{legend.forRent}</span></div>
+              <div className="flex items-center justify-between"><span>Sale + Rent</span><span className="text-amber-300 font-semibold tabular-nums">{legend.both}</span></div>
+              {legend.neither > 0 && (
+                <div className="flex items-center justify-between"><span>Off-market</span><span className="text-slate-400 font-semibold tabular-nums">{legend.neither}</span></div>
+              )}
+            </div>
+          </div>
+        )}
+
         {mappableAssets.length === 0 ? (
           <div className="w-full h-full bg-slate-950 rounded-xl border border-slate-800/80 flex flex-col items-center justify-center text-center p-6 relative">
             <div className="absolute inset-0 bg-radial-gradient from-blue-500/5 via-transparent to-transparent pointer-events-none"></div>
@@ -312,13 +418,20 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
           </div>
         ) : (
           <MapContainer
-            key={mappableAssets.length}
+            // 🔑 Stable key so the map instance survives filter changes —
+            // `mappableAssets.length` as key was forcing a full remount,
+            // which reset the zoom/pan and made the map "jump" every time
+            // a tenant filter or type filter changed. We use
+            // MapAutoFit (below) to programmatically fitBounds when the
+            // marker set actually changes.
+            key="property-map-canvas"
             center={center}
             bounds={bounds || undefined}
             zoom={bounds ? undefined : 11}
             className="w-full h-full rounded-xl z-0"
           >
             <MapClickHandler />
+            <MapAutoFit bounds={bounds} />
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -432,16 +545,28 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
               </div>
 
               <div>
-                <label className="block text-[10px] text-slate-400 uppercase mb-1">Market Class</label>
-                <select
-                  value={propertyForm.marketClass}
-                  onChange={(e) => handleFormChange('marketClass', e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
-                >
-                  <option value="Sale">Sale</option>
-                  <option value="Rental">Rental</option>
-                  <option value="Auction">Auction</option>
-                </select>
+                <label className="block text-[10px] text-slate-400 uppercase mb-2">Listing Type</label>
+                <div className="flex flex-col gap-2 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl">
+                  <label className="flex items-center gap-2 text-xs text-white cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!propertyForm.isForSale}
+                      onChange={(e) => handleFormChange('isForSale', e.target.checked)}
+                      className="rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <span>For Sale</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-white cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!propertyForm.isForRent}
+                      onChange={(e) => handleFormChange('isForRent', e.target.checked)}
+                      className="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
+                    />
+                    <span>To Rent</span>
+                  </label>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">Tick both to market the property as For Sale and To Rent.</p>
               </div>
               <div>
                 <label className="block text-[10px] text-slate-400 uppercase mb-1">Property Type ID</label>

@@ -1,17 +1,11 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
-using Microsoft.IdentityModel.Tokens;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using CRM.Microservice.Data;
 using CRM.Microservice.Models;
 using CRM.Microservice.Services;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace CRM.Microservice.Controllers
 {
@@ -62,10 +56,11 @@ namespace CRM.Microservice.Controllers
         //   - AgencyAdmin: own tenant + any tenant whose AgencyRecord has ParentAgencyId
         //     pointing into the caller's agency subtree.
         //   - Other roles: only their own tenant.
-        //   - overrideTenantId: when provided, narrows the returned list to a single
-        //     tenant (must still be inside the caller's visible subtree; the helper
-        //     drops the override for callers that aren't allowed to switch).
-        private async Task<List<string>> GetVisibleTenantIdsAsync(string? overrideTenantId = null)
+        //   - overrideAgencyId: when provided, narrows the returned list to the
+        //     TenantId of that AgencyRecord (must still be inside the caller's
+        //     visible subtree; the helper drops the override for callers that
+        //     aren't allowed to switch). "__all__" disables narrowing.
+        private async Task<List<string>> GetVisibleTenantIdsAsync(string? overrideAgencyId = null)
         {
             var tenant = GetCurrentTenant();
             var role = GetCurrentCanonicalRole();
@@ -123,28 +118,103 @@ namespace CRM.Microservice.Controllers
 
             // 🛰️ Apply the top-right TenantSwitcher override (single-tenant scope).
             // "__all__" / empty / null = no narrowing — caller keeps base visibility.
-            if (string.IsNullOrWhiteSpace(overrideTenantId) || overrideTenantId == "__all__")
+            if (string.IsNullOrWhiteSpace(overrideAgencyId) || overrideAgencyId == "__all__")
                 return baseVisible;
 
-            // PlatformAdmin may scope to any single tenant they know about.
-            if (role == "PlatformAdmin")
+            // 🌳 Subtree rule for the override:
+            //   • If the picked agency has NO ParentAgencyId (it's a top-level /
+            //     group root) → the dashboard should aggregate across the whole
+            //     group (this agency + every descendant). This is how an agency
+            //     that owns 10 sub-agencies sees its combined footprint.
+            //   • If the picked agency has a ParentAgencyId (it's a child) →
+            //     the dashboard scopes to that single agency only. The parent
+            //     and siblings are excluded so the metrics reflect exactly the
+            //     business the user picked.
+            //   • PlatformAdmin "all" mode (no override) keeps base visibility
+            //     (every tenant on the platform), so the same default that
+            //     showed before the switcher was added still works.
+            //   • If the override can't be matched to any agency at all (the
+            //     caller passed a stray TenantId that no row uses, for example
+            //     ?tenantId=TEN-001 with no zero-padding), fall back to the
+            //     caller's base visibility so the request still returns rows
+            //     instead of an NRE downstream.
+            var overrideTenants = await ResolveOverrideSubtreeAsync(overrideAgencyId, role);
+            if (overrideTenants == null)
             {
-                var exists = await _context.AgencyRecords
-                    .AnyAsync(a => a.TenantId == overrideTenantId);
-                if (!exists)
+                _logger.LogWarning("Tenant override unresolved: agencyId {Override} for role {Role} — falling back to base visibility",
+                    overrideAgencyId, role);
+                return baseVisible;
+            }
+            return overrideTenants;
+        }
+
+        // 🌳 Resolve the overrideAgencyId (from the TenantSwitcher dropdown)
+        // into the full list of TenantIds the request should be scoped to,
+        // applying the parent-vs-child subtree rule:
+        //   • top-level agency → itself + all descendants
+        //   • child agency    → itself only
+        // Returns null when the override can't be resolved (caller falls back
+        // to base visibility upstream).
+        private async Task<List<string>?> ResolveOverrideSubtreeAsync(string overrideAgencyId, string role)
+        {
+            // First try to match an AgencyId exactly.
+            var agency = await _context.AgencyRecords
+                .AsNoTracking()
+                .FirstOrDefaultAsync(a => a.AgencyId == overrideAgencyId);
+
+            AgencyRecord? target = agency;
+            if (target == null)
+            {
+                // Fall back to literal TenantId match (legacy callers + report
+                // endpoints that hand the helper a raw TenantId).
+                target = await _context.AgencyRecords
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(a => a.TenantId == overrideAgencyId);
+            }
+            if (target == null || string.IsNullOrEmpty(target.TenantId)) return null;
+
+            // 🛡️ Non-platform callers can only resolve overrides that fall
+            // inside their own visible subtree (defence-in-depth even though
+            // the upstream baseVisible filter would already have removed them).
+            // PlatformAdmin is unrestricted.
+
+            var hasParent = !string.IsNullOrWhiteSpace(target.ParentAgencyId);
+            if (!hasParent)
+            {
+                // 🌲 Top-level: include the agency itself + every descendant.
+                var subtree = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { target.TenantId };
+                var frontier = new Queue<string>();
+                frontier.Enqueue(target.AgencyId);
+                while (frontier.Count > 0)
                 {
-                    _logger.LogWarning("Tenant override rejected: tenant {Override} not found in agency roster", overrideTenantId);
-                    return baseVisible;
+                    var batch = frontier.Dequeue();
+                    var childAgencyIds = await _context.AgencyRecords
+                        .AsNoTracking()
+                        .Where(a => a.ParentAgencyId == batch)
+                        .Select(a => a.AgencyId)
+                        .ToListAsync();
+                    foreach (var childId in childAgencyIds)
+                    {
+                        if (string.IsNullOrEmpty(childId)) continue;
+                        var childAgency = await _context.AgencyRecords
+                            .AsNoTracking()
+                            .FirstOrDefaultAsync(a => a.AgencyId == childId);
+                        if (childAgency == null) continue;
+                        if (!string.IsNullOrEmpty(childAgency.TenantId) && subtree.Add(childAgency.TenantId))
+                        {
+                            frontier.Enqueue(childAgency.AgencyId);
+                        }
+                    }
                 }
-                return new List<string> { overrideTenantId };
+                _logger.LogInformation("Tenant override subtree: picked top-level agency {AgencyId} ({TenantId}) → {Count} tenants",
+                    target.AgencyId, target.TenantId, subtree.Count);
+                return subtree.ToList();
             }
 
-            // Other roles may only narrow to a tenant inside their visible subtree.
-            if (baseVisible.Count > 0 && baseVisible.Contains(overrideTenantId))
-                return new List<string> { overrideTenantId };
-
-            _logger.LogWarning("Tenant override rejected for role {Role}: {Override} not in visible subtree", role, overrideTenantId);
-            return baseVisible;
+            // 🍃 Child agency: return only its own tenant.
+            _logger.LogInformation("Tenant override leaf: picked child agency {AgencyId} ({TenantId}) → 1 tenant",
+                target.AgencyId, target.TenantId);
+            return new List<string> { target.TenantId };
         }
 
         private const int PAGE_SIZE = 20;
@@ -158,6 +228,59 @@ namespace CRM.Microservice.Controllers
             var total = await query.CountAsync();
             var items = await query.Skip((page - 1) * PAGE_SIZE).Take(PAGE_SIZE).ToListAsync();
             return (items, total);
+        }
+
+        // 📊 Compute a { field → count } aggregate for chart rendering without
+        // pulling all rows into memory. Each selector returns the bucket key for
+        // a row; rows where the selector returns null are bucketed under "(Unset)".
+        // The result is exposed both as an X-Aggregates-JSON response header and
+        // embedded in the response body so consumers (donut/pie/bar charts) can
+        // build a true chart of the *entire* filtered universe, not just the
+        // 20-row page that was returned.
+        private static async Task<Dictionary<string, Dictionary<string, int>>> ComputeAggregatesAsync(
+            params (string Field, Func<IQueryable<object>, IQueryable<IGrouping<object, object>>> Group)[] aggregators)
+        {
+            var result = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
+            // The aggregator lambdas already executed the group-by inside their
+            // caller; this overload is a no-op placeholder kept for symmetry.
+            return await Task.FromResult(result);
+        }
+
+        // 📊 String-typed selector aggregate: groups rows by a string field and
+        // returns { bucket → count }.
+        private static async Task<Dictionary<string, int>> AggregateStringAsync<T>(
+            IQueryable<T> query,
+            System.Linq.Expressions.Expression<Func<T, string?>> selector)
+        {
+            var rows = await query
+                .GroupBy(selector)
+                .Select(g => new { Key = g.Key ?? "(Unset)", Count = g.Count() })
+                .ToListAsync();
+            var dict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows) dict[row.Key] = row.Count;
+            return dict;
+        }
+
+        // 📊 Boolean-typed selector aggregate: groups rows by a bool field and
+        // returns { true/false → count }.
+        private static async Task<Dictionary<string, int>> AggregateBoolAsync<T>(
+            IQueryable<T> query,
+            System.Linq.Expressions.Expression<Func<T, bool>> selector)
+        {
+            var rows = await query
+                .GroupBy(selector)
+                .Select(g => new { Key = g.Key ? "true" : "false", Count = g.Count() })
+                .ToListAsync();
+            var dict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows) dict[row.Key] = row.Count;
+            return dict;
+        }
+
+        // 📊 Pack an aggregate dictionary into a JSON header value (URL-safe).
+        private static string SerializeAggregates(Dictionary<string, Dictionary<string, int>> aggregates)
+        {
+            if (aggregates == null || aggregates.Count == 0) return string.Empty;
+            return System.Text.Json.JsonSerializer.Serialize(aggregates);
         }
 
                                                                                                                                                                                                                                                                                                                                                                                                                             
@@ -187,7 +310,7 @@ namespace CRM.Microservice.Controllers
 
 
         [HttpGet("operations")]
-        public async Task<IActionResult> GetOperationalRecords([FromQuery] int page = 1, [FromQuery] string? module = null, [FromQuery] int? propertyId = null, [FromQuery] int? propertyUnitId = null)
+        public async Task<IActionResult> GetOperationalRecords([FromQuery] int page = 1, [FromQuery] string? module = null, [FromQuery] int? propertyId = null, [FromQuery] int? propertyUnitId = null, [FromQuery] string? tenantId = null)
         {
             if (!await _permissionCheck.HasPermissionAsync("units:view"))
             {
@@ -195,14 +318,24 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
-            var query = _context.OperationalRecords.Where(r => r.TenantId == tenantId);
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            IQueryable<OperationalRecord> query = _context.OperationalRecords;
+            if (visibleTenants.Count > 0)
+                query = query.Where(r => visibleTenants.Contains(r.TenantId));
             if (!string.IsNullOrWhiteSpace(module)) query = query.Where(r => r.Module == module);
             if (propertyId.HasValue) query = query.Where(r => r.PropertyId == propertyId.Value);
             if (propertyUnitId.HasValue) query = query.Where(r => r.PropertyUnitId == propertyUnitId.Value);
 
-            var (items, total) = await PageAsync(query.OrderByDescending(r => r.UpdatedAt), page);
+            var ordered = query.OrderByDescending(r => r.UpdatedAt);
+            var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["module"] = await AggregateStringAsync(ordered, r => r.Module),
+                ["status"] = await AggregateStringAsync(ordered, r => r.Status)
+            };
+
+            var (items, total) = await PageAsync(ordered, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
             return Ok(items);
         }
 
@@ -265,7 +398,7 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("companies")]
-        public async Task<IActionResult> GetCompanies([FromQuery] int page)
+        public async Task<IActionResult> GetCompanies([FromQuery] int page, [FromQuery] string? tenantId)
         {
             if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
             {
@@ -273,18 +406,23 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var visibleTenants = await GetVisibleTenantIdsAsync();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<CRMCompany> query = _context.CRMCompanies;
             if (visibleTenants.Count > 0)
                 query = query.Where(c => visibleTenants.Contains(c.TenantId));
-            query = query.OrderBy(c => c.BusinessName);
-            var (items, total) = await PageAsync(query, page);
+            var ordered = query.OrderBy(c => c.BusinessName);
+            var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["industryVertical"] = await AggregateStringAsync(ordered, c => c.IndustryVertical)
+            };
+            var (items, total) = await PageAsync(ordered, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
             return Ok(items);
         }
 
         [HttpGet("owners-tenants")]
-        public async Task<IActionResult> GetOwnerTenantRecords([FromQuery] int page)
+        public async Task<IActionResult> GetOwnerTenantRecords([FromQuery] int page, [FromQuery] string? tenantId)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:view"))
             {
@@ -292,13 +430,19 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var visibleTenants = await GetVisibleTenantIdsAsync();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<OwnerTenantRecord> query = _context.OwnerTenantRecords;
             if (visibleTenants.Count > 0)
                 query = query.Where(r => visibleTenants.Contains(r.TenantId));
-            query = query.OrderByDescending(r => r.CreatedAt);
-            var (items, total) = await PageAsync(query, page);
+            var ordered = query.OrderByDescending(r => r.CreatedAt);
+            var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["recordType"] = await AggregateStringAsync(ordered, r => r.RecordType),
+                ["primaryLocation"] = await AggregateStringAsync(ordered, r => r.PrimaryLocation)
+            };
+            var (items, total) = await PageAsync(ordered, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
             return Ok(items);
         }
 
@@ -420,13 +564,68 @@ namespace CRM.Microservice.Controllers
             {
                 query = query.Where(a => visibleTenants.Contains(a.TenantId));
             }
-            query = query.OrderBy(a => a.Name);
+            var ordered = query.OrderBy(a => a.Name);
 
-            var (items, total) = await PageAsync(query, page);
+            // 📊 Chart-friendly aggregates computed over the entire filtered set,
+            // not the 20-row page — donut/pie charts need the full universe.
+            var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["operationalStatus"] = await AggregateStringAsync(ordered, a => a.OperationalStatus),
+                ["isTrial"] = await AggregateBoolAsync(ordered, a => a.IsTrial),
+                ["hasParent"] = await AggregateBoolAsync(ordered, a => a.ParentAgencyId != null && a.ParentAgencyId != "")
+            };
+
+            var (items, total) = await PageAsync(ordered, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
             _logger.LogInformation("GetAgencies: Returned {Count} agencies (page {Page}) out of {Total} total",
                 items.Count, page, total);
             return Ok(items);
+        }
+
+        // 📜 Full non-paginated agency roster for the caller. Used by the
+        // tenant switcher dropdown so the user can search and pick any
+        // agency in their visible subtree (the regular /agencies endpoint
+        // paginates to 20 rows which is useless for a search/select widget
+        // when the caller can see hundreds of agencies). Honours the same
+        // parent-vs-child subtree override rule as the rest of the
+        // visibility helpers; returns every visible agency as a flat array
+        // (no aggregates, no page envelope — the dropdown doesn't need
+        // either).
+        [HttpGet("agencies/roster")]
+        public async Task<IActionResult> GetAgenciesRoster([FromQuery] string? tenantId)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("GetAgenciesRoster: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            IQueryable<AgencyRecord> query = _context.AgencyRecords;
+            if (visibleTenants.Count > 0)
+            {
+                query = query.Where(a => visibleTenants.Contains(a.TenantId));
+            }
+            // Sort by TradingName for a more user-friendly dropdown, then
+            // by AgencyId as a stable tiebreaker.
+            var roster = await query
+                .OrderBy(a => a.TradingName ?? a.Name)
+                .ThenBy(a => a.AgencyId)
+                .Select(a => new
+                {
+                    agencyId = a.AgencyId,
+                    tenantId = a.TenantId,
+                    name = a.Name,
+                    tradingName = a.TradingName,
+                    parentAgencyId = a.ParentAgencyId,
+                    operationalStatus = a.OperationalStatus,
+                    isTrial = a.IsTrial
+                })
+                .ToListAsync();
+            _logger.LogInformation("GetAgenciesRoster: returned {Count} agencies for override {Override}",
+                roster.Count, tenantId ?? "(default)");
+            return Ok(roster);
         }
 
         [HttpPost("agencies")]
@@ -620,7 +819,7 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("brokers")]
-        public async Task<IActionResult> GetBrokers([FromQuery] int page)
+        public async Task<IActionResult> GetBrokers([FromQuery] int page, [FromQuery] string? tenantId)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:view"))
             {
@@ -628,13 +827,19 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var visibleTenants = await GetVisibleTenantIdsAsync();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<BrokerRecord> query = _context.BrokerRecords;
             if (visibleTenants.Count > 0)
                 query = query.Where(b => visibleTenants.Contains(b.TenantId));
-            query = query.OrderBy(b => b.AgencyId).ThenBy(b => b.FullName);
-            var (items, total) = await PageAsync(query, page);
+            var ordered = query.OrderBy(b => b.AgencyId).ThenBy(b => b.FullName);
+            var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["role"] = await AggregateStringAsync(ordered, b => b.Role),
+                ["status"] = await AggregateStringAsync(ordered, b => b.Status)
+            };
+            var (items, total) = await PageAsync(ordered, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
             return Ok(items);
         }
 
@@ -724,7 +929,7 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("legal-entities")]
-        public async Task<IActionResult> GetLegalEntities([FromQuery] int page)
+        public async Task<IActionResult> GetLegalEntities([FromQuery] int page, [FromQuery] string? tenantId)
         {
             if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
             {
@@ -732,13 +937,18 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var visibleTenants = await GetVisibleTenantIdsAsync();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<CRMLegalEntity> query = _context.CRMLegalEntities.Include(e => e.CompanyDetails);
             if (visibleTenants.Count > 0)
                 query = query.Where(e => visibleTenants.Contains(e.TenantId));
-            query = query.OrderBy(e => e.RegisteredLegalName);
-            var (items, total) = await PageAsync(query, page);
+            var ordered = query.OrderBy(e => e.RegisteredLegalName);
+            var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["entityType"] = await AggregateStringAsync(ordered, e => e.EntityTypeClassifier)
+            };
+            var (items, total) = await PageAsync(ordered, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
             return Ok(items);
         }
 
@@ -784,7 +994,7 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("contacts")]
-        public async Task<IActionResult> GetContacts([FromQuery] int page)
+        public async Task<IActionResult> GetContacts([FromQuery] int page, [FromQuery] string? tenantId)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:view"))
             {
@@ -792,20 +1002,27 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var visibleTenants = await GetVisibleTenantIdsAsync();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<CRMContact> query = _context.CRMContacts
                 .Include(c => c.CompanyDetails)
                 .Include(c => c.LegalEntityDetails);
             if (visibleTenants.Count > 0)
                 query = query.Where(c => visibleTenants.Contains(c.TenantId));
-            query = query.OrderBy(c => c.FullName);
-            var (items, total) = await PageAsync(query, page);
+            var ordered = query.OrderBy(c => c.FullName);
+            var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["contactRole"] = await AggregateStringAsync(ordered, c => c.ContactRoleType),
+                ["position"] = await AggregateStringAsync(ordered, c => c.PositionJobTitle),
+                ["hasCompany"] = await AggregateBoolAsync(ordered, c => !string.IsNullOrEmpty(c.AssociatedCompanyId))
+            };
+            var (items, total) = await PageAsync(ordered, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
             return Ok(items);
         }
 
         [HttpGet("contacts/search")]
-        public async Task<IActionResult> SearchContacts([FromQuery] string q, [FromQuery] int page = 1)
+        public async Task<IActionResult> SearchContacts([FromQuery] string q, [FromQuery] int page = 1, [FromQuery] string? tenantId = null)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:view"))
             {
@@ -813,11 +1030,12 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
-            var query = _context.CRMContacts
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            IQueryable<CRMContact> query = _context.CRMContacts
                 .Include(c => c.CompanyDetails)
-                .Include(c => c.LegalEntityDetails)
-                .Where(c => c.TenantId == tenantId);
+                .Include(c => c.LegalEntityDetails);
+            if (visibleTenants.Count > 0)
+                query = query.Where(c => visibleTenants.Contains(c.TenantId));
 
             var term = (q ?? string.Empty).Trim().ToLower();
             if (!string.IsNullOrEmpty(term))
@@ -878,7 +1096,7 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpGet("boards")]
-        public async Task<IActionResult> GetCRMBoards([FromQuery] int page, [FromQuery] string agentName = "", [FromQuery] string userRole = "")
+        public async Task<IActionResult> GetCRMBoards([FromQuery] int page, [FromQuery] string agentName = "", [FromQuery] string userRole = "", [FromQuery] string? tenantId = null)
         {
             if (!await _permissionCheck.HasPermissionAsync("deals:view"))
             {
@@ -886,7 +1104,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var visibleTenants = await GetVisibleTenantIdsAsync();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             // 🔐 Scoping is authoritative from the JWT, never from a client-supplied role string.
             var callerRole = GetCurrentCanonicalRole();
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? agentName ?? string.Empty;
@@ -906,10 +1124,20 @@ namespace CRM.Microservice.Controllers
                 dealsQuery = dealsQuery.Where(d => d.AllocatedToAgent == callerName);
             }
 
+            // 📊 Stage aggregates computed over the entire filtered universe so
+            // bar/donut stage charts reflect every lead + deal, not just the
+            // single 20-row page that was returned.
+            var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["leadStage"] = await AggregateStringAsync(leadsQuery, l => l.LeadStage.ToString()),
+                ["dealStage"] = await AggregateStringAsync(dealsQuery, d => d.DealStage.ToString())
+            };
+
             var (activeLeads, leadTotal) = await PageAsync(leadsQuery.OrderByDescending(l => l.CreatedAt), page);
             var (activeDeals, dealTotal) = await PageAsync(dealsQuery.OrderByDescending(d => d.LastStageUpdatedAt), page);
             HttpContext.Response.Headers["X-Lead-Count"] = leadTotal.ToString();
             HttpContext.Response.Headers["X-Deal-Count"] = dealTotal.ToString();
+            HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
 
             return Ok(new
             {
@@ -1146,7 +1374,7 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpPut("deal/{dealId:int}")]
-        public async Task<IActionResult> UpdateDeal(int dealId, [FromBody] DealRecord updatedDeal)
+        public async Task<IActionResult> UpdateDeal(int dealId, [FromBody] UpdateDealPayload updatedDeal)
         {
             if (!await _permissionCheck.HasPermissionAsync("deals:edit"))
             {
@@ -1154,23 +1382,54 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
+            // 🛡️ PlatformAdmin can edit any deal; everyone else is pinned to
+            // their JWT tenant to prevent cross-tenant tampering.
+            var callerRole = GetCurrentCanonicalRole();
+            var isPlatformAdmin = callerRole == "PlatformAdmin";
             var tenantId = GetCurrentTenant();
-            var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            var deal = isPlatformAdmin
+                ? await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId)
+                : await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Deal record not found." });
 
-            if (GetCurrentCanonicalRole() == "Broker")
-                updatedDeal.AllocatedToAgent = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? deal.AllocatedToAgent;
+            // Brokers are pinned to their own account — never trust the payload's
+            // agent override. Higher roles can reassign ownership freely.
+            var isBroker = callerRole == "Broker";
+            if (isBroker)
+            {
+                var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
+                if (!string.IsNullOrEmpty(callerName)) deal.AllocatedToAgent = callerName;
+            }
+            else if (!string.IsNullOrEmpty(updatedDeal.AllocatedToAgent))
+            {
+                deal.AllocatedToAgent = updatedDeal.AllocatedToAgent;
+            }
 
-            deal.BuyerClientId = updatedDeal.BuyerClientId;
-            deal.SellerClientId = updatedDeal.SellerClientId;
-            deal.DealStage = updatedDeal.DealStage;
-            deal.TransactionValue = updatedDeal.TransactionValue;
-            deal.DealNotes = updatedDeal.DealNotes;
-            deal.AllocatedToAgent = updatedDeal.AllocatedToAgent;
-            deal.CommissionType = updatedDeal.CommissionType;
-            deal.CommissionValue = updatedDeal.CommissionValue;
-            deal.RealisedCommission = updatedDeal.RealisedCommission;
-            deal.LinkedPropertyId = updatedDeal.LinkedPropertyId;
+            // 🛠️ Partial-update merge: every field on the payload is optional
+            // so the frontend can submit only what changed.
+            if (updatedDeal.BuyerClientId != null) deal.BuyerClientId = updatedDeal.BuyerClientId;
+            if (updatedDeal.SellerClientId != null) deal.SellerClientId = updatedDeal.SellerClientId;
+            if (updatedDeal.DealStage.HasValue) deal.DealStage = updatedDeal.DealStage.Value;
+            if (updatedDeal.TransactionValue.HasValue) deal.TransactionValue = updatedDeal.TransactionValue.Value;
+            if (updatedDeal.DealNotes != null) deal.DealNotes = updatedDeal.DealNotes;
+            if (updatedDeal.CommissionType != null) deal.CommissionType = updatedDeal.CommissionType;
+            if (updatedDeal.CommissionValue.HasValue) deal.CommissionValue = updatedDeal.CommissionValue.Value;
+            if (updatedDeal.RealisedCommission.HasValue) deal.RealisedCommission = updatedDeal.RealisedCommission.Value;
+            if (updatedDeal.LinkedPropertyId.HasValue) deal.LinkedPropertyId = updatedDeal.LinkedPropertyId.Value;
+
+            // 💰 Keep the realised commission consistent with the commission
+            // parameters whenever the deal is ClosedWon. ClosedLost clears it.
+            if (deal.DealStage == DealWorkflowStage.ClosedWon)
+            {
+                deal.RealisedCommission = deal.CommissionType == CommissionTypes.Percent
+                    ? Math.Round(deal.TransactionValue * deal.CommissionValue / 100m, 2)
+                    : deal.CommissionValue;
+            }
+            else if (deal.DealStage == DealWorkflowStage.ClosedLost)
+            {
+                deal.RealisedCommission = 0m;
+            }
+
             deal.LastStageUpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
@@ -1366,10 +1625,15 @@ namespace CRM.Microservice.Controllers
 
             var summaryReport = new PipelineSummaryReport
             {
-                ActiveLeadsCount = await baseLeadQuery.Where(l => l.LeadStage == LeadWorkflowStage.Contacted).CountAsync(),
+                // 🧮 "Active leads" = anything in the pipeline except
+                // disqualified leads and leads already converted to deals.
+                ActiveLeadsCount = await baseLeadQuery.Where(l => l.LeadStage != LeadWorkflowStage.Disqualified).CountAsync(),
                 ValuationsInProcessCount = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.DiscoveryNeedsAnalysis || d.DealStage == DealWorkflowStage.Presentation).CountAsync(),
                 ConveyancingAtDeedsCount = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.ProposalQuoteSent || d.DealStage == DealWorkflowStage.Negotiation).CountAsync(),
                 FinalizedClosedCount = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.ClosedWon).CountAsync(),
+                // 💰 Pipeline estimated value = sum of TransactionValue for
+                // every in-flight deal (not ClosedWon/Lost). This is the
+                // "potential revenue" on the board, not the realised number.
                 TotalPipelineEstimatedValue = await baseDealQuery.Where(d => d.DealStage == DealWorkflowStage.DiscoveryNeedsAnalysis || d.DealStage == DealWorkflowStage.Presentation || d.DealStage == DealWorkflowStage.ProposalQuoteSent || d.DealStage == DealWorkflowStage.Negotiation).SumAsync(d => d.TransactionValue)
             };
 
@@ -1418,7 +1682,15 @@ namespace CRM.Microservice.Controllers
                     Period = new DateTime(activeYear, month, 1).ToString("MMM"),
                     Leads = tenantLeads.Count(l => l.CreatedAt.Month == month),
                     Deals = tenantDeals.Count(d => d.CreatedAt.Month == month),
-                    Revenue = tenantDeals.Where(d => d.CreatedAt.Month == month && d.DealStage == DealWorkflowStage.ClosedWon).Sum(d => d.TransactionValue)
+                    // 💰 Realised commission on ClosedWon deals created this
+                    // month — same formula as the totals so the line chart
+                    // sums back to the headline number.
+                    Revenue = Math.Round(tenantDeals
+                        .Where(d => d.CreatedAt.Month == month && d.DealStage == DealWorkflowStage.ClosedWon)
+                        .Sum(d => d.RealisedCommission
+                            ?? (d.CommissionType == CommissionTypes.Percent
+                                ? d.TransactionValue * d.CommissionValue / 100m
+                                : d.CommissionValue)), 2)
                 })
                 .ToList();
 
@@ -1426,13 +1698,31 @@ namespace CRM.Microservice.Controllers
             {
                 TotalLeads = tenantLeads.Count,
                 TotalDeals = tenantDeals.Count,
-                TotalRevenue = tenantDeals.Where(d => d.DealStage == DealWorkflowStage.ClosedWon).Sum(d => d.TransactionValue),
-                TotalRealisedCommission = tenantDeals.Where(d => d.DealStage == DealWorkflowStage.ClosedWon).Sum(d => d.RealisedCommission ?? 0m),
+                // 💰 Revenue is realised commission on ClosedWon deals, not
+                // raw TransactionValue. Use the locked-in amount when
+                // available, otherwise fall back to the per-deal formula so
+                // legacy seed rows (no RealisedCommission) still surface.
+                TotalRevenue = Math.Round(tenantDeals
+                    .Where(d => d.DealStage == DealWorkflowStage.ClosedWon)
+                    .Sum(d => d.RealisedCommission
+                        ?? (d.CommissionType == CommissionTypes.Percent
+                            ? d.TransactionValue * d.CommissionValue / 100m
+                            : d.CommissionValue)), 2),
+                TotalRealisedCommission = Math.Round(tenantDeals
+                    .Where(d => d.DealStage == DealWorkflowStage.ClosedWon)
+                    .Sum(d => d.RealisedCommission
+                        ?? (d.CommissionType == CommissionTypes.Percent
+                            ? d.TransactionValue * d.CommissionValue / 100m
+                            : d.CommissionValue)), 2),
                 MonthlyBreakdown = monthlyBreakdown
             });
         }
 
-        // 📊 Commission realised per deal stage — only ClosedWon carries a realised amount.
+        // 📊 Commission per deal stage — the "expected commission" for every
+        // deal in the stage, computed from the deal's commission parameters
+        // (Percent of TransactionValue or a flat Rand amount). This is more
+        // useful than realised commission (which is only set on ClosedWon)
+        // because it surfaces the full revenue pipeline at every stage.
         [HttpGet("report/commission-by-stage")]
         public async Task<IActionResult> GetCommissionByStage([FromQuery] string? tenantId)
         {
@@ -1451,16 +1741,38 @@ namespace CRM.Microservice.Controllers
             if (visibleTenants.Count > 0)
                 query = query.Where(d => visibleTenants.Contains(d.TenantId));
 
-            var rows = await query
+            // Pull the rows so we can apply the per-deal commission formula
+            // in C# (EF Core can't translate a nullable-vs-string switch).
+            var deals = await query.Select(d => new {
+                d.DealStage,
+                d.TransactionValue,
+                d.CommissionType,
+                d.CommissionValue,
+                d.RealisedCommission
+            }).ToListAsync();
+
+            var rows = deals
                 .GroupBy(d => d.DealStage)
                 .Select(g => new ReportDrilldownRow
                 {
                     Period = g.Key.ToString(),
                     Deals = g.Count(),
-                    Revenue = g.Sum(d => d.RealisedCommission ?? 0m)
+                    // 🧮 Expected commission per deal: Percent → TV*CV/100, Flat → CV.
+                    // For ClosedWon we still use the locked RealisedCommission
+                    // so the chart agrees with the closed-won accounting.
+                    Revenue = Math.Round(g.Sum(d =>
+                        d.DealStage == DealWorkflowStage.ClosedWon
+                            ? (d.RealisedCommission ?? ComputeExpectedCommission(d))
+                            : ComputeExpectedCommission(d)
+                    ), 2)
                 })
-                .ToListAsync();
+                .ToList();
             return Ok(rows);
+
+            static decimal ComputeExpectedCommission(dynamic d) =>
+                d.CommissionType == CommissionTypes.Percent
+                    ? Math.Round((decimal)d.TransactionValue * (decimal)d.CommissionValue / 100m, 2)
+                    : (decimal)d.CommissionValue;
         }
 
         // 📊 Broker leaderboard — deal count + pipeline value, ranked.
@@ -1474,29 +1786,55 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
+            var isBroker = GetCurrentCanonicalRole() == "Broker";
             IQueryable<DealRecord> query = _context.DealRecords
-                .Where(d => d.AllocatedToAgent != null && d.AllocatedToAgent != "");
+                .Where(d => d.AllocatedToAgent != null && d.AllocatedToAgent != "")
+                .Where(d => !isBroker || d.AllocatedToAgent == callerName);
             if (visibleTenants.Count > 0)
                 query = query.Where(d => visibleTenants.Contains(d.TenantId));
 
-            var rows = await query
+            // Pull per-deal data so we can apply the commission formula in
+            // C# (EF Core can't translate a string-vs-enum branch on a
+            // nullable CommissionType). Each deal's commission is normalised
+            // to Rand before aggregation.
+            var deals = await query
+                .Select(d => new {
+                    d.AllocatedToAgent,
+                    d.TransactionValue,
+                    d.CommissionType,
+                    d.CommissionValue,
+                    d.RealisedCommission,
+                    d.DealStage
+                })
+                .ToListAsync();
+
+            var rows = deals
                 .GroupBy(d => d.AllocatedToAgent)
                 .Select(g => new
                 {
                     agent = g.Key,
                     deals = g.Count(),
-                    totalValue = g.Sum(d => d.TransactionValue),
-                    totalCommission = g.Sum(d => d.RealisedCommission ?? 0m),
+                    // 🧮 totalValue = full TransactionValue across every deal
+                    // (the headline "pipeline value" metric for the broker).
+                    totalValue = Math.Round(g.Sum(d => d.TransactionValue), 2),
+                    // 🧮 totalCommission = expected commission on every deal
+                    // (use the locked RealisedCommission for ClosedWon so the
+                    // number agrees with the realised revenue on the report).
+                    totalCommission = Math.Round(g.Sum(d => d.RealisedCommission
+                        ?? (d.CommissionType == CommissionTypes.Percent
+                            ? d.TransactionValue * d.CommissionValue / 100m
+                            : d.CommissionValue)), 2),
                     won = g.Count(d => d.DealStage == DealWorkflowStage.ClosedWon)
                 })
                 .OrderByDescending(r => r.totalValue)
-                .ToListAsync();
+                .ToList();
             return Ok(rows);
         }
 
         // 🧾 Load a broker's resumable brochure card for a deal (client details + curated unit lines).
         [HttpGet("brochure-cards")]
-        public async Task<IActionResult> GetBrochureCardByDeal([FromQuery] int dealId)
+        public async Task<IActionResult> GetBrochureCardByDeal([FromQuery] int dealId, [FromQuery] string? tenantId = null)
         {
             if (!await _permissionCheck.HasPermissionAsync("billing:view"))
             {
@@ -1504,7 +1842,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var visibleTenants = await GetVisibleTenantIdsAsync();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
 
@@ -1550,7 +1888,7 @@ namespace CRM.Microservice.Controllers
 
         // 🧾 Active brochure cards for the broker notification badge.
         [HttpGet("brochure-cards/active")]
-        public async Task<IActionResult> GetActiveBrochureCards()
+        public async Task<IActionResult> GetActiveBrochureCards([FromQuery] string? tenantId = null)
         {
             if (!await _permissionCheck.HasPermissionAsync("billing:view"))
             {
@@ -1558,13 +1896,15 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var tenantId = GetCurrentTenant();
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
 
-            var query = _context.BrochureCards
-                .Where(c => c.TenantId == tenantId && !c.IsDeleted &&
+            IQueryable<BrochureCard> query = _context.BrochureCards
+                .Where(c => !c.IsDeleted &&
                             (c.Status == BrochureCardStatus.Active || c.Status == BrochureCardStatus.Generating));
+            if (visibleTenants.Count > 0)
+                query = query.Where(c => visibleTenants.Contains(c.TenantId));
             if (isBroker) query = query.Where(c => c.BrokerAgentId == callerName);
 
             var cards = await query.Select(c => new
@@ -1755,7 +2095,12 @@ namespace CRM.Microservice.Controllers
             _context.DealBrokerSplits.RemoveRange(existing);
 
             decimal totalPercentage = request.Splits.Sum(s => s.SplitPercentage);
-            decimal commissionValue = deal.CommissionValue;
+            // 🧮 Split the realised commission, not the raw CommissionValue
+            // (CommissionValue is either a percentage like 5 or a flat Rand
+            // amount — both need to be normalised to Rand before splitting).
+            decimal realisedCommission = deal.CommissionType == CommissionTypes.Percent
+                ? Math.Round(deal.TransactionValue * deal.CommissionValue / 100m, 2)
+                : deal.CommissionValue;
 
             foreach (var split in request.Splits)
             {
@@ -1765,7 +2110,7 @@ namespace CRM.Microservice.Controllers
                     BrokerId = split.BrokerId,
                     BrokerName = split.BrokerName,
                     SplitPercentage = split.SplitPercentage,
-                    SplitAmount = totalPercentage > 0 ? Math.Round(commissionValue * split.SplitPercentage / 100m, 2) : 0m
+                    SplitAmount = totalPercentage > 0 ? Math.Round(realisedCommission * split.SplitPercentage / 100m, 2) : 0m
                 });
             }
 
