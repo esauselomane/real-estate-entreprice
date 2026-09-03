@@ -1,0 +1,149 @@
+substitutions:
+  _REGION: us-central1
+  _REPO: realestate-images
+  _SQL_INSTANCE: realestate-sql
+  _VPC_CONNECTOR: realestate-connector
+  _SHORT_SHA: $SHORT_SHA
+  _PROJECT_ID: $PROJECT_ID
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  - id: build-identity
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=BUILD_CONFIGURATION=Release
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/identity-service:${_SHORT_SHA}
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/identity-service:latest
+      - -f=backend-services/Identity.Microservice/Dockerfile
+      - .
+
+  - id: build-property
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=BUILD_CONFIGURATION=Release
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/property-service:${_SHORT_SHA}
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/property-service:latest
+      - -f=backend-services/Property.Microservice/Dockerfile
+      - .
+
+  - id: build-crm
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=BUILD_CONFIGURATION=Release
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/crm-service:${_SHORT_SHA}
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/crm-service:latest
+      - -f=backend-services/CRM.Microservice/Dockerfile
+      - .
+
+  - id: build-developer-api
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=BUILD_CONFIGURATION=Release
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/developer-api:${_SHORT_SHA}
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/developer-api:latest
+      - -f=Developer.API/Dockerfile
+      - .
+
+  - id: build-gateway
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=BUILD_CONFIGURATION=Release
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/gateway:${_SHORT_SHA}
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/gateway:latest
+      - -f=api-gateway/Dockerfile
+      - .
+
+  - id: build-brochure-worker
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=BUILD_CONFIGURATION=Release
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/brochure-worker:${_SHORT_SHA}
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/brochure-worker:latest
+      - -f=backend-services/BrochureGeneration.Worker/Dockerfile
+      - .
+
+  - id: build-image-worker
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=BUILD_CONFIGURATION=Release
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/image-worker:${_SHORT_SHA}
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/image-worker:latest
+      - -f=backend-services/ImageProcessor.Worker/Dockerfile
+      - .
+
+  - id: build-syndication-worker
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=BUILD_CONFIGURATION=Release
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/syndication-worker:${_SHORT_SHA}
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/syndication-worker:latest
+      - -f=backend-services/PlatformSyndication.Worker/Dockerfile
+      - .
+
+  - id: build-frontend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=BUILD_CONFIGURATION=Release
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/frontend-client:${_SHORT_SHA}
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/frontend-client:latest
+      - -f=frontend-client/Dockerfile
+      - .
+
+  - id: build-client-facing
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg=BUILD_CONFIGURATION=Release
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/client-facing:${_SHORT_SHA}
+      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/client-facing:latest
+      - -f=client-facing-app/Dockerfile
+      - .
+
+  - id: push-images
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        for svc in identity-service property-service crm-service developer-api gateway brochure-worker image-worker syndication-worker frontend-client client-facing; do
+          docker push ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/$$svc:${_SHORT_SHA}
+          docker push ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/$$svc:latest
+        done
+
+  - id: deploy-cloud-run
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - replace
+      - /workspace/deploy/cloud-run-manifest.yaml
+      - --region=${_REGION}
+
+images:
+  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/identity-service:${_SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/property-service:${_SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/crm-service:${_SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/developer-api:${_SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/gateway:${_SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/brochure-worker:${_SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/image-worker:${_SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/syndication-worker:${_SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/frontend-client:${_SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/client-facing:${_SHORT_SHA}
+
+timeout: 1800s
+queueTtl: 3600s

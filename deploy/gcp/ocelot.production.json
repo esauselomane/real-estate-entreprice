@@ -1,0 +1,76 @@
+# Production Ocelot gateway config for Google Cloud Run.
+# This file replaces api-gateway/ocelot.json when deploying to GCP.
+#
+# Variables to substitute at deploy time:
+#   ${PROJECT_ID_HASH} — short hash of project ID (e.g., real-estate-enter-a1b2c3)
+#   ${DOMAIN} — your production domain
+
+{
+  "Routes": [
+    {
+      "DownstreamPathTemplate": "/api/auth/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity-service-${PROJECT_ID_HASH}.a.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/auth/{everything}",
+      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/properties/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "property-service-${PROJECT_ID_HASH}.a.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/properties/{everything}",
+      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/crm/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "crm-service-${PROJECT_ID_HASH}.a.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/crm/{everything}",
+      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/system/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity-service-${PROJECT_ID_HASH}.a.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/system/{everything}",
+      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/developer/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "developer-api-${PROJECT_ID_HASH}.a.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/developer/{everything}",
+      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+    }
+  ],
+  "GlobalConfiguration": {
+    "BaseUrl": "https://api.${DOMAIN}",
+    "RequestIdKey": "X-Request-Id",
+    "DownstreamScheme": "https"
+  }
+}

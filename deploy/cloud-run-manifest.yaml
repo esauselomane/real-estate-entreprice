@@ -1,0 +1,414 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: identity-service
+  annotations:
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/sql-instance: PROJECT_ID:REGION:INSTANCE_NAME
+        run.googleapis.com/vpc-access-connector: VPC_CONNECTOR
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: identity-sa@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/identity-service:SHORT_SHA
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1Gi
+            requests:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: ASPNETCORE_URLS
+              value: http://*:8080
+            - name: ConnectionStrings__DefaultConnection
+              value: "Server=10.x.x.x;Database=IdentityDB;User Id=sqlserver;Password=PASSWORD;TrustServerCertificate=True;Encrypt=False;"
+            - name: Jwt__Secret
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: latest
+            - name: Jwt__Issuer
+              value: "Identity.Microservice"
+            - name: Jwt__Audience
+              value: "RealEstateApp.Client"
+            - name: Cors__AllowedOrigins__0
+              value: "https://app.yourdomain.com"
+            - name: Cors__AllowedOrigins__1
+              value: "https://www.yourdomain.com"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 10
+  traffic:
+    - latestRevision: true
+      percent: 100
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: property-service
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "15"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/sql-instance: PROJECT_ID:REGION:INSTANCE_NAME
+        run.googleapis.com/vpc-access-connector: VPC_CONNECTOR
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: property-sa@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/property-service:SHORT_SHA
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1.5Gi
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: ASPNETCORE_URLS
+              value: http://*:8080
+            - name: ConnectionStrings__DefaultConnection
+              value: "Server=10.x.x.x;Database=PropertyDB;User Id=sqlserver;Password=PASSWORD;TrustServerCertificate=True;Encrypt=False;"
+            - name: Jwt__Secret
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: latest
+            - name: Identity__BaseUrl
+              value: "https://identity-service-xxx.a.run.app"
+            - name: Kafka__BootstrapServers
+              value: "kafka:9092"
+            - name: Cors__AllowedOrigins__0
+              value: "https://app.yourdomain.com"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 30
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: crm-service
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "15"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/sql-instance: PROJECT_ID:REGION:INSTANCE_NAME
+        run.googleapis.com/vpc-access-connector: VPC_CONNECTOR
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: crm-sa@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/crm-service:SHORT_SHA
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1.5Gi
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: ASPNETCORE_URLS
+              value: http://*:8080
+            - name: ConnectionStrings__DefaultConnection
+              value: "Server=10.x.x.x;Database=CRMDB;User Id=sqlserver;Password=PASSWORD;TrustServerCertificate=True;Encrypt=False;"
+            - name: Jwt__Secret
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: latest
+            - name: Identity__BaseUrl
+              value: "https://identity-service-xxx.a.run.app"
+            - name: Gateway__BaseUrl
+              value: "https://gateway-xxx.a.run.app"
+            - name: Kafka__BootstrapServers
+              value: "kafka:9092"
+            - name: Cors__AllowedOrigins__0
+              value: "https://app.yourdomain.com"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 5
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: developer-api
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "5"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/sql-instance: PROJECT_ID:REGION:INSTANCE_NAME
+        run.googleapis.com/vpc-access-connector: VPC_CONNECTOR
+    spec:
+      containerConcurrency: 100
+      serviceAccountName: developer-sa@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/developer-api:SHORT_SHA
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: ASPNETCORE_URLS
+              value: http://*:8080
+            - name: ConnectionStrings__DeveloperConnection
+              value: "Server=10.x.x.x;Database=DeveloperDB;User Id=sqlserver;Password=PASSWORD;TrustServerCertificate=True;Encrypt=False;"
+            - name: ConnectionStrings__PropertyConnection
+              value: "Server=10.x.x.x;Database=PropertyDB;User Id=sqlserver;Password=PASSWORD;TrustServerCertificate=True;Encrypt=False;"
+            - name: Jwt__Secret
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: latest
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: gateway
+  annotations:
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "20"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 200
+      timeoutSeconds: 60
+      serviceAccountName: gateway-sa@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/gateway:SHORT_SHA
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: ASPNETCORE_URLS
+              value: http://*:8080
+            - name: Cors__AllowedOrigins__0
+              value: "https://app.yourdomain.com"
+            - name: Cors__AllowedOrigins__1
+              value: "https://www.yourdomain.com"
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: frontend-client
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 30
+      serviceAccountName: frontend-sa@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/frontend-client:SHORT_SHA
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: VITE_API_BASE_URL
+              value: "https://gateway-xxx.a.run.app"
+            - name: NODE_ENV
+              value: production
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: client-facing
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 100
+      serviceAccountName: client-facing-sa@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/client-facing:SHORT_SHA
+          ports:
+            - name: http1
+              containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: NEXT_PUBLIC_GATEWAY_URL
+              value: "https://gateway-xxx.a.run.app"
+            - name: NEXT_PUBLIC_APP_URL
+              value: "https://app.yourdomain.com"
+            - name: NEXT_PUBLIC_SITE_URL
+              value: "https://www.yourdomain.com"
+            - name: LEAD_API_URL
+              value: "https://identity-service-xxx.a.run.app"
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: brochure-worker
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "5"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 1
+      timeoutSeconds: 3600
+      serviceAccountName: worker-sa@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/brochure-worker:SHORT_SHA
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: Gateway__BaseUrl
+              value: "https://gateway-xxx.a.run.app"
+            - name: Kafka__BootstrapServers
+              value: "kafka:9092"
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: image-worker
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "5"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 1
+      timeoutSeconds: 3600
+      serviceAccountName: worker-sa@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/image-worker:SHORT_SHA
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: Kafka__BootstrapServers
+              value: "kafka:9092"
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: syndication-worker
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "5"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 1
+      timeoutSeconds: 3600
+      serviceAccountName: worker-sa@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPO/syndication-worker:SHORT_SHA
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Production
+            - name: Kafka__BootstrapServers
+              value: "kafka:9092"

@@ -8,6 +8,26 @@ namespace CRM.Microservice.Data
 {
     public static class CRMSeedData
     {
+        private static void EnsureSchemaBackfill(CRMDbContext context)
+        {
+            BackfillColumn(context, "CRMContacts", "LinkedDealIds", "nvarchar(max) NULL DEFAULT ''");
+            BackfillColumn(context, "CRMContacts", "Area", "nvarchar(max) NULL DEFAULT ''");
+            BackfillColumn(context, "CRMContacts", "Budget", "nvarchar(max) NULL DEFAULT ''");
+            BackfillColumn(context, "OwnerTenantRecords", "PropertyTypeInterests", "nvarchar(max) NULL DEFAULT ''");
+            BackfillColumn(context, "OwnerTenantRecords", "AreaInterestIds", "nvarchar(max) NULL DEFAULT ''");
+        }
+
+        private static void BackfillColumn(CRMDbContext context, string tableName, string columnName, string definition)
+        {
+            var columnExists = context.Database.SqlQueryRaw<int>(
+                $"SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = N'{tableName}' AND COLUMN_NAME = N'{columnName}'")
+                .AsEnumerable().FirstOrDefault();
+            if (columnExists == 0)
+            {
+                context.Database.ExecuteSqlRaw($"ALTER TABLE [{tableName}] ADD [{columnName}] {definition};");
+            }
+        }
+
         public static void EnsureSeeded(CRMDbContext context)
         {
             if (context == null)
@@ -16,6 +36,8 @@ namespace CRM.Microservice.Data
             }
 
             context.Database.EnsureCreated();
+
+            EnsureSchemaBackfill(context);
 
             if (context.AgencyRecords.Count() < 1000)
             {
