@@ -17,3 +17,4 @@ aider-env
 .next/
 out/
 .env*
+agents.md
