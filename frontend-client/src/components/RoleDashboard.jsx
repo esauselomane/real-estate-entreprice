@@ -264,7 +264,7 @@ export default function RoleDashboard() {
        {isLoading ? (
         <div className="py-16 text-center text-slate-500 text-sm">Loading role-specific analytics...</div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 grid-cols-2">
           {charts.map((c) => (
             <ChartCard key={c.title} title={c.title} icon={c.icon}>
               {renderChart(c)}

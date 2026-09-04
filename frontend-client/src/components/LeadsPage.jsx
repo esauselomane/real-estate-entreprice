@@ -5,8 +5,12 @@ import { crmService } from '../services/crmService.js';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
+import ContactPicker from '../components/ContactPicker.jsx';
+import BrokerPicker from '../components/BrokerPicker.jsx';
+import Pagination from '../components/Pagination.jsx';
 
 const LEAD_STAGES = ['Contacted', 'Qualified', 'Negotiation', 'ProposalSent', 'ClosedWon', 'ClosedLost'];
+const LEAD_PAGE_SIZE = 20;
 const LEAD_STAGE_COLORS = { Contacted: '#3b82f6', Qualified: '#14b8a6', Negotiation: '#f59e0b', ProposalSent: '#a78bfa', ClosedWon: '#22c55e', ClosedLost: '#ef4444' };
 
 const formatLeadStage = (value) => {
@@ -27,6 +31,8 @@ export default function LeadsPage() {
   const { activeTenantId } = useTenant();
   const [leads, setLeads] = useState([]);
   const [leadTotalCount, setLeadTotalCount] = useState(0);
+  const [leadPage, setLeadPage] = useState(1);
+  const [stageAggregates, setStageAggregates] = useState({});
   const [brokers, setBrokers] = useState([]);
   const [summaryReport, setSummaryReport] = useState({ activeLeadsCount: 0, valuationsInProcessCount: 0, conveyancingAtDeedsCount: 0, finalizedClosedCount: 0, totalPipelineEstimatedValue: 0 });
   const [isLoading, setIsLoading] = useState(false);
@@ -39,34 +45,68 @@ export default function LeadsPage() {
   const [editingLead, setEditingLead] = useState(null);
   const [nextStage, setNextStage] = useState('');
   const [notes, setNotes] = useState('');
-  const [editForm, setEditForm] = useState({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', leadType: 'ForSale', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedToAgent: '', linkedContactId: null });
+  const [editForm, setEditForm] = useState({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', leadType: 'ForSale', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedBrokerIds: [], linkedContactId: null });
   const [editContactSearch, setEditContactSearch] = useState('');
   const [editContactMatches, setEditContactMatches] = useState([]);
   const [editSelectedContact, setEditSelectedContact] = useState(null);
   const [showEditContactDropdown, setShowEditContactDropdown] = useState(false);
+  const [editSelectedBrokers, setEditSelectedBrokers] = useState([]);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const loadData = async () => {
+  const toErrorString = (err, fallback) => {
+    if (!err) return fallback;
+    if (typeof err === 'string') return err;
+    if (err.message) return err.message;
+    try { return JSON.stringify(err); } catch { return fallback; }
+  };
+
+  const loadData = async (pageToLoad = 1) => {
     setIsLoading(true);
     setErrorMessage('');
     try {
       const [summary, boards, brokersRes] = await Promise.all([
         crmService.getPipelineReportSummary(),
-        crmService.getCRMBoards(),
+        crmService.getCRMBoards(pageToLoad),
         crmService.getBrokers()
       ]);
       setSummaryReport(summary);
       setLeads(boards.unverifiedLeads || []);
       setLeadTotalCount(boards.leadCount || 0);
+      setStageAggregates(boards.aggregates?.leadStage || {});
+      setLeadPage(pageToLoad);
       setBrokers(brokersRes || []);
     } catch (err) {
-      setErrorMessage(err || 'Failed to load leads.');
+      setErrorMessage(toErrorString(err, 'Failed to load leads.'));
     } finally {
       setIsLoading(false);
     }
   };
 
-  useEffect(() => { loadData(); }, [activeTenantId]);
+  useEffect(() => { loadData(1); }, [activeTenantId]);
+
+  const handleLeadPageChange = (newPage) => {
+    if (newPage < 1) return;
+    const maxPage = Math.max(1, Math.ceil(leadTotalCount / LEAD_PAGE_SIZE));
+    if (newPage > maxPage) return;
+    loadData(newPage);
+  };
+
+  // 🧑‍💼 Resolve a comma-separated AllocatedBrokerIds string to broker names
+  // using the in-component `brokers` roster. Falls back to the raw id for
+  // any id that hasn't loaded yet (so cards never crash if brokers are
+  // still being fetched).
+  const resolveBrokerNames = (allocatedBrokerIds) => {
+    if (!allocatedBrokerIds) return '';
+    return allocatedBrokerIds
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((id) => {
+        const b = brokers.find((x) => x.brokerId === id);
+        return b ? b.fullName : id;
+      })
+      .join(', ');
+  };
 
   const handleContactSearch = async (value) => {
     setContactSearch(value);
@@ -131,16 +171,17 @@ export default function LeadsPage() {
         estimatedBudget: parseFloat(leadForm.estimatedBudget) || 0,
         commissionType: leadForm.commissionType,
         commissionValue: parseFloat(leadForm.commissionValue) || 0,
-        allocatedToAgent: leadForm.allocatedToAgent,
+        allocatedBrokerIds: (selectedBrokers || []).map((b) => b.brokerId).join(','),
         linkedContactId: selectedContact ? selectedContact.contactId : null
       };
       await crmService.createLead(payload);
-      setLeadForm({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedToAgent: '' });
+      setLeadForm({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedBrokerIds: [] });
+      setSelectedBrokers([]);
       clearContact();
       setIsLeadFormOpen(false);
       await loadData();
     } catch (err) {
-      alert(err || 'Failed to create lead.');
+      alert(toErrorString(err, 'Failed to create lead.'));
     }
   };
 
@@ -153,7 +194,7 @@ export default function LeadsPage() {
       setNextStage('');
       await loadData();
     } catch (err) {
-      alert(err || 'Failed to update lead stage.');
+      alert(toErrorString(err, 'Failed to update lead stage.'));
     }
   };
 
@@ -163,7 +204,7 @@ export default function LeadsPage() {
       alert(`Lead promoted to deal DL-${res.dealId}`);
       await loadData();
     } catch (err) {
-      alert(err || 'Promotion failed.');
+      alert(toErrorString(err, 'Promotion failed.'));
     }
   };
 
@@ -174,18 +215,23 @@ export default function LeadsPage() {
       await crmService.updateLead(editingLead.leadId, {
         ...editForm,
         estimatedBudget: parseFloat(editForm.estimatedBudget) || 0,
-        commissionValue: parseFloat(editForm.commissionValue) || 0
+        commissionValue: parseFloat(editForm.commissionValue) || 0,
+        // The picker keeps its own array; the form's `allocatedBrokerIds`
+        // is just the ids array (kept in sync on hydrate).
+        allocatedBrokerIds: (editSelectedBrokers || []).map((b) => b.brokerId).join(',')
       });
       setEditingLead(null);
       setNotes('');
+      setEditSelectedBrokers([]);
       clearEditContact();
       await loadData();
     } catch (err) {
-      alert(err || 'Failed to update lead.');
+      alert(toErrorString(err, 'Failed to update lead.'));
     }
   };
 
-  const [leadForm, setLeadForm] = useState({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', leadType: 'ForSale', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedToAgent: '' });
+  const [leadForm, setLeadForm] = useState({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', leadType: 'ForSale', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedBrokerIds: [] });
+  const [selectedBrokers, setSelectedBrokers] = useState([]);
 
   const filteredLeads = leads.filter((l) => {
     if (!searchTerm.trim()) return true;
@@ -193,7 +239,7 @@ export default function LeadsPage() {
     return (l.clientName || '').toLowerCase().includes(term) || (l.contactEmail || '').toLowerCase().includes(term) || (l.leadStage || '').toLowerCase().includes(term);
   });
 
-  const stageCounts = LEAD_STAGES.reduce((acc, stage) => { acc[stage] = leads.filter((l) => getLeadStageValue(l) === stage).length; return acc; }, {});
+  const stageCounts = LEAD_STAGES.reduce((acc, stage) => { acc[stage] = Number(stageAggregates[stage] || 0); return acc; }, {});
   const chartData = LEAD_STAGES.map((stage) => ({ name: stage.replace(/([A-Z])/g, ' $1').trim(), value: stageCounts[stage], color: LEAD_STAGE_COLORS[stage] })).filter((d) => d.value > 0);
 
   return (
@@ -204,7 +250,7 @@ export default function LeadsPage() {
           <p className="text-xs text-slate-400 mt-1">Tenant-scoped leads • {leadTotalCount} total</p>
         </div>
         <Can permission="leads:create">
-          <button type="button" onClick={() => { setIsLeadFormOpen(!isLeadFormOpen); if (!isLeadFormOpen) { clearContact(); setLeadForm({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedToAgent: '' }); } }} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all">
+          <button type="button" onClick={() => { setIsLeadFormOpen(!isLeadFormOpen); if (!isLeadFormOpen) { clearContact(); setLeadForm({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedBrokerIds: [] }); setSelectedBrokers([]); } }} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all">
             <UserPlus size={14} /> New Lead
           </button>
         </Can>
@@ -261,34 +307,12 @@ export default function LeadsPage() {
           <form onSubmit={handleCreateLead} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-1 lg:col-span-3">
               <label className="text-[10px] text-slate-400 uppercase">Link Existing Contact (optional)</label>
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                <input
-                  type="text"
-                  value={contactSearch}
-                  onChange={(e) => handleContactSearch(e.target.value)}
-                  onFocus={() => contactMatches.length > 0 && setShowContactDropdown(true)}
-                  placeholder="Search your tenant contacts by name, email, or phone..."
-                  className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                />
-                {showContactDropdown && contactMatches.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl shadow-xl max-h-48 overflow-y-auto">
-                    {contactMatches.map((c) => (
-                      <button key={c.contactId} type="button" onClick={() => selectContact(c)} className="w-full text-left px-3 py-2 hover:bg-slate-800 text-xs text-white flex items-center gap-2">
-                        <User size={12} className="text-slate-400" />
-                        <div><div className="font-semibold">{c.fullName}</div><div className="text-[10px] text-slate-500">{c.emailAddress} • {c.phoneNumber}</div></div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {selectedContact && (
-                <div className="flex items-center gap-2 mt-2 p-2 bg-blue-950/30 border border-blue-900 rounded-lg">
-                  <User size={12} className="text-blue-400" />
-                  <span className="text-xs text-blue-300">Linked: {selectedContact.fullName} ({selectedContact.emailAddress})</span>
-                  <button type="button" onClick={clearContact} className="ml-auto text-slate-400 hover:text-white"><X size={12} /></button>
-                </div>
-              )}
+              <ContactPicker
+                value={selectedContact}
+                onChange={(c) => { setSelectedContact(c); setContactSearch(c?.fullName || ''); }}
+                allowCreate={false}
+                placeholder="Search your tenant contacts by name, email, or phone..."
+              />
             </div>
             {!selectedContact && (
               <>
@@ -311,11 +335,13 @@ export default function LeadsPage() {
             </div>
             <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">{leadForm.commissionType === 'Percent' ? '% Commission' : 'Amount (R)'}</label><input required type="number" value={leadForm.commissionValue} onChange={(e) => setLeadForm({ ...leadForm, commissionValue: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
             <div className="space-y-1 lg:col-span-3">
-              <label className="text-[10px] text-slate-400 uppercase">Allocated To Agent</label>
-              <select value={leadForm.allocatedToAgent} onChange={(e) => setLeadForm({ ...leadForm, allocatedToAgent: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500">
-                <option value="">Unassigned Pool</option>
-                {brokers.map((b) => <option key={b.brokerId || b.emailAddress} value={b.fullName || b.emailAddress}>{b.fullName} ({b.emailAddress})</option>)}
-              </select>
+              <label className="text-[10px] text-slate-400 uppercase">Allocated Brokers</label>
+              <BrokerPicker
+                multi
+                value={selectedBrokers}
+                onChange={setSelectedBrokers}
+                placeholder="Search brokers by name or email..."
+              />
             </div>
             <div className="lg:col-span-3 flex gap-3 pt-1">
               <Can permission="leads:create">
@@ -354,6 +380,14 @@ export default function LeadsPage() {
                 setEditingLead(lead);
                 setNextStage(getLeadStageValue(lead));
                 setNotes(lead.leadNotes || '');
+                // 🧑‍💼 Resolve broker ids (csv) → broker objects for the picker.
+                // The picker's display is live-resolved from crmService.getBrokers()
+                // so renaming a broker automatically updates every lead card.
+                const ids = (lead.allocatedBrokerIds || '').split(',').map((s) => s.trim()).filter(Boolean);
+                const hydratedBrokers = ids
+                  .map((id) => brokers.find((b) => b.brokerId === id))
+                  .filter(Boolean);
+                setEditSelectedBrokers(hydratedBrokers);
                 setEditForm({
                   clientName: lead.clientName || '',
                   contactEmail: lead.contactEmail || '',
@@ -364,7 +398,7 @@ export default function LeadsPage() {
                   estimatedBudget: String(lead.estimatedBudget || ''),
                   commissionType: lead.commissionType || 'Percent',
                   commissionValue: String(lead.commissionValue || ''),
-                  allocatedToAgent: lead.allocatedToAgent || '',
+                  allocatedBrokerIds: ids,
                   linkedContactId: lead.linkedContactId || null
                 });
                 setEditContactSearch('');
@@ -381,7 +415,7 @@ export default function LeadsPage() {
                     <h4 className="text-white font-bold text-base tracking-tight">{lead.clientName}</h4>
                     <p className="text-xs text-slate-400 font-medium">Email: {lead.contactEmail} • Phone: {lead.contactPhone}</p>
                     <p className="text-[10px] text-slate-500 mt-1">
-                      Budget: R {Number(lead.estimatedBudget || 0).toLocaleString()} • Commission: {lead.commissionType === 'Percent' ? `${Number(lead.commissionValue || 0).toLocaleString()}%` : `R ${Number(lead.commissionValue || 0).toLocaleString()}`} • Agent: <span className="text-blue-400 font-semibold">{lead.allocatedToAgent || 'Unassigned'}</span>
+                      Budget: R {Number(lead.estimatedBudget || 0).toLocaleString()} • Commission: {lead.commissionType === 'Percent' ? `${Number(lead.commissionValue || 0).toLocaleString()}%` : `R ${Number(lead.commissionValue || 0).toLocaleString()}`} • Brokers: <span className="text-blue-400 font-semibold">{resolveBrokerNames(lead.allocatedBrokerIds, brokers) || 'Unassigned'}</span>
                     </p>
                   </div>
                 </div>
@@ -390,15 +424,28 @@ export default function LeadsPage() {
                     <button onClick={() => { setEditingLead(lead); setNextStage(getLeadStageValue(lead)); setNotes(''); }} className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Update Stage</button>
                   </Can>
                   <Can permission="deals:create">
-                    <button onClick={(e) => { e.stopPropagation(); handlePromoteLead(lead, true); }} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Rent Deal</button>
-                  </Can>
-                  <Can permission="deals:create">
-                    <button onClick={(e) => { e.stopPropagation(); handlePromoteLead(lead, false); }} className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Sale Deal</button>
+                    {/* 🚀 Promote buttons are gated by lead.leadType:
+                        ForSale leads → Sale Deal only; ToRent leads → Rent Deal only.
+                        Backend PromoteLeadToDeal picks listing type from the request.isRent flag. */}
+                    {lead.leadType === 'ToRent' && (
+                      <button onClick={(e) => { e.stopPropagation(); handlePromoteLead(lead, true); }} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Rent Deal</button>
+                    )}
+                    {lead.leadType === 'ForSale' && (
+                      <button onClick={(e) => { e.stopPropagation(); handlePromoteLead(lead, false); }} className="bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Promote → Sale Deal</button>
+                    )}
                   </Can>
                 </div>
               </div>
             ))
           )}
+
+          <Pagination
+            page={leadPage}
+            pageSize={LEAD_PAGE_SIZE}
+            totalCount={leadTotalCount}
+            onPageChange={handleLeadPageChange}
+            className="pt-2"
+          />
         </div>
       )}
 
@@ -413,43 +460,21 @@ export default function LeadsPage() {
             <form onSubmit={handleUpdateLeadFull} className="space-y-3">
               <div className="space-y-1 lg:col-span-3">
                 <label className="text-[10px] text-slate-400 uppercase">Link Existing Contact (optional)</label>
-                <div className="relative">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                  <input
-                    type="text"
-                    value={editContactSearch}
-                    onChange={(e) => handleEditContactSearch(e.target.value)}
-                    onFocus={() => editContactMatches.length > 0 && setShowEditContactDropdown(true)}
-                    placeholder="Search tenant contacts by name, email, or phone..."
-                    className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                  />
-                  {showEditContactDropdown && editContactMatches.length > 0 && (
-                    <div className="absolute z-50 w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl shadow-xl max-h-48 overflow-y-auto">
-                      {editContactMatches.map((c) => (
-                        <button key={c.contactId} type="button" onClick={() => selectEditContact(c)} className="w-full text-left px-3 py-2 hover:bg-slate-800 text-xs text-white flex items-center gap-2">
-                          <UserPlus size={12} className="text-slate-400" />
-                          <div><div className="font-semibold">{c.fullName}</div><div className="text-[10px] text-slate-500">{c.emailAddress} • {c.phoneNumber}</div></div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                <ContactPicker
+                  value={editSelectedContact}
+                  onChange={(c) => { setEditSelectedContact(c); setEditForm((prev) => ({ ...prev, linkedContactId: c?.contactId || null })); }}
+                  allowCreate={false}
+                  placeholder="Search tenant contacts by name, email, or phone..."
+                />
               </div>
-              {editSelectedContact && (
-                <div className="flex items-center gap-2 mt-2 p-2 bg-blue-950/30 border border-blue-900 rounded-lg">
-                  <UserPlus size={12} className="text-blue-400" />
-                  <span className="text-xs text-blue-300">Linked: {editSelectedContact.fullName} ({editSelectedContact.emailAddress})</span>
-                  <button type="button" onClick={clearEditContact} className="ml-auto text-slate-400 hover:text-white"><X size={12} /></button>
-                </div>
-              )}
               {!editSelectedContact && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Client Name</label><input required type="text" value={editForm.clientName} onChange={(e) => setEditForm({ ...editForm, clientName: e.target.value })} placeholder="Full name" className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                   <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Email</label><input required type="email" value={editForm.contactEmail} onChange={(e) => setEditForm({ ...editForm, contactEmail: e.target.value })} placeholder="email@example.com" className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                  <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Phone</label><input type="text" value={editForm.contactPhone} onChange={(e) => setEditForm({ ...editForm, contactPhone: e.target.value })} placeholder="+27 82 000 0000" className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                </div>
-               )}
-               </div>
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                   <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Phone</label><input type="text" value={editForm.contactPhone} onChange={(e) => setEditForm({ ...editForm, contactPhone: e.target.value })} placeholder="+27 82 000 0000" className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                 </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Property Interest</label><select value={editForm.propertyInterestClass} onChange={(e) => setEditForm({ ...editForm, propertyInterestClass: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"><option>Residential</option><option>Commercial</option><option>Retail</option><option>Industrial</option></select></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Lead Type</label><select value={editForm.leadType} onChange={(e) => setEditForm({ ...editForm, leadType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"><option value="ForSale">For Sale</option><option value="ToRent">To Rent</option></select></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Preferred Area</label><input type="text" value={editForm.preferredArea} onChange={(e) => setEditForm({ ...editForm, preferredArea: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
@@ -464,11 +489,13 @@ export default function LeadsPage() {
                 </div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">{editForm.commissionType === 'Percent' ? '% Commission' : 'Amount (R)'}</label><input required type="number" value={editForm.commissionValue} onChange={(e) => setEditForm({ ...editForm, commissionValue: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1 md:col-span-2">
-                  <label className="text-[10px] text-slate-400 uppercase">Allocated To Agent</label>
-                  <select value={editForm.allocatedToAgent} onChange={(e) => setEditForm({ ...editForm, allocatedToAgent: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500">
-                    <option value="">Unassigned Pool</option>
-                    {brokers.map((b) => <option key={b.brokerId || b.emailAddress} value={b.fullName || b.emailAddress}>{b.fullName} ({b.emailAddress})</option>)}
-                  </select>
+                  <label className="text-[10px] text-slate-400 uppercase">Allocated Brokers</label>
+                  <BrokerPicker
+                    multi
+                    value={editSelectedBrokers}
+                    onChange={setEditSelectedBrokers}
+                    placeholder="Search brokers by name or email..."
+                  />
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-[10px] text-slate-400 uppercase">Stage</label>

@@ -178,7 +178,27 @@ namespace Property.Microservice.Controllers
                     return NotFound(new { message = "Target property record not found." });
             }
 
-            return Ok(property);
+            // 📜 Attach the currently-active sole mandate (if any) so the
+            // UI can render the obligation/expiry banners without a
+            // second round-trip. Null when no mandate is open.
+            var activeMandate = await _context.SoleMandates
+                .Where(m => m.PropertyId == propertyId && m.IsActive
+                    && m.StartDate <= DateTime.UtcNow && m.EndDate >= DateTime.UtcNow)
+                .OrderByDescending(m => m.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            return Ok(new
+            {
+                property,
+                activeSoleMandate = activeMandate == null ? null : new
+                {
+                    activeMandate.SoleMandateId,
+                    activeMandate.StartDate,
+                    activeMandate.EndDate,
+                    activeMandate.CreatedAt,
+                    daysRemaining = (int)Math.Ceiling((activeMandate.EndDate - DateTime.UtcNow).TotalDays)
+                }
+            });
         }
 
         // --- 🏢 ENDPOINT: GET SUB-UNITS FOR A PROPERTY ---
@@ -789,7 +809,7 @@ namespace Property.Microservice.Controllers
         // --- 🔍 ENDPOINT A: MULTI-CRITERIA REAL ESTATE SEARCH PIPELINE ---
         [Authorize]
         [HttpPost("search")]
-        public async Task<IActionResult> SearchProperties([FromBody] PropertySearchCriteria criteria, [FromQuery] int page = 1)
+        public async Task<IActionResult> SearchProperties([FromBody] PropertySearchCriteria criteria, [FromQuery] int page = 1, [FromQuery] int? pageSize = null)
         {
             if (!await PermissionCheck.HasPermissionAsync("properties:view"))
             {
@@ -802,7 +822,14 @@ namespace Property.Microservice.Controllers
                 page, criteria.PropertyType, criteria.ListingType, string.Join(",", criteria.Locations ?? Enumerable.Empty<string>()), caller);
 
             if (page < 1) page = 1;
-            const int PAGE_SIZE = 20;
+            // 📐 Page-size override: callers can request up to a custom cap (the
+            // map + the "load all" PropertySearch view pass pageSize=10000).
+            // A null/zero/negative value falls back to the default of 20.
+            const int DEFAULT_PAGE_SIZE = 20;
+            const int MAX_PAGE_SIZE = 10000;
+            int pageSizeValue = pageSize.HasValue && pageSize.Value > 0
+                ? Math.Min(pageSize.Value, MAX_PAGE_SIZE)
+                : DEFAULT_PAGE_SIZE;
 
             // Eagerly load relational structures (Property Type lookups and sub-units)
             var query = _context.PropertyAssets
@@ -852,7 +879,40 @@ namespace Property.Microservice.Controllers
 
             var total = await query.CountAsync();
             var results = await query.OrderBy(p => p.PropertyId)
-                .Skip((page - 1) * PAGE_SIZE).Take(PAGE_SIZE).ToListAsync();
+                .Skip((page - 1) * pageSizeValue).Take(pageSizeValue)
+                .Select(p => new
+                {
+                    p.PropertyId,
+                    p.TenantId,
+                    p.CompleteAddress,
+                    p.ErfSpatialSize,
+                    p.TitleDeedType,
+                    p.PortfolioZoning,
+                    p.MarketClass,
+                    p.IsForSale,
+                    p.IsForRent,
+                    p.PropertyTypeId,
+                    p.ValuationPrice,
+                    p.SalePrice,
+                    p.TenantInstallationAllowance,
+                    p.Latitude,
+                    p.Longitude,
+                    p.VerificationDocumentsJson,
+                    p.LinkedOwnerId,
+                    p.PropertyDescription,
+                    p.CreatedAt,
+                    p.PropertyTypeDetails,
+                    // 📜 Days remaining on the active sole mandate (if any).
+                    // 0 / null = no active mandate. Surfaced on list cards so
+                    // the 14-day expiration banner can fire without a
+                    // second round-trip per row.
+                    soleMandateDaysRemaining = p.SoleMandates
+                        .Where(m => m.IsActive && m.StartDate <= DateTime.UtcNow && m.EndDate >= DateTime.UtcNow)
+                        .OrderByDescending(m => m.CreatedAt)
+                        .Select(m => (int?)Math.Ceiling((m.EndDate - DateTime.UtcNow).TotalDays))
+                        .FirstOrDefault()
+                })
+                .ToListAsync();
                          HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
 
             // 📊 Chart-friendly aggregates over the ENTIRE filtered universe
@@ -1190,5 +1250,373 @@ namespace Property.Microservice.Controllers
             await _context.SaveChangesAsync();
             return Ok(new { message = "Maintenance call resolved and removed." });
         }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // 📜 UNIT LEASE LEDGER — backing the Lease + History tabs on the unit modal.
+    //   • Today < LeaseStart  → future lease
+    //   • LeaseStart ≤ Today ≤ LeaseEnd → active (current tenant)
+    //   • Today > LeaseEnd  → expired
+    // We always re-derive IsActive on read so the UI badge stays correct even if
+    // the stored flag drifts. The flag itself is only persisted for backwards
+    // compatibility with the existing tenant-visibility filter (see
+    // ApplyPropertyVisibility / GetLeasedUnitIdsAsync).
+    // ────────────────────────────────────────────────────────────────────────────
+
+    [Authorize]
+    [HttpGet("{propertyId}/units/{unitId:int}/leases")]
+    public async Task<IActionResult> GetUnitLeases(int propertyId, int unitId)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("units:view"))
+        {
+            _logger.LogWarning("GetUnitLeases: forbidden — caller lacks units:view permission");
+            return Forbid();
+        }
+
+        var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+        if (unit == null)
+        {
+            if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+            return NotFound(new { message = "Target property or unit not found." });
+        }
+
+        var now = DateTime.UtcNow;
+        var leases = await _context.UnitLeases
+            .Where(l => l.PropertyId == propertyId && l.PropertyUnitId == unitId)
+            .OrderByDescending(l => l.LeaseStart)
+            .ToListAsync();
+
+        // Re-derive IsActive on the wire so the UI never has to compute it.
+        var projected = leases.Select(l => new
+        {
+            l.UnitLeaseId,
+            l.UserId,
+            l.TenantId,
+            l.PropertyId,
+            l.PropertyUnitId,
+            l.LeaseStart,
+            l.LeaseEnd,
+            // The authoritative live flag: window contains today.
+            IsActive = l.LeaseStart <= now && now <= l.LeaseEnd,
+            IsCurrent = l.LeaseStart <= now && now <= l.LeaseEnd,
+            IsFuture = l.LeaseStart > now,
+            IsExpired = l.LeaseEnd < now,
+            l.ContactId,
+            l.MonthlyRent,
+            l.DepositAmount,
+            l.Notes,
+            l.AccruedInterestPercent,
+            l.TenantNameSnapshot,
+            l.CreatedAt
+        }).ToList();
+        return Ok(projected);
     }
+
+    [Authorize]
+    [HttpGet("{propertyId}/units/{unitId:int}/leases/active")]
+    public async Task<IActionResult> GetUnitActiveLease(int propertyId, int unitId)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("units:view"))
+        {
+            _logger.LogWarning("GetUnitActiveLease: forbidden — caller lacks units:view permission");
+            return Forbid();
+        }
+
+        var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+        if (unit == null)
+        {
+            if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+            return NotFound(new { message = "Target property or unit not found." });
+        }
+
+        var now = DateTime.UtcNow;
+        var lease = await _context.UnitLeases
+            .Where(l => l.PropertyId == propertyId && l.PropertyUnitId == unitId
+                        && l.LeaseStart <= now && now <= l.LeaseEnd)
+            .OrderByDescending(l => l.LeaseStart)
+            .FirstOrDefaultAsync();
+        if (lease == null) return Ok(null);
+
+        return Ok(new
+        {
+            lease.UnitLeaseId,
+            lease.UserId,
+            lease.TenantId,
+            lease.PropertyId,
+            lease.PropertyUnitId,
+            lease.LeaseStart,
+            lease.LeaseEnd,
+            IsActive = true,
+            IsCurrent = true,
+            IsFuture = false,
+            IsExpired = false,
+            lease.ContactId,
+            lease.MonthlyRent,
+            lease.DepositAmount,
+            lease.Notes,
+            lease.AccruedInterestPercent,
+            lease.TenantNameSnapshot,
+            lease.CreatedAt
+        });
+    }
+
+    [Authorize]
+    [HttpPost("{propertyId}/units/{unitId:int}/leases")]
+    public async Task<IActionResult> CreateUnitLease(int propertyId, int unitId, [FromBody] CreateUnitLeasePayload payload)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("units:edit"))
+        {
+            _logger.LogWarning("CreateUnitLease: forbidden — caller lacks units:edit permission");
+            return Forbid();
+        }
+        if (IsReadOnlyRole()) return Forbid();
+        if (payload == null) return BadRequest(new { message = "A lease payload is required." });
+        if (payload.LeaseEnd <= payload.LeaseStart)
+            return BadRequest(new { message = "Lease end date must be after the start date." });
+
+        var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+        if (unit == null)
+        {
+            if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+            return NotFound(new { message = "Target property or unit not found." });
+        }
+
+        var tenantId = User.FindFirst("TenantId")?.Value ?? string.Empty;
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        var now = DateTime.UtcNow;
+        var isActive = payload.LeaseStart <= now && now <= payload.LeaseEnd;
+
+        var lease = new UnitLease
+        {
+            UserId = string.IsNullOrWhiteSpace(payload.UserId) ? userId : payload.UserId!,
+            TenantId = tenantId,
+            PropertyId = propertyId,
+            PropertyUnitId = unitId,
+            LeaseStart = payload.LeaseStart,
+            LeaseEnd = payload.LeaseEnd,
+            IsActive = isActive,
+            CreatedAt = now,
+            ContactId = payload.ContactId,
+            MonthlyRent = payload.MonthlyRent,
+            DepositAmount = payload.DepositAmount,
+            Notes = payload.Notes,
+            AccruedInterestPercent = payload.AccruedInterestPercent,
+            // 🏷️ Snapshotted tenant name from the frontend (picked contact).
+            // Null is allowed — the history view will fall back to "Unlinked".
+            TenantNameSnapshot = string.IsNullOrWhiteSpace(payload.TenantNameSnapshot)
+                ? null
+                : payload.TenantNameSnapshot.Trim()
+        };
+        _context.UnitLeases.Add(lease);
+        await _context.SaveChangesAsync();
+        return Ok(lease);
+    }
+
+    [Authorize]
+    [HttpPut("{propertyId}/units/{unitId:int}/leases/{leaseId:int}")]
+    public async Task<IActionResult> UpdateUnitLease(int propertyId, int unitId, int leaseId, [FromBody] UpdateUnitLeasePayload payload)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("units:edit"))
+        {
+            _logger.LogWarning("UpdateUnitLease: forbidden — caller lacks units:edit permission");
+            return Forbid();
+        }
+        if (IsReadOnlyRole()) return Forbid();
+        if (payload == null) return BadRequest(new { message = "A lease payload is required." });
+
+        var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+        if (unit == null)
+        {
+            if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+            return NotFound(new { message = "Target property or unit not found." });
+        }
+
+        var lease = await _context.UnitLeases.FirstOrDefaultAsync(l =>
+            l.UnitLeaseId == leaseId && l.PropertyId == propertyId && l.PropertyUnitId == unitId);
+        if (lease == null) return NotFound(new { message = "Lease not found." });
+
+        if (payload.LeaseStart.HasValue) lease.LeaseStart = payload.LeaseStart.Value;
+        if (payload.LeaseEnd.HasValue) lease.LeaseEnd = payload.LeaseEnd.Value;
+        if (lease.LeaseEnd <= lease.LeaseStart)
+            return BadRequest(new { message = "Lease end date must be after the start date." });
+
+        if (payload.ContactId != null) lease.ContactId = string.IsNullOrWhiteSpace(payload.ContactId) ? null : payload.ContactId;
+        if (payload.MonthlyRent.HasValue) lease.MonthlyRent = payload.MonthlyRent;
+        if (payload.DepositAmount.HasValue) lease.DepositAmount = payload.DepositAmount;
+        if (payload.Notes != null) lease.Notes = payload.Notes;
+        if (payload.AccruedInterestPercent.HasValue) lease.AccruedInterestPercent = payload.AccruedInterestPercent;
+        // Snapshot semantics: explicit non-null overwrites, null leaves
+        // existing value. An explicit empty string clears it.
+        if (payload.TenantNameSnapshot != null)
+        {
+            lease.TenantNameSnapshot = string.IsNullOrWhiteSpace(payload.TenantNameSnapshot)
+                ? null
+                : payload.TenantNameSnapshot.Trim();
+        }
+        if (payload.EndNow == true)
+        {
+            // End-now: pin LeaseEnd to today so the lease falls out of the active
+            // window and the unit is logically vacant again.
+            lease.LeaseEnd = DateTime.UtcNow;
+        }
+        // Always re-derive the persisted IsActive flag to stay in sync.
+        var now = DateTime.UtcNow;
+        lease.IsActive = lease.LeaseStart <= now && now <= lease.LeaseEnd;
+
+        await _context.SaveChangesAsync();
+        return Ok(lease);
+    }
+
+    [Authorize]
+    [HttpDelete("{propertyId}/units/{unitId:int}/leases/{leaseId:int}")]
+    public async Task<IActionResult> DeleteUnitLease(int propertyId, int unitId, int leaseId)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("units:delete"))
+        {
+            _logger.LogWarning("DeleteUnitLease: forbidden — caller lacks units:delete permission");
+            return Forbid();
+        }
+        if (IsReadOnlyRole()) return Forbid();
+
+        var unit = await GetAccessibleUnitAsync(propertyId, unitId);
+        if (unit == null)
+        {
+            if (string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value)) return Forbid();
+            return NotFound(new { message = "Target property or unit not found." });
+        }
+
+        var lease = await _context.UnitLeases.FirstOrDefaultAsync(l =>
+            l.UnitLeaseId == leaseId && l.PropertyId == propertyId && l.PropertyUnitId == unitId);
+        if (lease == null) return NotFound(new { message = "Lease not found." });
+
+        _context.UnitLeases.Remove(lease);
+        await _context.SaveChangesAsync();
+        return Ok(new { message = "Lease removed." });
+    }
+
+    // --- 📜 SOLE MANDATE ENDPOINTS ---
+
+    // 📜 History of all sole-mandate agreements for a property (active
+    // and closed). Sorted newest-first so the most recent record is
+    // index 0. Open to anyone with properties:view so tenants can see
+    // why a property is restricted.
+    [Authorize]
+    [HttpGet("{propertyId:int}/mandates")]
+    public async Task<IActionResult> GetSoleMandates(int propertyId)
+    {
+        var userTenantId = User.FindFirst("TenantId")?.Value;
+        if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
+
+        var property = await _context.PropertyAssets
+            .Where(p => p.PropertyId == propertyId)
+            .FirstOrDefaultAsync();
+        if (property == null) return NotFound(new { message = "Property not found." });
+
+        var mandates = await _context.SoleMandates
+            .Where(m => m.PropertyId == propertyId)
+            .OrderByDescending(m => m.CreatedAt)
+            .Select(m => new
+            {
+                m.SoleMandateId,
+                m.StartDate,
+                m.EndDate,
+                m.IsActive,
+                m.ClosedAt,
+                m.CreatedAt,
+                m.CreatedByUserId,
+                daysRemaining = m.IsActive && m.EndDate > DateTime.UtcNow
+                    ? (int)Math.Ceiling((m.EndDate - DateTime.UtcNow).TotalDays)
+                    : 0
+            })
+            .ToListAsync();
+        return Ok(mandates);
+    }
+
+    // ➕ Open a new sole mandate. If the property already has an active
+    // mandate, this endpoint closes it (sets IsActive=0, ClosedAt=now)
+    // and creates the new active row in the same transaction. The
+    // filtered unique index would reject two-active inserts anyway, so
+    // we close-then-insert to keep history intact.
+    [Authorize]
+    [HttpPost("{propertyId:int}/mandates")]
+    public async Task<IActionResult> CreateSoleMandate(int propertyId, [FromBody] CreateSoleMandatePayload payload)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("properties:edit"))
+        {
+            _logger.LogWarning("CreateSoleMandate: forbidden — caller lacks properties:edit permission");
+            return Forbid();
+        }
+        if (payload == null) return BadRequest(new { message = "Mandate payload is required." });
+        if (payload.EndDate <= payload.StartDate)
+            return BadRequest(new { message = "End date must be after start date." });
+        if (payload.EndDate <= DateTime.UtcNow)
+            return BadRequest(new { message = "End date must be in the future." });
+
+        var userTenantId = User.FindFirst("TenantId")?.Value;
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
+
+        // 🛡️ Apply same visibility rules as property edit so an
+        // AgencyAdmin can't add a mandate to a property they can't see.
+        var propertyQuery = _context.PropertyAssets.Where(p => p.PropertyId == propertyId);
+        propertyQuery = ApplyPropertyVisibility(propertyQuery);
+        var property = await propertyQuery.FirstOrDefaultAsync();
+        if (property == null) return NotFound(new { message = "Property not found." });
+
+        // 🧹 Auto-close the currently-active mandate (if any) in the same transaction.
+        var currentActive = await _context.SoleMandates
+            .Where(m => m.PropertyId == propertyId && m.IsActive)
+            .ToListAsync();
+        var now = DateTime.UtcNow;
+        foreach (var m in currentActive)
+        {
+            m.IsActive = false;
+            m.ClosedAt = now;
+        }
+
+        var newMandate = new SoleMandate
+        {
+            PropertyId = propertyId,
+            TenantId = userTenantId!,
+            StartDate = payload.StartDate,
+            EndDate = payload.EndDate,
+            IsActive = true,
+            CreatedByUserId = userId ?? string.Empty,
+            CreatedAt = now
+        };
+        _context.SoleMandates.Add(newMandate);
+        await _context.SaveChangesAsync();
+
+        return CreatedAtAction(nameof(GetSoleMandates), new { propertyId }, new
+        {
+            newMandate.SoleMandateId,
+            newMandate.StartDate,
+            newMandate.EndDate,
+            newMandate.IsActive,
+            newMandate.CreatedAt,
+            newMandate.CreatedByUserId,
+            daysRemaining = (int)Math.Ceiling((newMandate.EndDate - now).TotalDays)
+        });
+    }
+
+    // ❌ Terminate an active mandate early (or no-op on a closed one).
+    [Authorize]
+    [HttpDelete("{propertyId:int}/mandates/{mandateId:int}")]
+    public async Task<IActionResult> CloseSoleMandate(int propertyId, int mandateId)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("properties:edit"))
+        {
+            _logger.LogWarning("CloseSoleMandate: forbidden — caller lacks properties:edit permission");
+            return Forbid();
+        }
+        var mandate = await _context.SoleMandates
+            .FirstOrDefaultAsync(m => m.PropertyId == propertyId && m.SoleMandateId == mandateId);
+        if (mandate == null) return NotFound(new { message = "Mandate not found." });
+        if (!mandate.IsActive) return Ok(new { message = "Mandate is already closed." });
+
+        mandate.IsActive = false;
+        mandate.ClosedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return Ok(new { message = "Mandate closed." });
+    }
+}
 }

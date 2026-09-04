@@ -4,13 +4,17 @@ import { crmService } from '../services/crmService.js';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
+import Pagination from '../components/Pagination.jsx';
 
 const PROPERTY_TYPES = ['Residential', 'Commercial', 'Retail', 'Industrial'];
+const OT_PAGE_SIZE = 20;
 
 export default function OwnersTenantsWorkspace() {
   const { hasPermission } = usePermission();
   const { activeTenantId } = useTenant();
   const [records, setRecords] = useState([]);
+  const [recordsTotal, setRecordsTotal] = useState(0);
+  const [recordsPage, setRecordsPage] = useState(1);
   const [geography, setGeography] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -31,15 +35,17 @@ export default function OwnersTenantsWorkspace() {
     notes: ''
   });
 
-  const load = async () => {
+  const load = async (pageToLoad = 1) => {
     setIsLoading(true);
     setError('');
     try {
       const [data, geo] = await Promise.all([
-        crmService.getOwnerTenantRecords(),
+        crmService.getOwnerTenantRecords(pageToLoad),
         crmService.searchGeography('')
       ]);
       setRecords(data || []);
+      setRecordsTotal(Number(data?.totalCount || 0));
+      setRecordsPage(pageToLoad);
       setGeography(geo || []);
     } catch (err) {
       setError(err || 'Unable to load owner/tenant records.');
@@ -48,7 +54,14 @@ export default function OwnersTenantsWorkspace() {
     }
   };
 
-  useEffect(() => { load(); }, [activeTenantId]);
+  useEffect(() => { load(1); }, [activeTenantId]);
+
+  const handleOTPageChange = (newPage) => {
+    if (newPage < 1) return;
+    const maxPage = Math.max(1, Math.ceil(recordsTotal / OT_PAGE_SIZE));
+    if (newPage > maxPage) return;
+    load(newPage);
+  };
 
   const toggleType = (type) => {
     const next = form.propertyTypeInterests.includes(type)
@@ -254,6 +267,14 @@ export default function OwnersTenantsWorkspace() {
               )}
             </div>
           )}
+
+          <Pagination
+            page={recordsPage}
+            pageSize={OT_PAGE_SIZE}
+            totalCount={recordsTotal}
+            onPageChange={handleOTPageChange}
+            className="pt-2"
+          />
         </div>
       </div>
     </div>

@@ -1,3 +1,5 @@
+const toMessage = (err, fallback) => { if (!err) return fallback; if (typeof err === 'string') return err; if (err.message) return err.message; try { return JSON.stringify(err); } catch { return fallback; } };
+
 import apiClient from './apiClient.js';
 
 const ACTIVE_TENANT_STORAGE_KEY = 'active_tenant_override';
@@ -76,7 +78,7 @@ export const propertyService = {
   },
 
   // --- 🔍 MULTI-CRITERIA REAL ESTATE SEARCH PIPELINE ---
-  searchProperties: async (locationsArray, propertyType, minSize, maxSize, listingType = 'All', page = 1) => {
+  searchProperties: async (locationsArray, propertyType, minSize, maxSize, listingType = 'All', page = 1, pageSize = null) => {
     try {
       const criteriaPayload = {
         locations: locationsArray,
@@ -93,7 +95,9 @@ export const propertyService = {
       // property service unfiltered-queries (PlatformAdmin sees every
       // property, which is why the map never appeared to change).
       const overrideParams = propertyService._tenantQueryParams();
-      const queryString = new URLSearchParams({ page, ...overrideParams }).toString();
+      const queryParams = { page, ...overrideParams };
+      if (pageSize && pageSize > 0) queryParams.pageSize = pageSize;
+      const queryString = new URLSearchParams(queryParams).toString();
       // 🪵 DEBUG — leave in for the next round of troubleshooting. Will
       // show: (1) the raw override from localStorage, (2) the subtree
       // cache, (3) the final URL we're POSTing to.
@@ -106,7 +110,7 @@ export const propertyService = {
       const data = response.data;
       return Object.assign(data, { totalCount: Number(response.headers['x-total-count'] || 0) });
     } catch (error) {
-      throw error.response?.data?.message || 'Search execution failed on the database engine.';
+      throw new Error(toMessage(error.response?.data?.message, 'Search execution failed on the database engine.'));
     }
   },
 
@@ -122,9 +126,47 @@ export const propertyService = {
       // safe — the override was only ever used as a *scope-narrowing*
       // signal, not an *authorization* signal.
       const response = await apiClient.get(`/properties/${propertyId}`);
+      // The backend now wraps the property in { property, activeSoleMandate }
+      // so consumers don't need a second round-trip to render the
+      // obligation/expiry banners. Flatten the property back out so
+      // existing call-sites keep working, and tack the mandate on as
+      // an extra field.
+      const payload = response.data || {};
+      const property = payload.property || payload;
+      return Object.assign(property, { activeSoleMandate: payload.activeSoleMandate || null });
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to load the property asset.'));
+    }
+  },
+
+  // 📜 Sole-mandate helpers. One property can have many SoleMandates
+  // over time but only one is active at any moment (enforced on the
+  // server). The active mandate is included on getPropertyById so the
+  // UI doesn't have to call listMandates separately for banner logic.
+  listSoleMandates: async (propertyId) => {
+    try {
+      const response = await apiClient.get(`/properties/${propertyId}/mandates`);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to load the property asset.';
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to load sole mandates.'));
+    }
+  },
+
+  createSoleMandate: async (propertyId, { startDate, endDate }) => {
+    try {
+      const response = await apiClient.post(`/properties/${propertyId}/mandates`, { startDate, endDate });
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to open sole mandate.'));
+    }
+  },
+
+  closeSoleMandate: async (propertyId, mandateId) => {
+    try {
+      const response = await apiClient.delete(`/properties/${propertyId}/mandates/${mandateId}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to close sole mandate.'));
     }
   },
 
@@ -133,7 +175,7 @@ export const propertyService = {
       const response = await apiClient.put(`/properties/${propertyId}`, propertyData);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to save property details.';
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to save property details.'));
     }
   },
 
@@ -147,7 +189,7 @@ export const propertyService = {
       const response = await apiClient.get(`/properties/${propertyId}/units`);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to fetch property units.';
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to fetch property units.'));
     }
   },
 
@@ -159,7 +201,7 @@ export const propertyService = {
       const response = await apiClient.get(`/properties/${propertyId}/units/${unitId}/documents`);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to load unit documents.';
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to load unit documents.'));
     }
   },
 
@@ -169,7 +211,7 @@ export const propertyService = {
       const response = await apiClient.post(`/properties/${propertyId}/units`, unitData);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to add unit to property.';
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to add unit to property.'));
     }
   },
 
@@ -179,7 +221,7 @@ export const propertyService = {
        const response = await apiClient.delete(`/properties/${propertyId}/units/${unitId}`);
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'Failed to delete unit.';
+       throw new Error(toMessage(error.response?.data?.message, 'Failed to delete unit.'));
      }
    },
 
@@ -189,7 +231,7 @@ export const propertyService = {
        const response = await apiClient.put(`/properties/${propertyId}/units/${unitId}`, unitData);
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'Failed to update unit details.';
+       throw new Error(toMessage(error.response?.data?.message, 'Failed to update unit details.'));
      }
    },
 
@@ -213,7 +255,7 @@ export const propertyService = {
        const response = await apiClient.post(`/properties/${propertyId}/units/${unitId}/documents`, payload);
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'Failed to upload unit document.';
+       throw new Error(toMessage(error.response?.data?.message, 'Failed to upload unit document.'));
      }
    },
 
@@ -223,7 +265,7 @@ export const propertyService = {
        const response = await apiClient.get(`/properties/${propertyId}/units/${unitId}/documents/${encodeURIComponent(storedName)}`, { responseType: 'blob' });
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'Failed to download unit document.';
+       throw new Error(toMessage(error.response?.data?.message, 'Failed to download unit document.'));
      }
    },
 
@@ -233,7 +275,7 @@ export const propertyService = {
         const response = await apiClient.delete(`/properties/${propertyId}/units/${unitId}/documents/${encodeURIComponent(storedName)}`);
         return response.data;
       } catch (error) {
-        throw error.response?.data?.message || 'Failed to delete unit document.';
+        throw new Error(toMessage(error.response?.data?.message, 'Failed to delete unit document.'));
       }
     },
 
@@ -245,7 +287,7 @@ export const propertyService = {
         const response = await apiClient.get(`/properties/${propertyId}/units/${unitId}/maintenance`);
         return response.data;
       } catch (error) {
-        throw error.response?.data?.message || 'Failed to load maintenance calls.';
+        throw new Error(toMessage(error.response?.data?.message, 'Failed to load maintenance calls.'));
       }
     },
 
@@ -254,7 +296,7 @@ export const propertyService = {
         const response = await apiClient.post(`/properties/${propertyId}/units/${unitId}/maintenance`, payload);
         return response.data;
       } catch (error) {
-        throw error.response?.data?.message || 'Failed to log maintenance call.';
+        throw new Error(toMessage(error.response?.data?.message, 'Failed to log maintenance call.'));
       }
     },
 
@@ -263,9 +305,60 @@ export const propertyService = {
         const response = await apiClient.delete(`/properties/${propertyId}/units/${unitId}/maintenance/${callId}`);
         return response.data;
       } catch (error) {
-        throw error.response?.data?.message || 'Failed to remove maintenance call.';
+        throw new Error(toMessage(error.response?.data?.message, 'Failed to remove maintenance call.'));
       }
     },
+
+
+  // --- 📜 UNIT LEASE LEDGER (Lease + History tabs) ---
+  // All endpoints are role-scoped on the backend; the frontend never
+  // appends the tenant override because the backend resolves visibility
+  // from the JWT + the unit's propertyId (the same model used for
+  // single-record maintenance/document reads).
+  getUnitLeases: async (propertyId, unitId) => {
+    try {
+      const response = await apiClient.get(`/properties/${propertyId}/units/${unitId}/leases`);
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to load lease history.'));
+    }
+  },
+
+  getUnitActiveLease: async (propertyId, unitId) => {
+    try {
+      const response = await apiClient.get(`/properties/${propertyId}/units/${unitId}/leases/active`);
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to load active lease.'));
+    }
+  },
+
+  createUnitLease: async (propertyId, unitId, payload) => {
+    try {
+      const response = await apiClient.post(`/properties/${propertyId}/units/${unitId}/leases`, payload);
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to create lease.'));
+    }
+  },
+
+  updateUnitLease: async (propertyId, unitId, leaseId, payload) => {
+    try {
+      const response = await apiClient.put(`/properties/${propertyId}/units/${unitId}/leases/${leaseId}`, payload);
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to update lease.'));
+    }
+  },
+
+  deleteUnitLease: async (propertyId, unitId, leaseId) => {
+    try {
+      const response = await apiClient.delete(`/properties/${propertyId}/units/${unitId}/leases/${leaseId}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to remove lease.'));
+    }
+  },
 
 
   // --- 📋 GET SYNDICATION PLATFORMS ---
@@ -274,7 +367,7 @@ export const propertyService = {
       const response = await apiClient.get('/properties/platforms', { params: propertyService._tenantQueryParams() });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to fetch platforms.';
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to fetch platforms.'));
     }
   },
 
@@ -291,7 +384,7 @@ export const propertyService = {
       const response = await apiClient.post('/properties/create', payload);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to register the property asset record.';
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to register the property asset record.'));
     }
   },
   // --- 🖼️ KAFKA-BACKED IMAGE STREAMING FILE UPLOADER ---
@@ -321,7 +414,7 @@ export const propertyService = {
       const response = await apiClient.post(`/properties/${propertyId}/upload-image`, payload);
       return response.data;
     } catch (error) {
-      throw error || 'Failed to dispatch image file binary stream to Kafka pipeline.';
+      throw new Error(toMessage(error, 'Failed to dispatch image file binary stream to Kafka pipeline.'));
     }
   },
 
@@ -337,7 +430,7 @@ export const propertyService = {
       const response = await apiClient.post('/properties/syndicate', payload);
       return response.data; // Returns external reference numbers and live portal links
     } catch (error) {
-      throw error.response?.data?.message || 'Portal syndication tracker check out of sync.';
+      throw new Error(toMessage(error.response?.data?.message, 'Portal syndication tracker check out of sync.'));
     }
   }
   ,
@@ -346,7 +439,7 @@ export const propertyService = {
       const response = await apiClient.post('/properties/brochure/generate', payload);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Brochure generation request failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Brochure generation request failed.'));
     }
   },
 

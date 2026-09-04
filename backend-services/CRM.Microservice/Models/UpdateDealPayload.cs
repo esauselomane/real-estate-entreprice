@@ -10,7 +10,7 @@ namespace CRM.Microservice.Models
         public DealWorkflowStage? DealStage { get; set; }
         public decimal? TransactionValue { get; set; }
         public string? DealNotes { get; set; }
-        public string? AllocatedToAgent { get; set; }
+        public string? AllocatedBrokerIds { get; set; }
         public string? CommissionType { get; set; }
         public decimal? CommissionValue { get; set; }
         public decimal? RealisedCommission { get; set; }

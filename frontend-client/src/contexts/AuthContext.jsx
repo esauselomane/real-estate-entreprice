@@ -78,6 +78,13 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const toMessage = (err, fallback) => {
+    if (!err) return fallback;
+    if (typeof err === 'string') return err;
+    if (err.message) return err.message;
+    try { return JSON.stringify(err); } catch { return fallback; }
+  };
+
   const login = useCallback(
     async (email, password) => {
       dispatch({ type: 'LOGIN_START' });
@@ -90,8 +97,9 @@ export function AuthProvider({ children }) {
         });
         return normalizedProfile;
       } catch (err) {
-        dispatch({ type: 'LOGIN_ERROR', payload: err || 'Connection timed out. Ensure your Ocelot gateway service container is active.' });
-        throw err;
+        const message = toMessage(err, 'Connection timed out. Ensure your Ocelot gateway service container is active.');
+        dispatch({ type: 'LOGIN_ERROR', payload: message });
+        throw new Error(message);
       }
     },
     []
@@ -110,8 +118,9 @@ export function AuthProvider({ children }) {
         });
         dispatch({ type: 'REGISTER_SUCCESS', payload: 'Registration successful. You can now sign in.' });
       } catch (err) {
-        dispatch({ type: 'REGISTER_ERROR', payload: err || 'Registration failed. Please try again.' });
-        throw err;
+        const message = toMessage(err, 'Registration failed. Please try again.');
+        dispatch({ type: 'REGISTER_ERROR', payload: message });
+        throw new Error(message);
       }
     },
     []

@@ -223,8 +223,42 @@ using (var serviceScope = app.Services.CreateScope())
             ALTER TABLE [DealRecords] ADD [CommissionValue] decimal(18,2) NOT NULL CONSTRAINT DF_Deal_CommissionValue DEFAULT 0;
         IF COL_LENGTH(N'[DealRecords]', 'RealisedCommission') IS NULL
             ALTER TABLE [DealRecords] ADD [RealisedCommission] decimal(18,2) NULL;
+        -- 💱 Marker so the frontend can render an AUTO badge on deals where
+        -- realised commission was filled by formula (CommissionType x TransactionValue)
+        -- because the user left it blank/zero. Server is the source of truth.
+        IF COL_LENGTH(N'[DealRecords]', 'RealisedCommissionIsAuto') IS NULL
+            ALTER TABLE [DealRecords] ADD [RealisedCommissionIsAuto] bit NOT NULL CONSTRAINT DF_Deal_RealisedCommissionIsAuto DEFAULT 0;
         IF COL_LENGTH(N'[LeadRecords]', 'LinkedContactId') IS NULL
             ALTER TABLE [LeadRecords] ADD [LinkedContactId] nvarchar(50) NULL;
+        -- 🧑‍💼 Multi-broker rename: legacy AllocatedToAgent (free-text) → AllocatedBrokerIds (comma-separated ids).
+        -- Idempotent across reseeds: detect old column, rename; otherwise ensure new exists.
+        IF COL_LENGTH(N'[LeadRecords]', 'AllocatedToAgent') IS NOT NULL AND COL_LENGTH(N'[LeadRecords]', 'AllocatedBrokerIds') IS NULL
+            EXEC sp_rename N'[LeadRecords].[AllocatedToAgent]', N'AllocatedBrokerIds', N'COLUMN';
+        IF COL_LENGTH(N'[LeadRecords]', 'AllocatedBrokerIds') IS NULL
+            ALTER TABLE [LeadRecords] ADD [AllocatedBrokerIds] nvarchar(MAX) NOT NULL CONSTRAINT DF_Lead_AllocatedBrokerIds DEFAULT N'';
+        IF COL_LENGTH(N'[DealRecords]', 'AllocatedToAgent') IS NOT NULL AND COL_LENGTH(N'[DealRecords]', 'AllocatedBrokerIds') IS NULL
+            EXEC sp_rename N'[DealRecords].[AllocatedToAgent]', N'AllocatedBrokerIds', N'COLUMN';
+        IF COL_LENGTH(N'[DealRecords]', 'AllocatedBrokerIds') IS NULL
+            ALTER TABLE [DealRecords] ADD [AllocatedBrokerIds] nvarchar(MAX) NOT NULL CONSTRAINT DF_Deal_AllocatedBrokerIds DEFAULT N'';
+    ");
+
+    // 💱 One-time backfill: any ClosedWon deal with a falsy RealisedCommission
+    // gets the formula value AND the IsAuto marker, so the dashboard, broker
+    // leaderboard, and CRM reports don't return 0 for closed deals that have
+    // a real commission value sitting in CommissionType × CommissionValue.
+    // Idempotent — only touches rows still missing a realised value.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        UPDATE d SET
+            RealisedCommission = CASE
+                WHEN d.CommissionType = N'Percent'
+                    THEN ROUND(d.TransactionValue * d.CommissionValue / 100.0, 2)
+                ELSE d.CommissionValue
+            END,
+            RealisedCommissionIsAuto = 1
+        FROM [DealRecords] d
+        WHERE d.DealStage = N'ClosedWon'
+          AND (d.RealisedCommission IS NULL OR d.RealisedCommission = 0)
+          AND d.CommissionValue > 0;
     ");
 
     // 🧾 Brochure card (cart) + per-line unit selection ledger for the Presentation stage.

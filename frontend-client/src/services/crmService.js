@@ -1,4 +1,5 @@
 import apiClient from './apiClient.js';
+import { propertyService } from './propertyService.js';
 
 const ACTIVE_TENANT_STORAGE_KEY = 'active_tenant_override';
 const ACTIVE_TENANT_STORAGE_MARKER = 'view-override';
@@ -39,8 +40,20 @@ function resolveLoggedInTenantId() {
 // The server pre-computes these over the entire filtered universe so chart
 // components (donuts, bars, pies) can render true counts instead of being
 // limited to the 20-row page that came back in the body.
+// 🛡️ Axios rejects with a real Error object, but the *re-thrown* value
+// inside our crmService call-sites can be whatever
+// `error.response?.data?.message` happens to be — sometimes a string,
+// sometimes an object (e.g. ProblemDetails with nested fields). React
+// components then crash with "Objects are not valid as a React child"
+// when they try to render the error string. Always coerce.
+const normalizeError = (err, fallback) => {
+  if (!err) return fallback;
+  if (typeof err === 'string') return err;
+  if (err.message) return err.message;
+  try { return JSON.stringify(err); } catch { return fallback; }
+};
+
 function parseAggregatesHeader(headers) {
-  debugger;
   const raw = headers?.['x-aggregates'];
   if (!raw) return {};
   try {
@@ -121,7 +134,7 @@ export const crmService = {
         aggregates: parseAggregatesHeader(response.headers)
       };
     } catch (error) {
-      throw error.response?.data?.message || 'Dual pipeline boards data sync extraction failed.';
+      throw normalizeError(error.response?.data?.message, 'Dual pipeline boards data sync extraction failed.');
     }
   },
 
@@ -134,7 +147,7 @@ export const crmService = {
         aggregates: parseAggregatesHeader(response.headers)
       });
     } catch (error) {
-      throw error.response?.data?.message || 'Owner/tenant registry sync failed.';
+      throw normalizeError(error.response?.data?.message, 'Owner/tenant registry sync failed.');
     }
   },
 
@@ -143,7 +156,7 @@ export const crmService = {
       const response = await apiClient.get(`/crm/owners-tenants/${ownerTenantId}`, { params: crmService._tenantQueryParams() });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Owner/tenant record could not be loaded.';
+      throw normalizeError(error.response?.data?.message, 'Owner/tenant record could not be loaded.');
     }
   },
 
@@ -164,7 +177,7 @@ export const crmService = {
       const response = await apiClient.get('/crm/geography', { params: { search: search || '' } });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Geographic area lookup failed.';
+      throw normalizeError(error.response?.data?.message, 'Geographic area lookup failed.');
     }
   },
 
@@ -176,7 +189,7 @@ export const crmService = {
       });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Owner/tenant record creation failed.';
+      throw normalizeError(error.response?.data?.message, 'Owner/tenant record creation failed.');
     }
   },
 
@@ -185,7 +198,7 @@ export const crmService = {
       const response = await apiClient.put('/crm/owners-tenants', crmService._normalizeOwnerInterests(payload));
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Owner/tenant record update failed.';
+      throw normalizeError(error.response?.data?.message, 'Owner/tenant record update failed.');
     }
   },
 
@@ -194,7 +207,7 @@ export const crmService = {
       const response = await apiClient.get('/crm/report/overview', { params: { year, ...crmService._tenantQueryParams() } });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Metrics overview could not be loaded.';
+      throw normalizeError(error.response?.data?.message, 'Metrics overview could not be loaded.');
     }
   },
 
@@ -213,7 +226,7 @@ export const crmService = {
         aggregates: parseAggregatesHeader(response.headers)
       });
     } catch (error) {
-      throw error.response?.data?.message || 'Agency list sync failed.';
+      throw normalizeError(error.response?.data?.message, 'Agency list sync failed.');
     }
   },
 
@@ -230,7 +243,7 @@ export const crmService = {
       const response = await apiClient.get('/crm/agencies/roster', { params });
       return Array.isArray(response.data) ? response.data : [];
     } catch (error) {
-      throw error.response?.data?.message || 'Agency roster sync failed.';
+      throw normalizeError(error.response?.data?.message, 'Agency roster sync failed.');
     }
   },
 
@@ -242,7 +255,7 @@ export const crmService = {
       });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Agency creation failed.';
+      throw normalizeError(error.response?.data?.message, 'Agency creation failed.');
     }
   },
 
@@ -256,7 +269,7 @@ export const crmService = {
       const response = await apiClient.get(`/crm/agencies/${agencyId}`, { params: crmService._tenantQueryParams() });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Agency record could not be loaded.';
+      throw normalizeError(error.response?.data?.message, 'Agency record could not be loaded.');
     }
   },
 
@@ -266,7 +279,7 @@ export const crmService = {
       const response = await apiClient.get(`/crm/agencies/${agencyId}/contacts`, { params: crmService._tenantQueryParams() });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Contact list sync failed.';
+      throw normalizeError(error.response?.data?.message, 'Contact list sync failed.');
     }
   },
 
@@ -275,7 +288,7 @@ export const crmService = {
       const response = await apiClient.post(`/crm/agencies/${agencyId}/contacts`, payload);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Contact person creation failed.';
+      throw normalizeError(error.response?.data?.message, 'Contact person creation failed.');
     }
   },
 
@@ -284,7 +297,7 @@ export const crmService = {
       const response = await apiClient.put(`/crm/contact-persons/${contactId}`, payload);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Contact person update failed.';
+      throw normalizeError(error.response?.data?.message, 'Contact person update failed.');
     }
   },
 
@@ -293,7 +306,7 @@ export const crmService = {
       const response = await apiClient.delete(`/crm/contact-persons/${contactId}`);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Contact person removal failed.';
+      throw normalizeError(error.response?.data?.message, 'Contact person removal failed.');
     }
   },
 
@@ -302,7 +315,7 @@ export const crmService = {
       const response = await apiClient.post(`/crm/contact-persons/${contactId}/promote-to-broker`);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Promotion to broker failed.';
+      throw normalizeError(error.response?.data?.message, 'Promotion to broker failed.');
     }
   },
 
@@ -315,7 +328,7 @@ export const crmService = {
         aggregates: parseAggregatesHeader(response.headers)
       });
     } catch (error) {
-      throw error.response?.data?.message || 'Broker list sync failed.';
+      throw normalizeError(error.response?.data?.message, 'Broker list sync failed.');
     }
   },
 
@@ -327,7 +340,7 @@ export const crmService = {
       });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Broker onboarding failed.';
+      throw normalizeError(error.response?.data?.message, 'Broker onboarding failed.');
     }
   },
 
@@ -339,15 +352,20 @@ export const crmService = {
   createLead: async (leadDetails) => {
     try {
       const userProfile = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
+      // 🧑‍💼 Brokers always self-assign: the backend stamps the caller's
+      // NameIdentifier claim into AllocatedBrokerIds. For non-brokers we
+      // trust whatever the form already provided (csv of broker ids).
       const payload = {
         ...leadDetails,
         tenantId: crmService._resolveWriteTenantId() || userProfile.tenantId,
-        allocatedToAgent: userProfile.role === 'Broker' ? (userProfile.name || 'Unassigned Pool') : (leadDetails.allocatedToAgent || 'Unassigned Pool')
+        allocatedBrokerIds: userProfile.role === 'Broker'
+          ? (userProfile.id || leadDetails.allocatedBrokerIds || '')
+          : (leadDetails.allocatedBrokerIds || '')
       };
       const response = await apiClient.post('/crm/lead/create', payload);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to submit unverified lead.';
+      throw normalizeError(error.response?.data?.message, 'Failed to submit unverified lead.');
     }
   },
 
@@ -363,7 +381,7 @@ export const crmService = {
        const response = await apiClient.post('/crm/update-lead-stage', payload);
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'Failed to progress lead milestone.';
+       throw normalizeError(error.response?.data?.message, 'Failed to progress lead milestone.');
      }
    },
 
@@ -372,7 +390,7 @@ export const crmService = {
        const response = await apiClient.put(`/crm/lead/${leadId}`, payload);
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'Failed to update lead.';
+       throw normalizeError(error.response?.data?.message, 'Failed to update lead.');
      }
    },
 
@@ -382,7 +400,7 @@ export const crmService = {
         const response = await apiClient.post('/crm/update-deal-stage', payload);
         return response.data;
       } catch (error) {
-        throw error.response?.data?.message || 'Failed to progress deal phase.';
+        throw normalizeError(error.response?.data?.message, 'Failed to progress deal phase.');
       }
     },
 
@@ -391,7 +409,7 @@ export const crmService = {
        const response = await apiClient.put(`/crm/deal/${dealId}`, payload);
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'Failed to update deal.';
+       throw normalizeError(error.response?.data?.message, 'Failed to update deal.');
      }
    },
 
@@ -409,7 +427,7 @@ export const crmService = {
        });
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'Deal auto-promotion engine failed.';
+       throw normalizeError(error.response?.data?.message, 'Deal auto-promotion engine failed.');
      }
    },
 
@@ -419,7 +437,7 @@ export const crmService = {
        const response = await apiClient.delete(`/crm/deals/${dealId}`);
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'Deal deletion permission denied or failed.';
+       throw normalizeError(error.response?.data?.message, 'Deal deletion permission denied or failed.');
      }
    },
 
@@ -430,7 +448,7 @@ export const crmService = {
       const response = await apiClient.post('/crm/reallocate', payload);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to reallocate handler.';
+      throw normalizeError(error.response?.data?.message, 'Failed to reallocate handler.');
     }
   },
 
@@ -439,7 +457,7 @@ export const crmService = {
       const response = await apiClient.get('/crm/report/summary', { params: crmService._tenantQueryParams() });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Analytics metrics retrieval failed.';
+      throw normalizeError(error.response?.data?.message, 'Analytics metrics retrieval failed.');
     }
   },
 
@@ -449,7 +467,7 @@ export const crmService = {
       const response = await apiClient.get('/crm/report/commission-by-stage', { params: crmService._tenantQueryParams() });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Commission stage report unavailable.';
+      throw normalizeError(error.response?.data?.message, 'Commission stage report unavailable.');
     }
   },
 
@@ -459,15 +477,20 @@ export const crmService = {
       const response = await apiClient.get('/crm/report/broker-leaderboard', { params: crmService._tenantQueryParams() });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Broker leaderboard unavailable.';
+      throw normalizeError(error.response?.data?.message, 'Broker leaderboard unavailable.');
     }
   },
 
   // 📊 Market share of property types — pulled from the X-Aggregates header
   // so the chart reflects the ENTIRE filtered universe, not just page 1.
+  // Use propertyService's resolver so the active-tenant subtree (cached in
+  // localStorage) is passed as a comma-separated tenantId list — a top-level
+  // agency with descendants would otherwise only return its own row.
   getPropertyMarketShare: async () => {
     try {
-      const response = await apiClient.post('/properties/search?page=1', { propertyType: 'All', listingType: 'All' });
+      const override = propertyService._tenantQueryParams();
+      const queryString = new URLSearchParams({ page: 1, pageSize: 1, ...override }).toString();
+      const response = await apiClient.post(`/properties/search?${queryString}`, { propertyType: 'All', listingType: 'All' });
       const buckets = parseAggregatesHeader(response.headers)?.propertyType || {};
       const total = Object.values(buckets).reduce((a, b) => a + Number(b || 0), 0);
       return Object.entries(buckets).map(([name, value]) => ({
@@ -522,7 +545,23 @@ export const crmService = {
       const response = await apiClient.get('/crm/contacts/search', { params: { q: query, page: 1, ...crmService._tenantQueryParams() } });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Contact search failed.';
+      throw normalizeError(error.response?.data?.message, 'Contact search failed.');
+    }
+  },
+
+  // 🆕 Inline "create new contact" used by the lease ContactPicker when the
+  // tenant/lessee doesn't exist yet. POSTs to the flat /crm/contact/create
+  // endpoint and returns the new CRMContact (with ContactId) on success.
+  createContact: async (payload) => {
+    try {
+      // The model has [Required] on TenantId (used by reads); the controller
+      // overwrites it with the JWT tenant on insert, so we send a non-null
+      // placeholder to satisfy model validation. The server is the source of
+      // truth for TenantId.
+      const response = await apiClient.post('/crm/contact/create', { tenantId: '__pending__', ...payload });
+      return response.data;
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Contact creation failed.');
     }
   },
 

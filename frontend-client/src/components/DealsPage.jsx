@@ -7,8 +7,11 @@ import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
+import BrokerPicker from '../components/BrokerPicker.jsx';
+import Pagination from '../components/Pagination.jsx';
 
 const DEAL_STAGES = ['DiscoveryNeedsAnalysis', 'Presentation', 'ProposalQuoteSent', 'Negotiation', 'ClosedWon', 'ClosedLost'];
+const DEAL_PAGE_SIZE = 20;
 const DEAL_STAGE_COLORS = { DiscoveryNeedsAnalysis: '#0ea5e9', Presentation: '#3b82f6', ProposalQuoteSent: '#a78bfa', Negotiation: '#f59e0b', ClosedWon: '#22c55e', ClosedLost: '#ef4444' };
 
 const formatDealStage = (value) => {
@@ -26,11 +29,13 @@ const getDealStageValue = (deal) => {
 
 export default function DealsPage() {
   const { userRole: currentUserRole } = useAuth();
-  const { setBrochureDealTarget: onOpenBrochureBuilder } = useAppUi();
+  const { setBrochureDealTarget: onOpenBrochureBuilder, navigateTo } = useAppUi();
   const { hasPermission } = usePermission();
   const { activeTenantId } = useTenant();
   const [deals, setDeals] = useState([]);
   const [dealTotalCount, setDealTotalCount] = useState(0);
+  const [dealPage, setDealPage] = useState(1);
+  const [stageAggregates, setStageAggregates] = useState({});
   const [brokers, setBrokers] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [activeCards, setActiveCards] = useState([]);
@@ -40,21 +45,29 @@ export default function DealsPage() {
   const [editingDeal, setEditingDeal] = useState(null);
   const [nextStage, setNextStage] = useState('');
   const [notes, setNotes] = useState('');
-  const [editForm, setEditForm] = useState({ buyerClientId: '', sellerClientId: '', dealStage: 'DiscoveryNeedsAnalysis', transactionValue: '', commissionType: 'Percent', commissionValue: '', realisedCommission: '', linkedPropertyId: '', dealNotes: '', allocatedToAgent: '' });
+  const [editForm, setEditForm] = useState({ buyerClientId: '', sellerClientId: '', dealStage: 'DiscoveryNeedsAnalysis', transactionValue: '', commissionType: 'Percent', commissionValue: '', realisedCommission: '', linkedPropertyId: '', dealNotes: '', allocatedBrokerIds: [] });
+  const [editSelectedBrokers, setEditSelectedBrokers] = useState([]);
   const [brokerSplits, setBrokerSplits] = useState([]);
   const [isLoadingSplits, setIsLoadingSplits] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  const toErrorString = (err, fallback) => {
+    if (!err) return fallback;
+    if (typeof err === 'string') return err;
+    if (err.message) return err.message;
+    try { return JSON.stringify(err); } catch { return fallback; }
+  };
+
   const canManageDeals = currentUserRole === 'PlatformAdmin' || currentUserRole === 'AgencyAdmin';
   const canEditCommission = currentUserRole === 'PlatformAdmin' || currentUserRole === 'AgencyAdmin';
 
-  const loadData = async () => {
+  const loadData = async (pageToLoad = 1) => {
     setIsLoading(true);
     setErrorMessage('');
     try {
       const [summary, boards, brokersRes, contactsRes, cardsRes] = await Promise.all([
         crmService.getPipelineReportSummary(),
-        crmService.getCRMBoards(),
+        crmService.getCRMBoards(pageToLoad),
         crmService.getBrokers(),
         crmService.getContacts().catch(() => []),
         crmService.getActiveBrochureCards().catch(() => [])
@@ -62,17 +75,26 @@ export default function DealsPage() {
       setSummaryReport(summary);
       setDeals(boards.verifiedDeals || []);
       setDealTotalCount(boards.dealCount || 0);
+      setStageAggregates(boards.aggregates?.dealStage || {});
+      setDealPage(pageToLoad);
       setBrokers(brokersRes || []);
       setContacts(contactsRes || []);
       setActiveCards(cardsRes || []);
     } catch (err) {
-      setErrorMessage(err || 'Failed to load deals.');
+      setErrorMessage(toErrorString(err, 'Failed to load deals.'));
     } finally {
       setIsLoading(false);
     }
   };
 
-  useEffect(() => { loadData(); }, [activeTenantId]);
+  useEffect(() => { loadData(1); }, [activeTenantId]);
+
+  const handleDealPageChange = (newPage) => {
+    if (newPage < 1) return;
+    const maxPage = Math.max(1, Math.ceil(dealTotalCount / DEAL_PAGE_SIZE));
+    if (newPage > maxPage) return;
+    loadData(newPage);
+  };
 
   useEffect(() => {
     if (editingDeal) {
@@ -88,26 +110,53 @@ export default function DealsPage() {
       await crmService.deleteDeal(deal.dealId);
       await loadData();
     } catch (err) {
-      alert(err || 'Deletion failed.');
+      alert(toErrorString(err, 'Deletion failed.'));
     }
   };
 
   const handleUpdateDealFull = async (e) => {
     e.preventDefault();
     if (!editingDeal) return;
+    // 💱 Auto-fill realised commission on the client too — mirrors the
+    // server-side rule so the user gets an instant toast instead of
+    // waiting for the round-trip. Server is still the source of truth.
+    const isClosingWon = editForm.dealStage === 'ClosedWon';
+    const realisedRaw = parseFloat(editForm.realisedCommission);
+    const realisedIsFalsy = !editForm.realisedCommission || isNaN(realisedRaw) || realisedRaw === 0;
+    let autoFilledValue = null;
+    const outbound = {
+      ...editForm,
+      transactionValue: parseFloat(editForm.transactionValue) || 0,
+      commissionValue: parseFloat(editForm.commissionValue) || 0,
+      realisedCommission: realisedIsFalsy ? 0 : realisedRaw,
+      linkedPropertyId: editForm.linkedPropertyId ? parseInt(editForm.linkedPropertyId, 10) : null,
+      // Picker keeps its own array; the form's `allocatedBrokerIds` field
+      // is just the ids array (kept in sync on hydrate).
+      allocatedBrokerIds: (editSelectedBrokers || []).map((b) => b.brokerId).join(',')
+    };
+    if (isClosingWon && realisedIsFalsy) {
+      const txn = parseFloat(editForm.transactionValue) || 0;
+      const cval = parseFloat(editForm.commissionValue) || 0;
+      autoFilledValue = editForm.commissionType === 'Percent'
+        ? Math.round(txn * cval) / 100
+        : cval;
+      outbound.realisedCommission = autoFilledValue;
+    }
     try {
-      await crmService.updateDeal(editingDeal.dealId, {
-        ...editForm,
-        transactionValue: parseFloat(editForm.transactionValue) || 0,
-        commissionValue: parseFloat(editForm.commissionValue) || 0,
-        realisedCommission: parseFloat(editForm.realisedCommission) || 0,
-        linkedPropertyId: editForm.linkedPropertyId ? parseInt(editForm.linkedPropertyId, 10) : null
-      });
+      await crmService.updateDeal(editingDeal.dealId, outbound);
+      if (autoFilledValue != null && autoFilledValue > 0) {
+        const formatted = `R ${autoFilledValue.toLocaleString()}`;
+        const reason = editForm.commissionType === 'Percent'
+          ? `${editForm.commissionValue}% of R ${(parseFloat(editForm.transactionValue) || 0).toLocaleString()}`
+          : 'fixed commission value';
+        alert(`💱 Realised commission auto-set to ${formatted} (${reason}).`);
+      }
       setEditingDeal(null);
       setNotes('');
+      setEditSelectedBrokers([]);
       await loadData();
     } catch (err) {
-      alert(err || 'Failed to update deal.');
+      alert(toErrorString(err, 'Failed to update deal.'));
     }
   };
 
@@ -131,7 +180,7 @@ export default function DealsPage() {
       alert('Commission split updated.');
       await loadBrokerSplits(editingDeal.dealId);
     } catch (err) {
-      alert(err || 'Failed to update commission split.');
+      alert(toErrorString(err, 'Failed to update commission split.'));
     }
   };
 
@@ -141,9 +190,7 @@ export default function DealsPage() {
     return (d.buyerClientId || '').toLowerCase().includes(term) || (d.sellerClientId || '').toLowerCase().includes(term) || (d.dealStage || '').toLowerCase().includes(term);
   });
 
-  const stageCounts = DEAL_STAGES.reduce((acc, stage) => { acc[stage] = deals.filter((d) => getDealStageValue(d) === stage).length; return acc; }, {});
-  
-  debugger;
+  const stageCounts = DEAL_STAGES.reduce((acc, stage) => { acc[stage] = Number(stageAggregates[stage] || 0); return acc; }, {});
   const chartData = DEAL_STAGES.map((stage) => ({ name: stage.replace(/([A-Z])/g, ' $1').trim(), value: stageCounts[stage], color: DEAL_STAGE_COLORS[stage] })).filter((d) => d.value > 0);
 
   const pipelineValue = deals.filter((d) => { const stage = getDealStageValue(d); return stage !== 'ClosedWon' && stage !== 'ClosedLost'; }).reduce((sum, d) => sum + (Number(d.transactionValue) || 0), 0);
@@ -230,6 +277,12 @@ export default function DealsPage() {
                 setEditingDeal(deal);
                 setNextStage(getDealStageValue(deal));
                 setNotes(deal.dealNotes || '');
+                // 🧑‍💼 Resolve broker ids (csv) → broker objects for the picker.
+                const ids = (deal.allocatedBrokerIds || '').split(',').map((s) => s.trim()).filter(Boolean);
+                const hydratedBrokers = ids
+                  .map((id) => brokers.find((b) => b.brokerId === id))
+                  .filter(Boolean);
+                setEditSelectedBrokers(hydratedBrokers);
                 setEditForm({
                   buyerClientId: deal.buyerClientId || '',
                   sellerClientId: deal.sellerClientId || '',
@@ -240,7 +293,7 @@ export default function DealsPage() {
                   realisedCommission: String(deal.realisedCommission || ''),
                   linkedPropertyId: String(deal.linkedPropertyId || ''),
                   dealNotes: deal.dealNotes || '',
-                  allocatedToAgent: deal.allocatedToAgent || ''
+                  allocatedBrokerIds: ids
                 });
               }} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row justify-between lg:items-center gap-4 hover:border-blue-700 transition-colors cursor-pointer">
                 <div className="space-y-2 flex-1">
@@ -256,6 +309,15 @@ export default function DealsPage() {
                     {getDealStageValue(deal) === 'Presentation' && activeCardDealIds.has(deal.dealId) && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold font-mono text-blue-300 bg-blue-950/40 px-2 py-0.5 rounded border border-blue-900 animate-pulse">
                         <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block"></span> Card Active
+                      </span>
+                    )}
+                    {/* 💱 Marker shown when realised commission was filled by the
+                        server formula (CommissionType × CommissionValue) because the
+                        user left it blank. Editable — just re-save the deal with a
+                        hand-entered value to clear the badge. */}
+                    {getDealStageValue(deal) === 'ClosedWon' && deal.realisedCommissionIsAuto && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold font-mono text-amber-300 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-900" title="Realised commission was auto-filled from the commission formula because the value was left blank.">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span> AUTO
                       </span>
                     )}
                   </div>
@@ -278,7 +340,7 @@ export default function DealsPage() {
                   </Can>
                   {getDealStageValue(deal) === 'Presentation' && (
                     <Can permission="billing:export">
-                      <button onClick={() => onOpenBrochureBuilder && onOpenBrochureBuilder(deal)} className="p-2 bg-indigo-950/40 hover:bg-indigo-800 text-indigo-400 rounded-xl border border-indigo-900 cursor-pointer" title="Open brochure card"><Layers size={14} /></button>
+                      <button onClick={() => { onOpenBrochureBuilder && onOpenBrochureBuilder(deal); navigateTo('crm'); }} className="p-2 bg-indigo-950/40 hover:bg-indigo-800 text-indigo-400 rounded-xl border border-indigo-900 cursor-pointer" title="Open brochure card"><Layers size={14} /></button>
                     </Can>
                   )}
                   <Can permission="deals:delete">
@@ -288,6 +350,14 @@ export default function DealsPage() {
               </div>
             ))
           )}
+
+          <Pagination
+            page={dealPage}
+            pageSize={DEAL_PAGE_SIZE}
+            totalCount={dealTotalCount}
+            onPageChange={handleDealPageChange}
+            className="pt-2"
+          />
         </div>
       )}
 
@@ -324,13 +394,19 @@ export default function DealsPage() {
                   </div>
                 </div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">{editForm.commissionType === 'Percent' ? '% Commission' : 'Amount (R)'}</label><input required type="number" value={editForm.commissionValue} onChange={(e) => setEditForm({ ...editForm, commissionValue: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Realised Commission (R)</label><input type="number" value={editForm.realisedCommission} onChange={(e) => setEditForm({ ...editForm, realisedCommission: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Realised Commission (R)</label><input type="number" value={editForm.realisedCommission} onChange={(e) => setEditForm({ ...editForm, realisedCommission: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" placeholder="Leave blank to auto-fill from formula" />
+                  {editForm.dealStage === 'ClosedWon' && (
+                    <p className="text-[9px] text-amber-400/80">💱 Leave blank or 0 to auto-fill from {editForm.commissionType === 'Percent' ? `${editForm.commissionValue}% × transaction value` : 'fixed commission'}.</p>
+                  )}
+                </div>
                 <div className="space-y-1 md:col-span-2">
-                  <label className="text-[10px] text-slate-400 uppercase">Allocated To Agent</label>
-                  <select value={editForm.allocatedToAgent} onChange={(e) => setEditForm({ ...editForm, allocatedToAgent: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500">
-                    <option value="">Unassigned Pool</option>
-                    {brokers.map((b) => <option key={b.brokerId || b.emailAddress} value={b.fullName || b.emailAddress}>{b.fullName} ({b.emailAddress})</option>)}
-                  </select>
+                  <label className="text-[10px] text-slate-400 uppercase">Allocated Brokers</label>
+                  <BrokerPicker
+                    multi
+                    value={editSelectedBrokers}
+                    onChange={setEditSelectedBrokers}
+                    placeholder="Search brokers by name or email..."
+                  />
                 </div>
 
                 {/* 🤝 CO-BROKERAGE COMMISSION SPLIT (AgencyAdmin only) */}
@@ -362,8 +438,8 @@ export default function DealsPage() {
                           const newSplits = brokers.map(b => ({
                             brokerId: b.brokerId,
                             brokerName: b.fullName,
-                            splitPercentage: Math.Round(evenPct, 2),
-                            splitAmount: Math.Round(commissionVal * evenPct / 100, 2)
+                            splitPercentage: Math.round(evenPct * 100) / 100,
+                            splitAmount: Math.round(commissionVal * evenPct / 100 * 100) / 100
                           }));
                           setBrokerSplits(newSplits);
                         }} className="text-[10px] font-bold text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg">Auto-Split Evenly</button>

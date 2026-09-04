@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { crmService } from '../services/crmService.js';
 import { useAuth } from './AuthContext.jsx';
 
@@ -62,6 +62,11 @@ export function TenantProvider({ children }) {
   // expands the subtree and the frontend hands the resulting TenantId
   // list to the property endpoint as a comma-separated query value.
   const [subtreeCache, setSubtreeCache] = useState({});
+  // 📌 Latest-cache ref so the lazy-resolution callback in setActiveTenantId
+  // can read the current cache without re-creating the callback (and thus
+  // re-running the pre-warm effect) every time the cache updates.
+  const subtreeCacheRef = useRef({});
+  useEffect(() => { subtreeCacheRef.current = subtreeCache; }, [subtreeCache]);
 
   // 🔄 Always load the FULL visible agency roster for the dropdown (no
   // pagination — the switcher needs every agency the caller can pick so
@@ -141,6 +146,24 @@ export function TenantProvider({ children }) {
       };
       setOverrideState(payload);
       persistOverride(payload);
+      // 🌱 Lazy subtree resolution for child agencies: the pre-warm only
+      // resolves top-level parents (cheap, O(top-level) calls). When the
+      // user picks a child, resolve its subtree on-demand — for a child
+      // agency the server returns just the one row, so it's a single
+      // quick call.
+      if (found.parentAgencyId && !subtreeCacheRef.current[found.agencyId]) {
+        crmService
+          .getAgenciesRoster(found.agencyId)
+          .then((rows) => {
+            const tenantIds = Array.isArray(rows)
+              ? Array.from(new Set(rows.map((r) => r.tenantId).filter(Boolean)))
+              : [found.tenantId].filter(Boolean);
+            setSubtreeCache((prev) => ({ ...prev, [found.agencyId]: tenantIds }));
+          })
+          .catch(() => {
+            setSubtreeCache((prev) => ({ ...prev, [found.agencyId]: [found.tenantId].filter(Boolean) }));
+          });
+      }
     },
     [canSwitch, visibleAgencies]
   );
@@ -182,18 +205,17 @@ export function TenantProvider({ children }) {
     return !Array.isArray(subtreeCache[activeAgencyId]);
   }, [isAllTenants, activeAgencyId, subtreeCache]);
 
-  // Pre-warm the subtree cache for every loaded agency. We hit
-  // /agencies/roster with the agencyId as the override — the CRM
-  // returns either the full subtree (top-level) or the single tenant
-  // (child), and the frontend extracts the TenantId list. Doing this for
-  // every agency at once is cheap (one HTTP call per agency, each
-  // returning a small JSON array) and means the dropdown never picks an
-  // agency that has to wait for a fresh fetch before the next dashboard
-  // request can be filtered.
+  // Pre-warm the subtree cache for the agencies the user is actually
+  // likely to pick — TOP-LEVEL parents only. With 1000+ seeded agencies
+  // (most of them leaves), pre-warming every single one fired 1000 BFS
+  // round-trips on the CRM service every render, drowning the network
+  // panel. Child agencies' subtrees are just [their own tenantId] so
+  // there's no value in resolving them through the server.
   useEffect(() => {
     if (!canSwitch || !agencies || agencies.length === 0) return undefined;
     let cancelled = false;
     const missing = agencies
+      .filter((a) => !a.parentAgencyId)
       .map((a) => a.agencyId)
       .filter((id) => id && !subtreeCache[id]);
     if (missing.length === 0) return undefined;

@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
-import { 
-   ArrowLeft, MapPin, FileText, User, Home, CheckCircle2, 
-   ExternalLink, Image, Plus, Trash2, Layers, 
+import {
+   ArrowLeft, MapPin, FileText, User, Home, CheckCircle2,
+   ExternalLink, Image, Plus, Trash2, Layers,
    Building, Check, Loader2, AlertCircle, FileSignature, Wrench, FolderLock, Pencil,
-   X, Save, Upload, Download
+   X, Save, Upload, Download, History, ChevronDown, ChevronUp, Calendar
   } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import { crmService } from '../services/crmService.js';
 import { canManageUnits } from '../services/authService.js';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import Can from '../components/Can.jsx';
+import ContactPicker from '../components/ContactPicker.jsx';
 
 export default function PropertyDetails({ propertyId, onBack, onNavigateToClient }) {
   const { hasPermission } = usePermission();
@@ -29,9 +30,11 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const [propertyOpsLoading, setPropertyOpsLoading] = useState(false);
   const [propertyOpsError, setPropertyOpsError] = useState('');
 
-  // 🔗 UNIT WORKSPACE MODAL: editable details + leases/maintenance + unit document vault
+  // 🔗 UNIT WORKSPACE MODAL: editable details + lease/history + maintenance + document vault
+  // The legacy OperationalRecord-backed "Leases" tab has been replaced by a real
+  // UnitLeases-backed flow: a Lease tab (current editable lease) and a History
+  // tab (read-only list of every past lease for this unit).
   const OPS_TABS = [
-    { id: 'leases', label: 'Leases', Icon: FileSignature, amount: 'Monthly rent', detailsPlaceholder: 'Term, escalation, deposit and notice details' },
     { id: 'maintenance', label: 'Maintenance', Icon: Wrench, amount: 'Estimated cost', detailsPlaceholder: 'Issue, access instructions, photos or resolution notes' }
   ];
   const [unitModalUnit, setUnitModalUnit] = useState(null);
@@ -42,10 +45,35 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const [unitOpsSuccess, setUnitOpsSuccess] = useState('');
   const [unitOpsForm, setUnitOpsForm] = useState({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' });
   const [unitOpsEditing, setUnitOpsEditing] = useState(null);
-  const activeOpsTab = OPS_TABS.find(t => t.id === (unitModalUnit ? modalTab : 'leases')) || OPS_TABS[0];
+  const activeOpsTab = OPS_TABS.find(t => t.id === (unitModalUnit ? modalTab : 'maintenance')) || OPS_TABS[0];
 
-  // Editable unit details form (pre-filled when the modal opens on a unit)
-  const [unitEditForm, setUnitEditForm] = useState({ unitNumber: '', unitDescription: '', netRentableAreaSqM: '', specificUnitRentalPrice: '', specificUnitSalePrice: '', rentalRate: '', rentEscalationPercentage: '', leaseTermMonths: '', isCurrentlyVacant: true });
+  // 📜 Lease tab state — current editable lease + the full history list.
+  const [unitLeases, setUnitLeases] = useState([]);
+  const [unitLeasesLoading, setUnitLeasesLoading] = useState(false);
+  const [unitLeasesError, setUnitLeasesError] = useState('');
+  const [unitLeasesSuccess, setUnitLeasesSuccess] = useState('');
+  const [leaseForm, setLeaseForm] = useState({
+    contactId: null,
+    contactDisplay: null, // full contact object (for ContactPicker)
+    tenantName: '',       // snapshot of full name from picked contact
+    leaseStart: '',
+    leaseEnd: '',
+    monthlyRent: '',
+    depositAmount: '',
+    accruedInterestPercent: '',
+    notes: ''
+  });
+  const [leaseEditingId, setLeaseEditingId] = useState(null);
+  // 🕒 History drill-down: when set, render the read-only lease detail + maintenance
+  // summary instead of the history list. Cleared by the Back button.
+  const [historyDetail, setHistoryDetail] = useState(null);
+  const [historyMaintCalls, setHistoryMaintCalls] = useState([]);
+  const [historyMaintOpen, setHistoryMaintOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Editable unit details form (pre-filled when the modal opens on a unit).
+  // `leaseTermMonths` was removed — lease dates are now managed on the Lease tab.
+  const [unitEditForm, setUnitEditForm] = useState({ unitNumber: '', unitDescription: '', netRentableAreaSqM: '', specificUnitRentalPrice: '', specificUnitSalePrice: '', rentalRate: '', rentEscalationPercentage: '', isCurrentlyVacant: true });
   const [unitEditError, setUnitEditError] = useState('');
   const [unitEditSuccess, setUnitEditSuccess] = useState('');
 
@@ -129,7 +157,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       specificUnitSalePrice: unit.specificUnitSalePrice ?? '',
       rentalRate: unit.rentalRate ?? '',
       rentEscalationPercentage: unit.rentEscalationPercentage ?? '',
-      leaseTermMonths: unit.leaseTermMonths ?? '',
       isCurrentlyVacant: !!unit.isCurrentlyVacant
     });
     setUnitEditError(''); setUnitEditSuccess('');
@@ -139,10 +166,12 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
 
   const closeUnitModal = () => setUnitModalUnit(null);
 
-  // Load leases/maintenance operational records when the modal is open on those tabs
+  // Load maintenance operational records when the modal is open on that tab.
+  // (The legacy "leases" module of the OperationalRecord ledger has been
+  // superseded by the dedicated Lease/History tabs above.)
   useEffect(() => {
     const loadModalOps = async () => {
-      if (!unitModalUnit || !OPS_TABS.some(t => t.id === modalTab)) return;
+      if (!unitModalUnit || modalTab !== 'maintenance') return;
       setUnitOpsLoading(true);
       setUnitOpsError('');
       try {
@@ -160,6 +189,168 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     };
     loadModalOps();
   }, [unitModalUnit, modalTab]);
+
+  // 📜 Load the unit lease ledger whenever the Lease or History tab opens.
+  // The backend returns the full sorted list (newest first) with IsActive
+  // re-derived from the dates. We also surface the most recent current
+  // (active) lease into the editable Lease form so the user can update it
+  // in place rather than create a new one.
+  const loadUnitLeases = async () => {
+    if (!unitModalUnit || !property) return;
+    setUnitLeasesLoading(true);
+    setUnitLeasesError('');
+    try {
+      const list = await propertyService.getUnitLeases(property.propertyId, unitModalUnit.propertyUnitId);
+      setUnitLeases(Array.isArray(list) ? list : []);
+      const active = (list || []).find((l) => l.isCurrent) || null;
+      hydrateLeaseForm(active);
+    } catch (err) {
+      setUnitLeasesError(err || 'Could not load unit leases.');
+    } finally {
+      setUnitLeasesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!unitModalUnit) return;
+    if (modalTab === 'lease' || modalTab === 'history') {
+      loadUnitLeases();
+      setHistoryDetail(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitModalUnit, modalTab]);
+
+  // Populate the editable Lease form from a lease record. `leaseEditingId`
+  // distinguishes "edit existing" from "create new".
+  const hydrateLeaseForm = (lease) => {
+    if (lease) {
+      const display = lease.contactId
+        ? { contactId: lease.contactId, fullName: lease.tenantNameSnapshot || '(linked contact)' }
+        : null;
+      setLeaseForm({
+        contactId: lease.contactId || null,
+        contactDisplay: display,
+        tenantName: lease.tenantNameSnapshot || '',
+        leaseStart: lease.leaseStart ? new Date(lease.leaseStart).toISOString().slice(0, 10) : '',
+        leaseEnd: lease.leaseEnd ? new Date(lease.leaseEnd).toISOString().slice(0, 10) : '',
+        monthlyRent: lease.monthlyRent ?? '',
+        depositAmount: lease.depositAmount ?? '',
+        accruedInterestPercent: lease.accruedInterestPercent ?? '',
+        notes: lease.notes || ''
+      });
+      setLeaseEditingId(lease.unitLeaseId);
+    } else {
+      setLeaseForm({ contactId: null, contactDisplay: null, tenantName: '', leaseStart: '', leaseEnd: '', monthlyRent: '', depositAmount: '', accruedInterestPercent: '', notes: '' });
+      setLeaseEditingId(null);
+    }
+  };
+
+  const saveLease = async (e) => {
+    e.preventDefault();
+    if (!unitModalUnit || !property) return;
+    if (!leaseForm.leaseStart || !leaseForm.leaseEnd) {
+      setUnitLeasesError('Start and end dates are required.');
+      return;
+    }
+    if (new Date(leaseForm.leaseEnd) <= new Date(leaseForm.leaseStart)) {
+      setUnitLeasesError('Lease end date must be after the start date.');
+      return;
+    }
+    setUnitLeasesError(''); setUnitLeasesSuccess('');
+    const payload = {
+      leaseStart: new Date(leaseForm.leaseStart).toISOString(),
+      leaseEnd: new Date(leaseForm.leaseEnd).toISOString(),
+      contactId: leaseForm.contactDisplay?.contactId || null,
+      tenantNameSnapshot: leaseForm.tenantName || null,
+      monthlyRent: leaseForm.monthlyRent === '' ? null : Number(leaseForm.monthlyRent),
+      depositAmount: leaseForm.depositAmount === '' ? null : Number(leaseForm.depositAmount),
+      accruedInterestPercent: leaseForm.accruedInterestPercent === '' ? null : Number(leaseForm.accruedInterestPercent),
+      notes: leaseForm.notes || null
+    };
+    try {
+      if (leaseEditingId) {
+        await propertyService.updateUnitLease(property.propertyId, unitModalUnit.propertyUnitId, leaseEditingId, payload);
+      } else {
+        await propertyService.createUnitLease(property.propertyId, unitModalUnit.propertyUnitId, payload);
+      }
+      setUnitLeasesSuccess('Lease saved.');
+      setTimeout(() => setUnitLeasesSuccess(''), 2000);
+      await loadUnitLeases();
+    } catch (err) {
+      setUnitLeasesError(err || 'Could not save lease.');
+    }
+  };
+
+  const endLeaseNow = async (lease) => {
+    if (!unitModalUnit || !property) return;
+    if (!window.confirm('End this lease now? The end date will be set to today and the unit will become vacant.')) return;
+    try {
+      await propertyService.updateUnitLease(property.propertyId, unitModalUnit.propertyUnitId, lease.unitLeaseId, { endNow: true });
+      setUnitLeasesSuccess('Lease ended.');
+      setTimeout(() => setUnitLeasesSuccess(''), 2000);
+      await loadUnitLeases();
+    } catch (err) {
+      setUnitLeasesError(err || 'Could not end lease.');
+    }
+  };
+
+  const deleteLease = async (lease) => {
+    if (!unitModalUnit || !property) return;
+    if (!window.confirm('Delete this lease record permanently? This cannot be undone.')) return;
+    try {
+      await propertyService.deleteUnitLease(property.propertyId, unitModalUnit.propertyUnitId, lease.unitLeaseId);
+      setUnitLeasesSuccess('Lease removed.');
+      setTimeout(() => setUnitLeasesSuccess(''), 2000);
+      if (leaseEditingId === lease.unitLeaseId) hydrateLeaseForm(null);
+      await loadUnitLeases();
+    } catch (err) {
+      setUnitLeasesError(err || 'Could not delete lease.');
+    }
+  };
+
+  // 🕒 Open a past lease in the read-only History detail view. Loads the
+  // maintenance summary for the unit (all calls, since we don't link to leases).
+  const openHistoryDetail = async (lease) => {
+    setHistoryDetail(lease);
+    setHistoryMaintOpen(false);
+    setHistoryLoading(true);
+    try {
+      const calls = await propertyService.getUnitMaintenanceCalls(property.propertyId, unitModalUnit.propertyUnitId);
+      setHistoryMaintCalls(calls || []);
+    } catch {
+      setHistoryMaintCalls([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // Computes the lease term in months for display on history rows.
+  const leaseTermLabel = (start, end) => {
+    if (!start || !end) return '—';
+    const s = new Date(start);
+    const e = new Date(end);
+    if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return '—';
+    const months = Math.round(((e - s) / (1000 * 60 * 60 * 24 * 30.4375)) * 10) / 10;
+    return `${months} month${months === 1 ? '' : 's'}`;
+  };
+
+  // 💰 Amount due to tenant on lease termination.
+  //   total = deposit × (1 + rate × (months / 12))
+  // `rate` is a percentage per year (e.g. 5 means 5% p.a.).
+  // Returns null if any input is missing/invalid.
+  const leaseTerminationAmount = (deposit, ratePct, start, end) => {
+    const d = Number(deposit);
+    const r = Number(ratePct);
+    if (!Number.isFinite(d) || d <= 0) return null;
+    if (!Number.isFinite(r) || r < 0) return null;
+    if (!start || !end) return null;
+    const s = new Date(start);
+    const e = new Date(end);
+    if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return null;
+    const months = (e - s) / (1000 * 60 * 60 * 24 * 30.4375);
+    const years = months / 12;
+    return d * (1 + (r / 100) * years);
+  };
 
   const resetUnitOpForm = () => {
     setUnitOpsForm({ title: '', contactName: '', status: 'Open', dueDate: '', amount: '', details: '' });
@@ -234,7 +425,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         specificUnitSalePrice: unitEditForm.specificUnitSalePrice === '' ? null : Number(unitEditForm.specificUnitSalePrice),
         rentalRate: unitEditForm.rentalRate === '' ? null : Number(unitEditForm.rentalRate),
         rentEscalationPercentage: unitEditForm.rentEscalationPercentage === '' ? null : Number(unitEditForm.rentEscalationPercentage),
-        leaseTermMonths: unitEditForm.leaseTermMonths === '' ? null : Number(unitEditForm.leaseTermMonths),
         isCurrentlyVacant: unitEditForm.isCurrentlyVacant
       });
       // Reflect edits into the open modal + the master property list
@@ -496,6 +686,40 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         <div className="p-3.5 bg-emerald-950/40 border border-emerald-800/80 text-emerald-300 rounded-xl text-xs flex items-center gap-2 animate-fade-in">
           <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
           <span>{actionSuccessMessage}</span>
+        </div>
+      )}
+
+      {/* 📜 SOLE MANDATE BANNERS — visible to ALL roles. The yellow obligation
+          banner is shown whenever a property has an active sole mandate, to
+          remind every viewer of the legal-document requirement. The orange/red
+          14-day expiration banner fires when the mandate is about to lapse. */}
+      {property.activeSoleMandate && (
+        <div className="space-y-2">
+          <div className="flex items-start gap-3 p-3.5 rounded-2xl border border-amber-700/50 bg-gradient-to-br from-amber-950/50 to-slate-900/40 text-amber-100 text-xs leading-relaxed">
+            <span className="text-base leading-none shrink-0">📜</span>
+            <div className="flex-1">
+              <strong className="font-bold uppercase tracking-[0.1em] text-[10px] text-amber-300">Sole Mandate Active</strong>
+              <p className="mt-1">
+                This property is under a sole mandate from <strong>{property.activeSoleMandate.startDate?.slice(0, 10)}</strong> to <strong>{property.activeSoleMandate.endDate?.slice(0, 10)}</strong>.
+                The agent of record is obligated to keep the signed mandate legal documents on file in this property's documents tab before any marketing activity.
+              </p>
+            </div>
+          </div>
+          {Number.isFinite(property.activeSoleMandate.daysRemaining) && property.activeSoleMandate.daysRemaining <= 14 && (
+            <div className={`flex items-start gap-3 p-3.5 rounded-2xl border text-xs leading-relaxed ${property.activeSoleMandate.daysRemaining <= 0 ? 'bg-red-950/60 border-red-700/60 text-red-200' : property.activeSoleMandate.daysRemaining <= 7 ? 'bg-red-950/40 border-red-800/60 text-red-200' : 'bg-orange-950/40 border-orange-700/50 text-orange-200'}`}>
+              <span className="text-base leading-none shrink-0">⏰</span>
+              <div className="flex-1">
+                <strong className="font-bold uppercase tracking-[0.1em] text-[10px]">
+                  {property.activeSoleMandate.daysRemaining <= 0 ? 'Mandate Expired' : 'Mandate Expiring Soon'}
+                </strong>
+                <p className="mt-1">
+                  {property.activeSoleMandate.daysRemaining <= 0
+                    ? `The sole mandate expired ${Math.abs(property.activeSoleMandate.daysRemaining)} day${Math.abs(property.activeSoleMandate.daysRemaining) === 1 ? '' : 's'} ago. Renew or open a new mandate to continue marketing this property.`
+                    : `The sole mandate expires in ${property.activeSoleMandate.daysRemaining} day${property.activeSoleMandate.daysRemaining === 1 ? '' : 's'} (${property.activeSoleMandate.endDate?.slice(0, 10)}). Renew or open a new mandate before it lapses.`}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -765,6 +989,12 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
 
                 <nav className="flex items-end gap-1 px-4 border-b border-slate-800 bg-slate-950/40">
                   <button type="button" onClick={() => setModalTab('details')} className={`px-3 py-2 text-xs font-bold ${modalTab === 'details' ? 'text-blue-300 border-b-2 border-blue-500' : 'text-slate-400'}`}>Details</button>
+                  <button type="button" onClick={() => setModalTab('lease')} className={`flex items-center gap-1 px-3 py-2 text-xs font-bold ${modalTab === 'lease' ? 'text-blue-300 border-b-2 border-blue-500' : 'text-slate-400'}`}>
+                    <FileSignature size={13} />Lease
+                  </button>
+                  <button type="button" onClick={() => setModalTab('history')} className={`flex items-center gap-1 px-3 py-2 text-xs font-bold ${modalTab === 'history' ? 'text-blue-300 border-b-2 border-blue-500' : 'text-slate-400'}`}>
+                    <History size={13} />History
+                  </button>
                   {OPS_TABS.map((tab) => { const Icon = tab.Icon; return (
                     <button key={tab.id} type="button" onClick={() => setModalTab(tab.id)} className={`flex items-center gap-1 px-3 py-2 text-xs font-bold ${modalTab === tab.id ? 'text-blue-300 border-b-2 border-blue-500' : 'text-slate-400'}`}>
                       <Icon size={13} />{tab.label}
@@ -788,7 +1018,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                       <label className="label">Sale price<input type="number" min="0" value={unitEditForm.specificUnitSalePrice ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, specificUnitSalePrice: e.target.value || '' })} className="field" /></label>
                       <label className="label">Rental rate (R/mo)<input type="number" min="0" value={unitEditForm.rentalRate ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, rentalRate: e.target.value || '' })} className="field" /></label>
                       <label className="label">Escalation %<input type="number" min="0" step="0.01" value={unitEditForm.rentEscalationPercentage ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, rentEscalationPercentage: e.target.value || '' })} className="field" /></label>
-                      <label className="label">Lease term (months)<input type="number" min="0" value={unitEditForm.leaseTermMonths ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, leaseTermMonths: e.target.value || '' })} className="field" /></label>
                       <label className="flex items-center gap-2 text-xs mt-1"><input type="checkbox" checked={unitEditForm.isCurrentlyVacant} onChange={e => setUnitEditForm({ ...unitEditForm, isCurrentlyVacant: e.target.checked })} /><span className="text-slate-300">Currently vacant</span></label>
                       <div className="sm:col-span-2">
                         <Can permission="units:edit">
@@ -798,8 +1027,279 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                     </form>
                   )}
 
-                  {/* 📋 LEASES / MAINTENANCE (CRM records scoped to this unit; property/unit auto-bound) */}
-                  {(modalTab === 'leases' || modalTab === 'maintenance') && (
+                  {/* 📜 LEASE TAB — editable current lease (or new lease) backed by UnitLeases */}
+                  {modalTab === 'lease' && (
+                    <div className="space-y-4">
+                      {unitLeasesError && <div className="p-3 rounded-xl text-xs bg-red-950/40 border border-red-900 text-red-300">{unitLeasesError}</div>}
+                      {unitLeasesSuccess && <div className="p-3 rounded-xl text-xs bg-emerald-950/40 border border-emerald-900 text-emerald-300">{unitLeasesSuccess}</div>}
+
+                      <div className="grid xl:grid-cols-[1fr_320px] gap-6">
+                        <form onSubmit={saveLease} className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h5 className="text-xs font-bold text-blue-400 uppercase">
+                              {leaseEditingId ? 'Edit Current Lease' : 'New Lease'}
+                            </h5>
+                            {leaseEditingId && (
+                              <span className="text-[10px] text-slate-500">Lease #{leaseEditingId}</span>
+                            )}
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] text-slate-400 uppercase">Tenant (contact)</label>
+                            <ContactPicker
+                              value={leaseForm.contactDisplay}
+                              onChange={(c) => setLeaseForm({ ...leaseForm, contactDisplay: c, contactId: c?.contactId || null, tenantName: c?.fullName || '' })}
+                              allowCreate
+                              placeholder="Search tenant or create new..."
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <label className="label">Start date<input required type="date" value={leaseForm.leaseStart} onChange={(e) => setLeaseForm({ ...leaseForm, leaseStart: e.target.value })} className="field" /></label>
+                            <label className="label">End date<input required type="date" value={leaseForm.leaseEnd} onChange={(e) => setLeaseForm({ ...leaseForm, leaseEnd: e.target.value })} className="field" /></label>
+                          </div>
+                          {leaseForm.leaseStart && leaseForm.leaseEnd && new Date(leaseForm.leaseEnd) > new Date(leaseForm.leaseStart) && (
+                            <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                              <Calendar size={11} />Term: {leaseTermLabel(leaseForm.leaseStart, leaseForm.leaseEnd)}
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <label className="label">Monthly rent (R)<input type="number" min="0" value={leaseForm.monthlyRent ?? ''} onChange={(e) => setLeaseForm({ ...leaseForm, monthlyRent: e.target.value })} className="field" /></label>
+                            <label className="label">Deposit (R)<input type="number" min="0" value={leaseForm.depositAmount ?? ''} onChange={(e) => setLeaseForm({ ...leaseForm, depositAmount: e.target.value })} className="field" /></label>
+                          </div>
+
+                          <label className="label">Accrued interest on deposit (% per year)<input type="number" min="0" step="0.01" value={leaseForm.accruedInterestPercent ?? ''} onChange={(e) => setLeaseForm({ ...leaseForm, accruedInterestPercent: e.target.value })} className="field" placeholder="e.g. 5.00" /></label>
+
+                          {/* 💰 Live read-only label — recomputed on every keystroke so the
+                              user can see the termination value update as they edit deposit /
+                              rate / dates. Wording flips to "Amount paid" when the lease
+                              window is already in the past. Same formula is also used in
+                              the History detail view. */}
+                          {(() => {
+                            const total = leaseTerminationAmount(
+                              leaseForm.depositAmount,
+                              leaseForm.accruedInterestPercent,
+                              leaseForm.leaseStart,
+                              leaseForm.leaseEnd
+                            );
+                            if (total == null) {
+                              return (
+                                <div className="p-2.5 rounded-xl bg-slate-950/40 border border-dashed border-slate-800 text-[10px] text-slate-500">
+                                  Amount due to tenant on lease termination: enter deposit, rate, and both dates to preview.
+                                </div>
+                              );
+                            }
+                            const previewExpired = leaseForm.leaseEnd && new Date(leaseForm.leaseEnd) < new Date();
+                            const label = previewExpired
+                              ? 'Amount paid to tenant on lease termination'
+                              : 'Amount due to tenant on lease termination';
+                            return (
+                              <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-900">
+                                <span className="block text-[10px] text-emerald-400 uppercase font-bold tracking-wider">{label}</span>
+                                <span className="text-lg font-black text-emerald-200">R {Math.round(total).toLocaleString()}</span>
+                                <span className="block text-[10px] text-emerald-400/70 mt-0.5">
+                                  Deposit {Number(leaseForm.depositAmount).toLocaleString()} + interest at {Number(leaseForm.accruedInterestPercent)}% p.a. over {leaseTermLabel(leaseForm.leaseStart, leaseForm.leaseEnd)}
+                                </span>
+                              </div>
+                            );
+                          })()}
+
+                          <label className="label">Notes<textarea rows={3} value={leaseForm.notes} onChange={(e) => setLeaseForm({ ...leaseForm, notes: e.target.value })} className="field" placeholder="Notice period, escalation notes, special conditions..." /></label>
+
+                          <div className="flex gap-2">
+                            {leaseEditingId && (
+                              <button type="button" onClick={() => hydrateLeaseForm(null)} className="py-2 px-4 border border-slate-700 rounded-xl text-xs">New</button>
+                            )}
+                            <Can permission="units:edit">
+                              <button className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold">{leaseEditingId ? 'Save changes' : 'Create lease'}</button>
+                            </Can>
+                          </div>
+                        </form>
+
+                        <div className="space-y-2">
+                          <h5 className="text-xs font-bold text-blue-400 uppercase">Current Tenant</h5>
+                          {unitLeasesLoading ? (
+                            <div className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="animate-spin" size={14} />Loading…</div>
+                          ) : (() => {
+                            const current = unitLeases.find((l) => l.isCurrent);
+                            const upcoming = unitLeases.find((l) => l.isFuture);
+                            if (!current) {
+                              return (
+                                <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2">
+                                  <p className="text-xs text-slate-500">No active tenant for this unit right now.</p>
+                                  {upcoming && (
+                                    <p className="text-[10px] text-blue-300">Upcoming: starts {new Date(upcoming.leaseStart).toLocaleDateString()}</p>
+                                  )}
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="p-3 bg-emerald-950/30 border border-emerald-900 rounded-xl space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold text-emerald-300 uppercase">Active</span>
+                                  <span className="text-[10px] text-slate-400">Lease #{current.unitLeaseId}</span>
+                                </div>
+                                <p className="text-sm font-semibold text-white">{current.tenantNameSnapshot || (current.contactId ? `Tenant ${current.contactId}` : 'Unlinked lease')}</p>
+                                <p className="text-[10px] text-slate-400">
+                                  {new Date(current.leaseStart).toLocaleDateString()} → {new Date(current.leaseEnd).toLocaleDateString()} ({leaseTermLabel(current.leaseStart, current.leaseEnd)})
+                                </p>
+                                {current.monthlyRent != null && <p className="text-[10px] text-emerald-300">R {Number(current.monthlyRent).toLocaleString()}/mo</p>}
+                                <div className="flex gap-1.5 pt-1">
+                                  <Can permission="units:edit">
+                                    <button type="button" onClick={() => hydrateLeaseForm(current)} className="flex-1 text-[10px] py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg"><Pencil size={11} className="inline" /> Edit</button>
+                                    <button type="button" onClick={() => endLeaseNow(current)} className="flex-1 text-[10px] py-1.5 bg-amber-900/60 hover:bg-amber-900 text-amber-200 rounded-lg">End now</button>
+                                  </Can>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 🕒 HISTORY TAB — list of every lease for this unit. Click a row for read-only detail + maintenance summary. */}
+                  {modalTab === 'history' && (
+                    <div className="space-y-3">
+                      {unitLeasesError && <div className="p-3 rounded-xl text-xs bg-red-950/40 border border-red-900 text-red-300">{unitLeasesError}</div>}
+
+                      {historyDetail ? (
+                        // ─── read-only lease detail + collapsible maintenance summary ───
+                        <div className="space-y-3">
+                          <button type="button" onClick={() => setHistoryDetail(null)} className="inline-flex items-center gap-1 text-[10px] text-blue-300 hover:text-white"><ArrowLeft size={11} />Back to history</button>
+                          <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2">
+                            <div className="flex items-center justify-between">
+                              <h5 className="text-sm font-bold text-white">Lease #{historyDetail.unitLeaseId}</h5>
+                              {historyDetail.isCurrent ? (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 uppercase">Active</span>
+                              ) : historyDetail.isFuture ? (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 uppercase">Upcoming</span>
+                              ) : (
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 uppercase">Expired</span>
+                              )}
+                            </div>
+                            <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-300">
+                              <div><span className="text-slate-500">Start:</span> {new Date(historyDetail.leaseStart).toLocaleDateString()}</div>
+                              <div><span className="text-slate-500">End:</span> {new Date(historyDetail.leaseEnd).toLocaleDateString()}</div>
+                              <div><span className="text-slate-500">Term:</span> {leaseTermLabel(historyDetail.leaseStart, historyDetail.leaseEnd)}</div>
+                              <div><span className="text-slate-500">Monthly rent:</span> {historyDetail.monthlyRent != null ? `R ${Number(historyDetail.monthlyRent).toLocaleString()}` : '—'}</div>
+                              <div><span className="text-slate-500">Deposit:</span> {historyDetail.depositAmount != null ? `R ${Number(historyDetail.depositAmount).toLocaleString()}` : '—'}</div>
+                              <div><span className="text-slate-500">Interest rate:</span> {historyDetail.accruedInterestPercent != null ? `${Number(historyDetail.accruedInterestPercent)}% p.a.` : '—'}</div>
+                              <div className="sm:col-span-2">
+                                <span className="text-slate-500">Tenant:</span>{' '}
+                                <span className="text-white font-semibold">
+                                  {historyDetail.tenantNameSnapshot || (historyDetail.contactId ? historyDetail.contactId : 'Unlinked')}
+                                </span>
+                                {historyDetail.contactId && historyDetail.tenantNameSnapshot && (
+                                  <span className="text-slate-500 text-[10px] ml-2">({historyDetail.contactId})</span>
+                                )}
+                              </div>
+                            </div>
+                            {(() => {
+                              const total = leaseTerminationAmount(
+                                historyDetail.depositAmount,
+                                historyDetail.accruedInterestPercent,
+                                historyDetail.leaseStart,
+                                historyDetail.leaseEnd
+                              );
+                              if (total == null) return null;
+                              const label = historyDetail.isExpired
+                                ? 'Amount paid to tenant on lease termination'
+                                : 'Amount due to tenant on lease termination';
+                              return (
+                                <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-900">
+                                  <span className="block text-[10px] text-emerald-400 uppercase font-bold tracking-wider">{label}</span>
+                                  <span className="text-lg font-black text-emerald-200">R {Math.round(total).toLocaleString()}</span>
+                                </div>
+                              );
+                            })()}
+                            {historyDetail.notes && (
+                              <div className="pt-2 border-t border-slate-800 text-xs text-slate-300 whitespace-pre-wrap">{historyDetail.notes}</div>
+                            )}
+                          </div>
+
+                          {/* Collapsible maintenance summary — all unit calls, since we don't link to leases. */}
+                          <button
+                            type="button"
+                            onClick={() => setHistoryMaintOpen(!historyMaintOpen)}
+                            className="w-full flex items-center justify-between p-3 bg-slate-950/60 border border-slate-800 rounded-xl hover:bg-slate-900"
+                          >
+                            <span className="flex items-center gap-2 text-xs font-bold text-slate-200">
+                              <Wrench size={13} className="text-blue-400" />
+                              Maintenance Calls ({historyMaintCalls.length})
+                            </span>
+                            {historyMaintOpen ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+                          </button>
+                          {historyMaintOpen && (
+                            <div className="space-y-2 pl-2">
+                              {historyLoading ? (
+                                <div className="flex items-center gap-2 text-xs text-slate-400 pl-2"><Loader2 className="animate-spin" size={14} />Loading maintenance…</div>
+                              ) : historyMaintCalls.length === 0 ? (
+                                <p className="text-[10px] text-slate-500 pl-2">No maintenance calls logged for this unit.</p>
+                              ) : (
+                                historyMaintCalls.map((c) => (
+                                  <div key={c.maintenanceCallId} className="p-2.5 bg-slate-950/40 border border-slate-800 rounded-lg flex items-center justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-white truncate">{c.title}</p>
+                                      <p className="text-[10px] text-slate-500">{new Date(c.createdAt).toLocaleDateString()} • {c.status}</p>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+
+                          <Can permission="units:delete">
+                            <button type="button" onClick={() => deleteLease(historyDetail).then(() => setHistoryDetail(null))} className="text-[10px] text-red-400 hover:text-red-300 inline-flex items-center gap-1"><Trash2 size={11} />Delete this lease</button>
+                          </Can>
+                        </div>
+                      ) : (
+                        // ─── history list ───
+                        <>
+                          {unitLeasesLoading ? (
+                            <div className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="animate-spin" size={14} />Loading history…</div>
+                          ) : unitLeases.length === 0 ? (
+                            <p className="text-[10px] text-slate-500 text-center py-8">No leases recorded for this unit yet. Use the Lease tab to add one.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {unitLeases.map((l) => (
+                                <button
+                                  type="button"
+                                  key={l.unitLeaseId}
+                                  onClick={() => openHistoryDetail(l)}
+                                  className="w-full p-3 bg-slate-950/60 border border-slate-800 hover:border-blue-700 rounded-xl text-left flex items-center justify-between gap-3 transition-colors"
+                                >
+                                  <div className="min-w-0 space-y-0.5">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <p className="text-xs font-bold text-white">
+                                        Tenant: {l.tenantNameSnapshot || (l.contactId ? `(${l.contactId})` : 'Unlinked')}
+                                      </p>
+                                      {l.isCurrent ? (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/60 text-emerald-300 uppercase">Active</span>
+                                      ) : l.isFuture ? (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 uppercase">Upcoming</span>
+                                      ) : (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 uppercase">Expired</span>
+                                      )}
+                                    </div>
+                                    <p className="text-[10px] text-slate-400">
+                                      {new Date(l.leaseStart).toLocaleDateString()} → {new Date(l.leaseEnd).toLocaleDateString()} ({leaseTermLabel(l.leaseStart, l.leaseEnd)})
+                                    </p>
+                                    {l.monthlyRent != null && <p className="text-[10px] text-emerald-400">R {Number(l.monthlyRent).toLocaleString()}/mo</p>}
+                                  </div>
+                                  <span className="text-[10px] text-blue-400 font-semibold shrink-0">View →</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 📋 MAINTENANCE (CRM records scoped to this unit; property/unit auto-bound) */}
+                  {modalTab === 'maintenance' && (
                     <div className="space-y-4">
                       {unitOpsError && <div className="p-3 rounded-xl text-xs bg-red-950/40 border border-red-900 text-red-300">{unitOpsError}</div>}
                       {unitOpsSuccess && <div className="p-3 rounded-xl text-xs bg-emerald-950/40 border border-emerald-900 text-emerald-300">{unitOpsSuccess}</div>}

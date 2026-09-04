@@ -94,7 +94,7 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
       setIsLoading(true);
       setErrorMessage('');
       try {
-        const assets = await propertyService.searchProperties([], 'All', null, null);
+        const assets = await propertyService.searchProperties([], 'All', null, null, 'All', 1, 10000);
         setProperties(assets || []);
       } catch (err) {
         setErrorMessage(err || 'Failed to populate spatial markers onto map canvases.');

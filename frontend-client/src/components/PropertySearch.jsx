@@ -3,8 +3,10 @@ import { MapPin, X, SlidersHorizontal, Building2, Loader2, Pencil } from 'lucide
 import { propertyService } from '../services/propertyService.js';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import Can from '../components/Can.jsx';
+import Pagination from '../components/Pagination.jsx';
 
 const PAGE_SIZE = 20;
+const LOAD_ALL_PAGE_SIZE = 100000;
 
 export default function PropertySearch({ onSelectProperty }) {
   const { hasPermission } = usePermission();
@@ -19,31 +21,25 @@ export default function PropertySearch({ onSelectProperty }) {
   // Live data fetching lifecycle states
   const [properties, setProperties] = useState([]);
   const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [editingProperty, setEditingProperty] = useState(null);
-  const [propertyForm, setPropertyForm] = useState({ completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold', portfolioZoning: '', marketClass: 'Sale', propertyTypeId: '', valuationPrice: '', salePrice: '', latitude: '', longitude: '', linkedOwnerId: '' });
+  const [propertyForm, setPropertyForm] = useState({ completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold', portfolioZoning: '', marketClass: 'Sale', propertyTypeId: '', valuationPrice: '', salePrice: '', latitude: '', longitude: '', linkedOwnerId: '', soleMandate: false, soleMandateStart: '', soleMandateEnd: '' });
   const [addressQuery, setAddressQuery] = useState('');
   const [addressResults, setAddressResults] = useState([]);
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
   const [showAddressDropdown, setShowAddressDropdown] = useState(false);
   const addressDebounceRef = useRef(null);
-  const sentinelRef = useRef(null);
-  const observerRef = useRef(null);
   const criteriaKey = `${selectedLocations.join('|')}::${propertyType}::${minSize}::${maxSize}::${listingType}`;
 
-  // 📜 Fetch a single page; replaces the loaded list when `reset` is true,
-  // otherwise appends. Owns pagination/hasMore bookkeeping so the IntersectionObserver
-  // callback can call it without thinking about it.
-  const fetchPage = useCallback(async (pageToLoad, reset) => {
-    if (reset) {
-      setIsLoading(true);
-    } else {
-      setIsLoadingMore(true);
-    }
+  // 📜 Single-shot fetch — every filter change requests page 1 with a
+  // deliberately huge pageSize so the full set returns in one round-trip.
+  // Replaces the previous infinite-scroll + IntersectionObserver pattern
+  // (which was unreliable because the observer lived in a conditional
+  // effect and silently never fired).
+  const fetchAll = useCallback(async () => {
+    setIsLoading(true);
     setErrorMessage('');
     try {
       const liveInventory = await propertyService.searchProperties(
@@ -52,48 +48,26 @@ export default function PropertySearch({ onSelectProperty }) {
         minSize,
         maxSize,
         listingType,
-        pageToLoad
+        1,
+        LOAD_ALL_PAGE_SIZE
       );
       const incoming = Array.isArray(liveInventory) ? liveInventory : [];
-      setProperties((prev) => (reset ? incoming : [...prev, ...incoming]));
-      const total = Number(liveInventory?.totalCount || 0);
+      setProperties(incoming);
+      const total = Number(liveInventory?.totalCount || incoming.length);
       setTotalCount(total);
-      setPage(pageToLoad);
-      setHasMore((reset ? incoming.length : properties.length + incoming.length) < total && incoming.length > 0);
+      setPage(1);
     } catch (err) {
       setErrorMessage(err || 'Failed to sync spatial data metrics from backend clusters.');
     } finally {
       setIsLoading(false);
-      setIsLoadingMore(false);
     }
-  }, [selectedLocations, propertyType, minSize, maxSize, listingType, properties.length]);
-
-  // 🔄 LIVE BACKEND SYNCHRONIZATION PIPELINE: Reset to page 1 on any filter change.
-  useEffect(() => {
-    fetchPage(1, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLocations, propertyType, minSize, maxSize, listingType]);
 
-  // 👁️ INFINITE SCROLL: observe the sentinel div; when it enters the viewport
-  // (with 200px pre-fetch margin), request the next page.
+  // 🔄 LIVE BACKEND SYNCHRONIZATION PIPELINE: re-fetch on any filter change.
   useEffect(() => {
-    if (!sentinelRef.current) return;
-    if (observerRef.current) observerRef.current.disconnect();
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting && hasMore && !isLoading && !isLoadingMore) {
-            fetchPage(page + 1, false);
-          }
-        });
-      },
-      { rootMargin: '200px' }
-    );
-    observer.observe(sentinelRef.current);
-    observerRef.current = observer;
-    return () => observer.disconnect();
-  }, [fetchPage, hasMore, isLoading, isLoadingMore, page, criteriaKey]);
+    fetchAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLocations, propertyType, minSize, maxSize, listingType]);
 
   useEffect(() => () => { if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current); }, []);
 
@@ -141,6 +115,7 @@ export default function PropertySearch({ onSelectProperty }) {
     try {
       const prop = await propertyService.getPropertyById(propertyId);
       setEditingProperty(prop);
+      const mandate = prop.activeSoleMandate;
       setPropertyForm({
         completeAddress: prop.completeAddress || '',
         erfSpatialSize: prop.erfSpatialSize || '',
@@ -152,7 +127,10 @@ export default function PropertySearch({ onSelectProperty }) {
         salePrice: String(prop.salePrice || ''),
         latitude: String(prop.latitude || ''),
         longitude: String(prop.longitude || ''),
-        linkedOwnerId: prop.linkedOwnerId || ''
+        linkedOwnerId: prop.linkedOwnerId || '',
+        soleMandate: !!mandate,
+        soleMandateStart: mandate ? mandate.startDate?.slice(0, 10) : '',
+        soleMandateEnd: mandate ? mandate.endDate?.slice(0, 10) : ''
       });
       setAddressQuery(prop.completeAddress || '');
     } catch (err) { alert(err || 'Failed to load property.'); }
@@ -171,6 +149,28 @@ export default function PropertySearch({ onSelectProperty }) {
         longitude: parseFloat(propertyForm.longitude) || 0,
         linkedOwnerId: propertyForm.linkedOwnerId
       });
+      // 📜 Sole-mandate: separate from the property PUT. Ticked = open a
+      // new active mandate (server auto-closes any previous one). Unticked
+      // = close the currently-active mandate, if any.
+      const existingMandate = editingProperty.activeSoleMandate;
+      if (propertyForm.soleMandate && !existingMandate) {
+        const today = new Date();
+        const fallbackEnd = new Date(today.getTime() + 365 * 24 * 60 * 60 * 1000);
+        const start = propertyForm.soleMandateStart || today.toISOString().slice(0, 10);
+        const end = propertyForm.soleMandateEnd || fallbackEnd.toISOString().slice(0, 10);
+        await propertyService.createSoleMandate(editingProperty.propertyId, { startDate: start, endDate: end });
+      } else if (!propertyForm.soleMandate && existingMandate) {
+        await propertyService.closeSoleMandate(editingProperty.propertyId, existingMandate.soleMandateId);
+      } else if (propertyForm.soleMandate && existingMandate) {
+        // Re-saving with same dates is a no-op; the user can change dates
+        // and we'll close+reopen (server enforces one-active constraint).
+        const newStart = propertyForm.soleMandateStart;
+        const newEnd = propertyForm.soleMandateEnd;
+        if (newStart && newEnd && (newStart !== existingMandate.startDate?.slice(0, 10) || newEnd !== existingMandate.endDate?.slice(0, 10))) {
+          await propertyService.closeSoleMandate(editingProperty.propertyId, existingMandate.soleMandateId);
+          await propertyService.createSoleMandate(editingProperty.propertyId, { startDate: newStart, endDate: newEnd });
+        }
+      }
       setEditingProperty(null);
       setAddressQuery('');
       setAddressResults([]);
@@ -284,7 +284,7 @@ export default function PropertySearch({ onSelectProperty }) {
       <div className="space-y-3">
         <div className="flex justify-between items-center px-1">
           <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
-            Matched System Assets ({totalCount || properties.length}{hasMore ? ` — showing ${properties.length}` : ''})
+            Matched System Assets ({properties.length} of {totalCount || properties.length})
           </span>
         </div>
 
@@ -323,18 +323,32 @@ export default function PropertySearch({ onSelectProperty }) {
                    </div>
 
                   
-                  <h4 className="text-white font-bold text-base mb-1 tracking-tight group-hover:text-blue-400 transition-colors">
-                    {prop.completeAddress}
-                  </h4>
-                  <div className="flex items-center gap-2 mb-4">
-                    <p className="text-xs text-slate-500 font-medium">{prop.portfolioZoning}</p>
-                    {prop.subUnits && prop.subUnits.length > 0 && (
-                      <span className="text-[10px] font-semibold text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-900">
-                        {prop.subUnits.length} {prop.subUnits.length === 1 ? 'Unit' : 'Units'}
-                      </span>
-                    )}
-                  </div>
-                </div>
+                   <h4 className="text-white font-bold text-base mb-1 tracking-tight group-hover:text-blue-400 transition-colors">
+                     {prop.completeAddress}
+                   </h4>
+                   <div className="flex items-center gap-2 mb-4">
+                     <p className="text-xs text-slate-500 font-medium">{prop.portfolioZoning}</p>
+                     {prop.subUnits && prop.subUnits.length > 0 && (
+                       <span className="text-[10px] font-semibold text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded-full border border-blue-900">
+                         {prop.subUnits.length} {prop.subUnits.length === 1 ? 'Unit' : 'Units'}
+                       </span>
+                     )}
+                   </div>
+                 </div>
+
+                     {/* 📜 Sole-mandate expiration banner (14-day warning). Shown
+                         on every list card so the agent can see at a glance which
+                         mandates are about to lapse. */}
+                     {Number.isFinite(prop.soleMandateDaysRemaining) && prop.soleMandateDaysRemaining != null && prop.soleMandateDaysRemaining <= 14 && (
+                       <div className={`mt-2 flex items-start gap-2 p-2.5 rounded-xl border text-[10px] leading-snug ${prop.soleMandateDaysRemaining <= 0 ? 'bg-red-950/50 border-red-700/50 text-red-200' : prop.soleMandateDaysRemaining <= 7 ? 'bg-red-950/30 border-red-800/50 text-red-300' : 'bg-amber-950/40 border-amber-700/50 text-amber-200'}`}>
+                         <span className="text-sm leading-none">📜</span>
+                         <span className="font-semibold">
+                           {prop.soleMandateDaysRemaining <= 0
+                             ? 'Sole mandate has expired — renew to continue marketing.'
+                             : `Sole mandate expires in ${prop.soleMandateDaysRemaining} day${prop.soleMandateDaysRemaining === 1 ? '' : 's'}.`}
+                         </span>
+                       </div>
+                     )}
 
                     <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
                       <div>
@@ -356,15 +370,16 @@ export default function PropertySearch({ onSelectProperty }) {
           </div>
         )}
 
-        {/* 👁️ IntersectionObserver sentinel — pre-fetches 200px before the user sees it */}
-        {!isLoading && hasMore && properties.length > 0 && (
-          <div ref={sentinelRef} className="h-10 flex items-center justify-center text-[10px] text-slate-600 uppercase tracking-widest">
-            {isLoadingMore ? (
-              <span className="flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Loading more…</span>
-            ) : (
-              <span>Scroll to load more</span>
-            )}
-          </div>
+        {/* 📑 Pagination footer — list is fetched in one round-trip so this
+            just exposes the total count via the shared <Pagination /> component. */}
+        {!isLoading && properties.length > 0 && (
+          <Pagination
+            page={page}
+            pageSize={Math.max(1, properties.length)}
+            totalCount={totalCount || properties.length}
+            onPageChange={() => {}}
+            className="pt-2"
+          />
         )}
       </div>
 
@@ -403,6 +418,44 @@ export default function PropertySearch({ onSelectProperty }) {
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Latitude</label><input type="number" step="any" value={propertyForm.latitude} onChange={(e) => setPropertyForm({ ...propertyForm, latitude: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Longitude</label><input type="number" step="any" value={propertyForm.longitude} onChange={(e) => setPropertyForm({ ...propertyForm, longitude: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1 md:col-span-2"><label className="text-[10px] text-slate-400 uppercase">Linked Owner ID</label><input type="text" value={propertyForm.linkedOwnerId} onChange={(e) => setPropertyForm({ ...propertyForm, linkedOwnerId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+              </div>
+
+              {/* 📜 SOLE MANDATE — stylish toggle + date pickers + obligation reminder */}
+              <div className="md:col-span-2 p-4 rounded-2xl border border-amber-800/40 bg-gradient-to-br from-amber-950/30 to-slate-900/40 space-y-3">
+                <label className="flex items-center gap-3 cursor-pointer select-none">
+                  <span className="relative inline-flex">
+                    <input
+                      type="checkbox"
+                      checked={!!propertyForm.soleMandate}
+                      onChange={(e) => setPropertyForm({ ...propertyForm, soleMandate: e.target.checked })}
+                      className="peer sr-only"
+                    />
+                    <span className={`w-11 h-6 rounded-full transition-colors ${propertyForm.soleMandate ? 'bg-amber-500' : 'bg-slate-700'}`}></span>
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${propertyForm.soleMandate ? 'translate-x-5' : ''}`}></span>
+                  </span>
+                  <span className="text-xs font-bold text-amber-200 uppercase tracking-[0.12em]">📜 Property is under sole mandate</span>
+                </label>
+
+                {propertyForm.soleMandate && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 uppercase">Start Date</label>
+                        <input type="date" value={propertyForm.soleMandateStart} onChange={(e) => setPropertyForm({ ...propertyForm, soleMandateStart: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-400 uppercase">End Date</label>
+                        <input type="date" value={propertyForm.soleMandateEnd} onChange={(e) => setPropertyForm({ ...propertyForm, soleMandateEnd: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500" />
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-600/40 text-amber-200 text-[11px] leading-relaxed">
+                      <span className="text-base leading-none">⚠️</span>
+                      <span>
+                        <strong className="font-bold">Obligation:</strong> the signed mandate legal documents must be uploaded under this property's documents tab before any marketing or show-day activity begins. Mark the date range above and save to open the mandate.
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
               <div className="flex gap-2">
                 <button type="submit" className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold">Save Changes</button>

@@ -4,6 +4,13 @@ const ACTIVE_TENANT_STORAGE_KEY = 'active_tenant_override';
 const ACTIVE_TENANT_STORAGE_MARKER = 'view-override';
 const USER_PROFILE_STORAGE_KEY = 'user_profile_data';
 
+const toMessage = (err, fallback) => {
+  if (!err) return fallback;
+  if (typeof err === 'string') return err;
+  if (err.message) return err.message;
+  try { return JSON.stringify(err); } catch { return fallback; }
+};
+
 function resolveActiveTenantOverride() {
   try {
     const raw = localStorage.getItem(ACTIVE_TENANT_STORAGE_KEY);
@@ -48,7 +55,7 @@ export const authService = {
   login: async (email, password) => {
     try {
       const response = await apiClient.post('/auth/login', { email, password });
-      
+      debugger;
       if (response.data && response.data.token) {
         localStorage.setItem('user_session_jwt', response.data.token);
         localStorage.setItem('user_profile_data', JSON.stringify(response.data.profile));
@@ -56,9 +63,8 @@ export const authService = {
       
       return response.data;
     } catch (error) {
-      const message = error.response?.data?.message 
-        || error.message 
-        || 'Authentication framework link failed.';
+      debugger
+      const message = toMessage(error.response?.data?.message, null) || toMessage(error, 'Authentication framework link failed.');
       throw new Error(message, { cause: error });
     }
   },
@@ -69,7 +75,7 @@ export const authService = {
       const response = await apiClient.post('/auth/forgot-password', { email });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Outbound email recovery link trigger failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Outbound email recovery link trigger failed.'));
     }
   },
   // --- 🏢 ROLE-RESTRICTED REAL ESTATE USER PROVISIONING ---
@@ -86,7 +92,7 @@ export const authService = {
       const response = await apiClient.post('/auth/register-user', payload);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Corporate identity profile registration failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Corporate identity profile registration failed.'));
     }
   },
 
@@ -96,7 +102,7 @@ export const authService = {
       const response = await apiClient.get('/auth/users', { params: tenantQueryParams() });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'User directory sync failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'User directory sync failed.'));
     }
   },
    updateUserRole: async (userId, systemRole) => {
@@ -104,7 +110,7 @@ export const authService = {
       const response = await apiClient.put(`/auth/users/${userId}/role`, { systemRole });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Role reassignment failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Role reassignment failed.'));
     }
   },
 
@@ -114,7 +120,7 @@ export const authService = {
        const response = await apiClient.put(`/auth/users/${userId}/disable`);
        return response.data;
      } catch (error) {
-       throw error.response?.data?.message || 'User deactivation failed.';
+       throw new Error(toMessage(error.response?.data?.message, 'User deactivation failed.'));
      }
    },
 
@@ -124,7 +130,7 @@ export const authService = {
       const response = await apiClient.post('/auth/trial/set-password', { token, password });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Failed to set trial password.';
+      throw new Error(toMessage(error.response?.data?.message, 'Failed to set trial password.'));
     }
   },
 

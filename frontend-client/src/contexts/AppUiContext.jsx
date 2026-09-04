@@ -33,10 +33,13 @@ const uiReducer = (state, action) => {
     case 'CLEAR_BROCHURE_DEAL_TARGET':
       return { ...state, activeBrochureDealTarget: null };
     case 'NAVIGATE_TO':
+      // 🛒 Preserve the brochure cart target when the caller is navigating
+      // TO the crm view — the cart workspace mounts there. Clearing here
+      // would silently close the cart the user just opened.
       return {
         ...state,
         currentView: action.payload,
-        activeBrochureDealTarget: null,
+        activeBrochureDealTarget: action.payload === 'crm' ? state.activeBrochureDealTarget : null,
       };
     default:
       return state;

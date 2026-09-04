@@ -11,8 +11,10 @@ namespace CRM.Microservice.Models
         [Required]
         public string TenantId { get; set; } = string.Empty;
 
+        // 🧑‍💼 Multi-broker assignment: comma-separated broker ids. Resolved at
+        // read time so renames flow through. Legacy single-agent field is gone.
         [Required]
-        public string AllocatedToAgent { get; set; } = string.Empty;
+        public string AllocatedBrokerIds { get; set; } = string.Empty;
 
         [Required]
         public DealWorkflowStage DealStage { get; set; } = DealWorkflowStage.DiscoveryNeedsAnalysis;
@@ -38,6 +40,12 @@ namespace CRM.Microservice.Models
         public decimal CommissionValue { get; set; } = 0m;
         [Column(TypeName = "decimal(18,2)")]
         public decimal? RealisedCommission { get; set; } = null;
+
+        // 💱 True when RealisedCommission was filled by the server formula
+        // (CommissionType × CommissionValue/TransactionValue) because the
+        // user left it blank/zero. Lets the UI render an "AUTO" badge so
+        // editors can tell what was hand-entered vs derived.
+        public bool RealisedCommissionIsAuto { get; set; } = false;
 
         public ICollection<DealBrokerSplit> BrokerSplits { get; set; } = new List<DealBrokerSplit>();
     }

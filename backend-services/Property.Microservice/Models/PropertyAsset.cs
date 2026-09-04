@@ -72,5 +72,10 @@ namespace Property.Microservice.Models
 
         // 📨 RESTORED: Allows the system to read all active marketing channels this specific asset is pushed to
         public ICollection<PropertyPlatformSyndication> SyndicationLinks { get; set; } = new List<PropertyPlatformSyndication>();
+
+        // 📜 Sole-mandate history. One PropertyAsset → many SoleMandates,
+        // but the DB enforces at-most-one active via a filtered unique
+        // index (see Program.cs migration).
+        public ICollection<SoleMandate> SoleMandates { get; set; } = new List<SoleMandate>();
     }
 }

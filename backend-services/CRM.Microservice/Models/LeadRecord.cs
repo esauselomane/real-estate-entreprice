@@ -19,8 +19,11 @@ namespace CRM.Microservice.Models
         // 🔗 Optional link to an existing CRMContact resolved by name/surname or email on creation.
         public string? LinkedContactId { get; set; } = null;
 
+        // 🧑‍💼 Multi-broker assignment: comma-separated broker ids (e.g. "BRK-AB123,BRK-CD456").
+        // Resolved at read time by the frontend via crmService.getBrokers() so broker
+        // renames flow through automatically. Legacy single-agent field is gone.
         [Required]
-        public string AllocatedToAgent { get; set; } = string.Empty;
+        public string AllocatedBrokerIds { get; set; } = string.Empty;
 
         [Required]
         public LeadWorkflowStage LeadStage { get; set; } = LeadWorkflowStage.Contacted;

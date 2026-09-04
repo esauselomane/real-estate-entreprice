@@ -17,6 +17,7 @@ namespace Property.Microservice.Data
         public DbSet<PropertyPlatformSyndication> PropertyPlatformSyndications { get; set; }
         public DbSet<UnitLease> UnitLeases { get; set; }
         public DbSet<MaintenanceCall> MaintenanceCalls { get; set; }
+        public DbSet<SoleMandate> SoleMandates { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -33,6 +34,16 @@ namespace Property.Microservice.Data
             // so a Tenant always resolves to a single leased unit (their current home).
             modelBuilder.Entity<UnitLease>()
                 .HasIndex(l => new { l.UserId, l.PropertyUnitId, l.IsActive });
+
+            // 🛡️ Sole-mandate: cascade-delete with the parent property, AND a
+            // filtered unique index so the database itself enforces
+            // "at most one active mandate per property" — even if two
+            // clients race the POST /mandates endpoint.
+            modelBuilder.Entity<SoleMandate>()
+                .HasOne(m => m.Property)
+                .WithMany(p => p.SoleMandates)
+                .HasForeignKey(m => m.PropertyId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }

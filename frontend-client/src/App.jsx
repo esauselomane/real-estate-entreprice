@@ -15,6 +15,7 @@ import SetPassword from './components/SetPassword.jsx';
 import LeadsPage from './components/LeadsPage.jsx';
 import DealsPage from './components/DealsPage.jsx';
 import TenantSwitcher from './components/TenantSwitcher.jsx';
+import BrochureCartBell from './components/BrochureCartBell.jsx';
 
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useAppUi } from './contexts/AppUiContext.jsx';
@@ -234,7 +235,10 @@ export default function App() {
                 : `Multi-tenant spatial intelligence portal for ${currentAgency.name}`}
             </p>
           </div>
-          <TenantSwitcher />
+          <div className="flex items-center gap-3">
+            <BrochureCartBell />
+            <TenantSwitcher />
+          </div>
         </header>
 
         {/* 🎯 TRIAL BANNER — prominently shown at the top for trial accounts */}

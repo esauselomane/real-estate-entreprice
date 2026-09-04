@@ -243,23 +243,26 @@ namespace CRM.Microservice.Data
                 var leads = new List<LeadRecord>();
                 // 🧬 Leads inherit TenantId from their allocated broker so the
                 // TenantSwitcher scopes the lead list to a single agency.
+                // The seed now stores AllocatedBrokerIds (csv of broker user
+                // ids) instead of the legacy free-text AllocatedToAgent name.
                 var brokerTenantLookup = context.BrokerRecords
-                    .Select(b => new { b.FullName, b.TenantId })
-                    .GroupBy(x => x.FullName)
+                    .Select(b => new { b.BrokerId, b.FullName, b.TenantId })
+                    .GroupBy(x => x.BrokerId)
                     .Select(g => g.First())
-                    .ToDictionary(x => x.FullName, x => x.TenantId);
+                    .ToDictionary(x => x.BrokerId, x => new { x.FullName, x.TenantId });
                 var agents = brokerTenantLookup.Keys.ToList();
                 for (var i = context.LeadRecords.Count() + 1; i <= 1000; i++)
                 {
-                    var agent = agents[(i - 1) % agents.Count];
-                    var tenantId = brokerTenantLookup.TryGetValue(agent, out var t) ? t : "TEN-001";
+                    var agentId = agents[(i - 1) % agents.Count];
+                    var agent = brokerTenantLookup[agentId];
+                    var tenantId = agent.TenantId;
                     leads.Add(new LeadRecord
                     {
                         TenantId = tenantId,
                         ClientName = $"Lead Client {i}",
                         ContactEmail = $"lead{i}@opportunity.local",
                         ContactPhone = $"+27{(400000000 + i).ToString().Substring(0, 9)}",
-                        AllocatedToAgent = agent,
+                        AllocatedBrokerIds = agentId,
                         LeadStage = (LeadWorkflowStage)(i % 5),
                         PropertyInterestClass = i % 3 == 0 ? "Residential Sale" : i % 3 == 1 ? "Commercial Lease" : "Industrial Investment",
                         PreferredArea = i % 4 == 0 ? "Cape Town" : i % 4 == 1 ? "Johannesburg" : i % 4 == 2 ? "Durban" : "Pretoria",
@@ -288,20 +291,23 @@ namespace CRM.Microservice.Data
                 var sellerIds = context.CRMContacts.Select(c => c.ContactId).ToList();
                 // 🧬 Deals inherit TenantId from the allocated broker's agency
                 // so the TenantSwitcher scopes the deal list to one agency.
+                // AllocatedBrokerIds stores the broker user id (matches the
+                // updated DealRecord schema).
                 var brokerTenantLookup = context.BrokerRecords
-                    .Select(b => new { b.FullName, b.TenantId })
-                    .GroupBy(x => x.FullName)
+                    .Select(b => new { b.BrokerId, b.FullName, b.TenantId })
+                    .GroupBy(x => x.BrokerId)
                     .Select(g => g.First())
-                    .ToDictionary(x => x.FullName, x => x.TenantId);
+                    .ToDictionary(x => x.BrokerId, x => new { x.FullName, x.TenantId });
                 var agents = brokerTenantLookup.Keys.ToList();
                 for (var i = context.DealRecords.Count() + 1; i <= 1000; i++)
                 {
-                    var agent = agents[(i - 1) % agents.Count];
-                    var tenantId = brokerTenantLookup.TryGetValue(agent, out var t) ? t : "TEN-001";
+                    var agentId = agents[(i - 1) % agents.Count];
+                    var agent = brokerTenantLookup[agentId];
+                    var tenantId = agent.TenantId;
                     deals.Add(new DealRecord
                     {
                         TenantId = tenantId,
-                        AllocatedToAgent = agent,
+                        AllocatedBrokerIds = agentId,
                         DealStage = (DealWorkflowStage)(i % 6),
                         LinkedPropertyId = i % 200 == 0 ? 200 + (i % 250) : i % 900,
                         BuyerClientId = buyerIds[(i - 1) % buyerIds.Count],
@@ -456,7 +462,9 @@ namespace CRM.Microservice.Data
             DistributeByStringPk(staleContacts, c => c.ContactId, (c, t) => c.TenantId = t);
             context.SaveChanges();
 
-            // Leads + Deals inherit the broker's tenant.
+            // Leads + Deals inherit the broker's tenant. (Legacy AllocatedToAgent
+            // field was removed; the brokerTenantLookup is retained for any
+            // pre-migration rows that still need tenant stamping.)
             var brokerTenantLookup2 = context.BrokerRecords
                 .Where(b => !string.IsNullOrEmpty(b.FullName))
                 .Select(b => new { b.FullName, b.TenantId })
@@ -466,19 +474,13 @@ namespace CRM.Microservice.Data
             var staleLeads = context.LeadRecords.Where(l => legacyTenants.Contains(l.TenantId)).ToList();
             foreach (var l in staleLeads)
             {
-                if (!string.IsNullOrEmpty(l.AllocatedToAgent) && brokerTenantLookup2.TryGetValue(l.AllocatedToAgent, out var t))
-                    l.TenantId = t;
-                else
-                    l.TenantId = $"TEN-{(Math.Abs(l.LeadId) % 1000) + 1:0000}";
+                l.TenantId = $"TEN-{(Math.Abs(l.LeadId) % 1000) + 1:0000}";
             }
             context.SaveChanges();
             var staleDeals = context.DealRecords.Where(d => legacyTenants.Contains(d.TenantId)).ToList();
             foreach (var d in staleDeals)
             {
-                if (!string.IsNullOrEmpty(d.AllocatedToAgent) && brokerTenantLookup2.TryGetValue(d.AllocatedToAgent, out var t))
-                    d.TenantId = t;
-                else
-                    d.TenantId = $"TEN-{(Math.Abs(d.DealId) % 1000) + 1:0000}";
+                d.TenantId = $"TEN-{(Math.Abs(d.DealId) % 1000) + 1:0000}";
             }
             context.SaveChanges();
 

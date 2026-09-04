@@ -51,6 +51,25 @@ namespace CRM.Microservice.Controllers
             };
         }
 
+        // 🔐 Returns the caller's user id (NameIdentifier claim) — the new
+        // identity key for AllocatedBrokerIds (comma-separated broker ids).
+        private string GetCurrentUserId() =>
+            User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+
+        // 🧑‍💼 True when the caller's user id appears as a token in a
+        // comma-separated AllocatedBrokerIds string. Used by Broker-auth
+        // checks after the legacy single-name field was replaced.
+        private static readonly System.Text.RegularExpressions.Regex _brokerIdSplit =
+            new(@"\s*,\s*", System.Text.RegularExpressions.RegexOptions.Compiled);
+        private static bool CallerIsAssignedTo(string allocatedBrokerIds, string callerId)
+        {
+            if (string.IsNullOrWhiteSpace(callerId) || string.IsNullOrEmpty(allocatedBrokerIds))
+                return false;
+            foreach (var id in _brokerIdSplit.Split(allocatedBrokerIds))
+                if (string.Equals(id, callerId, StringComparison.Ordinal)) return true;
+            return false;
+        }
+
         // 🌳 Returns the caller's tenant + all child-agency tenant IDs.
         //   - PlatformAdmin: empty (caller sees everything via unfiltered query)
         //   - AgencyAdmin: own tenant + any tenant whose AgencyRecord has ParentAgencyId
@@ -1118,10 +1137,18 @@ namespace CRM.Microservice.Controllers
             }
 
             // Only a Broker (agent) is restricted to their own records; admins see the full tenant pipeline.
+            // AllocatedBrokerIds is a comma-separated list of broker user ids; the broker sees
+            // anything where their id appears as a token in that list.
             if (callerRole == "Broker")
             {
-                leadsQuery = leadsQuery.Where(l => l.AllocatedToAgent == callerName);
-                dealsQuery = dealsQuery.Where(d => d.AllocatedToAgent == callerName);
+                var callerId = GetCurrentUserId();
+                var likePattern = $"%{callerId}%";
+                leadsQuery = leadsQuery.Where(l => l.AllocatedBrokerIds == callerId
+                    || l.AllocatedBrokerIds.StartsWith(callerId + ",")
+                    || l.AllocatedBrokerIds.Contains("," + callerId));
+                dealsQuery = dealsQuery.Where(d => d.AllocatedBrokerIds == callerId
+                    || d.AllocatedBrokerIds.StartsWith(callerId + ",")
+                    || d.AllocatedBrokerIds.Contains("," + callerId));
             }
 
             // 📊 Stage aggregates computed over the entire filtered universe so
@@ -1160,9 +1187,14 @@ namespace CRM.Microservice.Controllers
             var tenantId = GetCurrentTenant();
             newLead.TenantId = tenantId;
             // 🔐 A Broker always creates leads allocated to themselves — the client value is ignored
-            // so an agent can never claim another broker's pipeline.
+            // so an agent can never claim another broker's pipeline. We store the broker's user id
+            // (NameIdentifier claim) when available, falling back to the name for legacy callers.
             if (GetCurrentCanonicalRole() == "Broker")
-                newLead.AllocatedToAgent = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? newLead.AllocatedToAgent;
+            {
+                var brokerId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (!string.IsNullOrWhiteSpace(brokerId))
+                    newLead.AllocatedBrokerIds = brokerId;
+            }
             newLead.LeadStage = LeadWorkflowStage.Contacted;
             newLead.IsConvertedToDeal = false;
             newLead.CreatedAt = DateTime.UtcNow;
@@ -1204,13 +1236,17 @@ namespace CRM.Microservice.Controllers
             if (lead == null) return NotFound(new { message = "Lead record not found." });
 
             if (GetCurrentCanonicalRole() == "Broker")
-                updatedLead.AllocatedToAgent = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? lead.AllocatedToAgent;
+            {
+                var brokerId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                if (!string.IsNullOrWhiteSpace(brokerId))
+                    updatedLead.AllocatedBrokerIds = brokerId;
+            }
 
             lead.ClientName = updatedLead.ClientName;
             lead.ContactEmail = updatedLead.ContactEmail;
             lead.ContactPhone = updatedLead.ContactPhone;
             lead.LinkedContactId = updatedLead.LinkedContactId;
-            lead.AllocatedToAgent = updatedLead.AllocatedToAgent;
+            lead.AllocatedBrokerIds = updatedLead.AllocatedBrokerIds;
             lead.LeadStage = updatedLead.LeadStage;
             lead.PropertyInterestClass = updatedLead.PropertyInterestClass;
             lead.PreferredArea = updatedLead.PreferredArea;
@@ -1323,7 +1359,7 @@ namespace CRM.Microservice.Controllers
             var deal = new DealRecord
             {
                 TenantId = tenantId,
-                AllocatedToAgent = lead.AllocatedToAgent,
+                AllocatedBrokerIds = lead.AllocatedBrokerIds,
                 DealStage = DealWorkflowStage.DiscoveryNeedsAnalysis,
                 LinkedPropertyId = matchedPropertyId,
                 BuyerClientId = buyerContact.ContactId,
@@ -1397,12 +1433,12 @@ namespace CRM.Microservice.Controllers
             var isBroker = callerRole == "Broker";
             if (isBroker)
             {
-                var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
-                if (!string.IsNullOrEmpty(callerName)) deal.AllocatedToAgent = callerName;
+                var callerId = GetCurrentUserId();
+                if (!string.IsNullOrEmpty(callerId)) deal.AllocatedBrokerIds = callerId;
             }
-            else if (!string.IsNullOrEmpty(updatedDeal.AllocatedToAgent))
+            else if (!string.IsNullOrEmpty(updatedDeal.AllocatedBrokerIds))
             {
-                deal.AllocatedToAgent = updatedDeal.AllocatedToAgent;
+                deal.AllocatedBrokerIds = updatedDeal.AllocatedBrokerIds;
             }
 
             // 🛠️ Partial-update merge: every field on the payload is optional
@@ -1419,15 +1455,26 @@ namespace CRM.Microservice.Controllers
 
             // 💰 Keep the realised commission consistent with the commission
             // parameters whenever the deal is ClosedWon. ClosedLost clears it.
+            // Auto-fill ONLY when RealisedCommission is null/0 — a hand-entered
+            // non-zero value wins so editors can override the formula.
             if (deal.DealStage == DealWorkflowStage.ClosedWon)
             {
-                deal.RealisedCommission = deal.CommissionType == CommissionTypes.Percent
-                    ? Math.Round(deal.TransactionValue * deal.CommissionValue / 100m, 2)
-                    : deal.CommissionValue;
+                if (deal.RealisedCommission == null || deal.RealisedCommission == 0m)
+                {
+                    deal.RealisedCommission = deal.CommissionType == CommissionTypes.Percent
+                        ? Math.Round(deal.TransactionValue * deal.CommissionValue / 100m, 2)
+                        : deal.CommissionValue;
+                    deal.RealisedCommissionIsAuto = true;
+                }
+                else
+                {
+                    deal.RealisedCommissionIsAuto = false;
+                }
             }
             else if (deal.DealStage == DealWorkflowStage.ClosedLost)
             {
                 deal.RealisedCommission = 0m;
+                deal.RealisedCommissionIsAuto = false;
             }
 
             deal.LastStageUpdatedAt = DateTime.UtcNow;
@@ -1450,13 +1497,15 @@ namespace CRM.Microservice.Controllers
             {
                 var deal = await _context.DealRecords.FindAsync(payload.TargetId);
                 if (deal == null) return NotFound(new { message = "Target deal record not found." });
-                deal.AllocatedToAgent = payload.TargetAgentName;
+                // payload.TargetAgentName is actually a broker id now (legacy field name kept
+                // for frontend compat — same payload shape, just an id instead of a display name).
+                deal.AllocatedBrokerIds = payload.TargetAgentName;
             }
             else
             {
                 var lead = await _context.LeadRecords.FindAsync(payload.TargetId);
                 if (lead == null) return NotFound(new { message = "Target lead record not found." });
-                lead.AllocatedToAgent = payload.TargetAgentName;
+                lead.AllocatedBrokerIds = payload.TargetAgentName;
             }
 
             await _context.SaveChangesAsync();
@@ -1477,7 +1526,7 @@ namespace CRM.Microservice.Controllers
             if (lead == null) return NotFound(new { message = "Target lead tracking record not found." });
 
             // 🔐 A Broker may only advance leads allocated to themselves.
-            if (GetCurrentCanonicalRole() == "Broker" && lead.AllocatedToAgent != (User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty))
+            if (GetCurrentCanonicalRole() == "Broker" && !CallerIsAssignedTo(lead.AllocatedBrokerIds, GetCurrentUserId()))
                 return Forbid();
 
             if (!Enum.TryParse<LeadWorkflowStage>(payload.NextStage, true, out var nextStageEnum))
@@ -1533,7 +1582,7 @@ namespace CRM.Microservice.Controllers
                 var dynamicDeal = new DealRecord
                 {
                     TenantId = lead.TenantId,
-                    AllocatedToAgent = lead.AllocatedToAgent,
+                    AllocatedBrokerIds = lead.AllocatedBrokerIds,
                     DealStage = DealWorkflowStage.DiscoveryNeedsAnalysis,
                     LinkedPropertyId = payload.LinkToPropertyId,
                     BuyerClientId = buyerContact.ContactId,
@@ -1568,7 +1617,7 @@ namespace CRM.Microservice.Controllers
             if (deal == null) return NotFound(new { message = "Target deal record not found." });
 
             // 🔐 A Broker may only advance deals allocated to themselves.
-            if (GetCurrentCanonicalRole() == "Broker" && deal.AllocatedToAgent != (User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty))
+            if (GetCurrentCanonicalRole() == "Broker" && !CallerIsAssignedTo(deal.AllocatedBrokerIds, GetCurrentUserId()))
                 return Forbid();
 
             if (!Enum.TryParse<DealWorkflowStage>(payload.NextStage, true, out var nextDealStageEnum))
@@ -1584,15 +1633,26 @@ namespace CRM.Microservice.Controllers
             }
 
             // 💰 Commission is only realised into revenue once the deal is concluded (ClosedWon).
+            // Same auto-fill rule as the full PUT: only fill when RealisedCommission is
+            // null/0, and mark it as auto so the UI can render the badge.
             if (nextDealStageEnum == DealWorkflowStage.ClosedWon)
             {
-                deal.RealisedCommission = deal.CommissionType == CommissionTypes.Percent
-                    ? Math.Round(deal.TransactionValue * deal.CommissionValue / 100m, 2)
-                    : deal.CommissionValue;
+                if (deal.RealisedCommission == null || deal.RealisedCommission == 0m)
+                {
+                    deal.RealisedCommission = deal.CommissionType == CommissionTypes.Percent
+                        ? Math.Round(deal.TransactionValue * deal.CommissionValue / 100m, 2)
+                        : deal.CommissionValue;
+                    deal.RealisedCommissionIsAuto = true;
+                }
+                else
+                {
+                    deal.RealisedCommissionIsAuto = false;
+                }
             }
             else if (nextDealStageEnum == DealWorkflowStage.ClosedLost)
             {
                 deal.RealisedCommission = 0m;
+                deal.RealisedCommissionIsAuto = false;
             }
 
             await _context.SaveChangesAsync();
@@ -1611,12 +1671,13 @@ namespace CRM.Microservice.Controllers
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
+            var callerId = GetCurrentUserId();
 
             IQueryable<LeadRecord> baseLeadQuery = _context.LeadRecords
                 .Where(l => !l.IsConvertedToDeal)
-                .Where(l => !isBroker || l.AllocatedToAgent == callerName);
+                .Where(l => !isBroker || l.AllocatedBrokerIds == callerId || l.AllocatedBrokerIds.StartsWith(callerId + ",") || l.AllocatedBrokerIds.Contains("," + callerId));
             IQueryable<DealRecord> baseDealQuery = _context.DealRecords
-                .Where(d => !isBroker || d.AllocatedToAgent == callerName);
+                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
             if (visibleTenants.Count > 0)
             {
                 baseLeadQuery = baseLeadQuery.Where(l => visibleTenants.Contains(l.TenantId));
@@ -1655,6 +1716,7 @@ namespace CRM.Microservice.Controllers
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
+            var callerId = GetCurrentUserId();
             var activeYear = year ?? DateTime.UtcNow.Year;
             _logger.LogInformation("GetReportOverview: Year={Year} overrideTenant={Override} Tenants={TenantCount}", activeYear, tenantId ?? "(default)", visibleTenants.Count);
 
@@ -1663,10 +1725,10 @@ namespace CRM.Microservice.Controllers
 
             IQueryable<LeadRecord> tenantLeadsQuery = _context.LeadRecords
                 .Where(l => l.CreatedAt >= yearStart && l.CreatedAt < yearEnd)
-                .Where(l => !isBroker || l.AllocatedToAgent == callerName);
+                .Where(l => !isBroker || l.AllocatedBrokerIds == callerId || l.AllocatedBrokerIds.StartsWith(callerId + ",") || l.AllocatedBrokerIds.Contains("," + callerId));
             IQueryable<DealRecord> tenantDealsQuery = _context.DealRecords
                 .Where(d => d.CreatedAt >= yearStart && d.CreatedAt < yearEnd)
-                .Where(d => !isBroker || d.AllocatedToAgent == callerName);
+                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
             if (visibleTenants.Count > 0)
             {
                 tenantLeadsQuery = tenantLeadsQuery.Where(l => visibleTenants.Contains(l.TenantId));
@@ -1735,9 +1797,10 @@ namespace CRM.Microservice.Controllers
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
+            var callerId = GetCurrentUserId();
 
             IQueryable<DealRecord> query = _context.DealRecords
-                .Where(d => !isBroker || d.AllocatedToAgent == callerName);
+                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
             if (visibleTenants.Count > 0)
                 query = query.Where(d => visibleTenants.Contains(d.TenantId));
 
@@ -1788,9 +1851,10 @@ namespace CRM.Microservice.Controllers
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
+            var callerId = GetCurrentUserId();
             IQueryable<DealRecord> query = _context.DealRecords
-                .Where(d => d.AllocatedToAgent != null && d.AllocatedToAgent != "")
-                .Where(d => !isBroker || d.AllocatedToAgent == callerName);
+                .Where(d => d.AllocatedBrokerIds != null && d.AllocatedBrokerIds != "")
+                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
             if (visibleTenants.Count > 0)
                 query = query.Where(d => visibleTenants.Contains(d.TenantId));
 
@@ -1800,7 +1864,7 @@ namespace CRM.Microservice.Controllers
             // to Rand before aggregation.
             var deals = await query
                 .Select(d => new {
-                    d.AllocatedToAgent,
+                    d.AllocatedBrokerIds,
                     d.TransactionValue,
                     d.CommissionType,
                     d.CommissionValue,
@@ -1809,11 +1873,30 @@ namespace CRM.Microservice.Controllers
                 })
                 .ToListAsync();
 
+            // 🧑‍💼 Broker name lookup. AllocatedBrokerIds is a comma-separated list of
+            // broker user ids; load the full visible broker roster once and build
+            // a map so we can resolve each id in a deal's allocation to a
+            // human-readable name for the leaderboard display.
+            var brokerRoster = await _context.BrokerRecords
+                .Where(b => visibleTenants.Count == 0 || visibleTenants.Contains(b.TenantId))
+                .Select(b => new { b.BrokerId, b.FullName })
+                .ToListAsync();
+            var brokerNames = brokerRoster
+                .GroupBy(b => b.BrokerId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().FullName, StringComparer.OrdinalIgnoreCase);
+
             var rows = deals
-                .GroupBy(d => d.AllocatedToAgent)
+                .GroupBy(d => d.AllocatedBrokerIds)
                 .Select(g => new
                 {
-                    agent = g.Key,
+                    // Resolve a representative name for the first broker in the
+                    // list. Multi-broker groups will surface one of the names;
+                    // the raw ids are returned separately for drill-downs.
+                    agent = (g.Key ?? string.Empty)
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Select(id => brokerNames.TryGetValue(id, out var n) ? n : id)
+                        .FirstOrDefault() ?? g.Key,
+                    agentIds = g.Key,
                     deals = g.Count(),
                     // 🧮 totalValue = full TransactionValue across every deal
                     // (the headline "pipeline value" metric for the broker).
@@ -1845,6 +1928,7 @@ namespace CRM.Microservice.Controllers
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
+            var callerId = GetCurrentUserId();
 
             IQueryable<BrochureCard> cardQuery = _context.BrochureCards
                 .Include(c => c.Lines)
@@ -1899,6 +1983,7 @@ namespace CRM.Microservice.Controllers
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
+            var callerId = GetCurrentUserId();
 
             IQueryable<BrochureCard> query = _context.BrochureCards
                 .Where(c => !c.IsDeleted &&
@@ -1933,13 +2018,18 @@ namespace CRM.Microservice.Controllers
 
             var tenantId = GetCurrentTenant();
             var brokerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
+            var brokerId = GetCurrentUserId();
             var role = GetCurrentCanonicalRole();
 
             if (role == "Broker")
             {
-                var ownsDeal = await _context.DealRecords
-                    .AnyAsync(d => d.DealId == request.DealId && d.TenantId == tenantId && d.AllocatedToAgent == brokerName);
-                if (!ownsDeal) return Forbid();
+                // Check whether the broker is one of the ids in the deal's
+                // AllocatedBrokerIds CSV. Single-broker legacy deals still
+                // match the equality case.
+                var deal = await _context.DealRecords
+                    .FirstOrDefaultAsync(d => d.DealId == request.DealId && d.TenantId == tenantId);
+                if (deal == null) return NotFound(new { message = "Target deal record not found." });
+                if (!CallerIsAssignedTo(deal.AllocatedBrokerIds, brokerId)) return Forbid();
             }
             else
             {

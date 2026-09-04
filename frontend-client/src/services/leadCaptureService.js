@@ -1,3 +1,5 @@
+const toMessage = (err, fallback) => { if (!err) return fallback; if (typeof err === 'string') return err; if (err.message) return err.message; try { return JSON.stringify(err); } catch { return fallback; } };
+
 import apiClient from './apiClient.js';
 
 export const leadCaptureService = {
@@ -13,7 +15,7 @@ export const leadCaptureService = {
         totalCount: Number(response.headers['x-total-count'] || 0),
       };
     } catch (error) {
-      throw error.response?.data?.message || 'Lead list sync failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Lead list sync failed.'));
     }
   },
 
@@ -23,7 +25,7 @@ export const leadCaptureService = {
       const response = await apiClient.post('/system/lead-requests', payload);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Lead capture failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Lead capture failed.'));
     }
   },
 
@@ -33,7 +35,7 @@ export const leadCaptureService = {
       const response = await apiClient.put(`/system/lead-requests/${id}`, payload);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Lead update failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Lead update failed.'));
     }
   },
 
@@ -43,7 +45,7 @@ export const leadCaptureService = {
       const response = await apiClient.put(`/system/lead-requests/${id}/status`, { status });
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Lead status update failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Lead status update failed.'));
     }
   },
 
@@ -53,7 +55,7 @@ export const leadCaptureService = {
       const response = await apiClient.get(`/system/lead-requests/${id}/workflow`);
       return response.data || [];
     } catch (error) {
-      throw error.response?.data?.message || 'Workflow history load failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Workflow history load failed.'));
     }
   },
 
@@ -63,7 +65,7 @@ export const leadCaptureService = {
       const response = await apiClient.post(`/system/lead-requests/${id}/workflow`, payload);
       return response.data;
     } catch (error) {
-      throw error.response?.data?.message || 'Workflow action failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Workflow action failed.'));
     }
   },
 
@@ -73,7 +75,7 @@ export const leadCaptureService = {
       const response = await apiClient.get('/system/lead-requests/pricing-packages');
       return response.data || [];
     } catch (error) {
-      throw error.response?.data?.message || 'Pricing packages load failed.';
+      throw new Error(toMessage(error.response?.data?.message, 'Pricing packages load failed.'));
     }
   },
 };

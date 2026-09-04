@@ -96,6 +96,23 @@ using (var serviceScope = app.Services.CreateScope())
             );
         END
     ");
+
+    // 📋 Lease enrichment: add the columns backing the SuperAdmin Lease tab.
+    // Idempotent — every IF COL_LENGTH check is independent. Safe to re-run.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF COL_LENGTH(N'[UnitLeases]', N'ContactId') IS NULL
+            ALTER TABLE [UnitLeases] ADD [ContactId] NVARCHAR(50) NULL;
+        IF COL_LENGTH(N'[UnitLeases]', N'MonthlyRent') IS NULL
+            ALTER TABLE [UnitLeases] ADD [MonthlyRent] DECIMAL(18,2) NULL;
+        IF COL_LENGTH(N'[UnitLeases]', N'DepositAmount') IS NULL
+            ALTER TABLE [UnitLeases] ADD [DepositAmount] DECIMAL(18,2) NULL;
+        IF COL_LENGTH(N'[UnitLeases]', N'Notes') IS NULL
+            ALTER TABLE [UnitLeases] ADD [Notes] NVARCHAR(MAX) NULL;
+        IF COL_LENGTH(N'[UnitLeases]', N'AccruedInterestPercent') IS NULL
+            ALTER TABLE [UnitLeases] ADD [AccruedInterestPercent] DECIMAL(5,2) NULL;
+        IF COL_LENGTH(N'[UnitLeases]', N'TenantNameSnapshot') IS NULL
+            ALTER TABLE [UnitLeases] ADD [TenantNameSnapshot] NVARCHAR(200) NULL;
+    ");
     databaseContext.Database.ExecuteSqlRaw(@"
         IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[MaintenanceCalls]') AND type = N'U')
         BEGIN
@@ -113,6 +130,30 @@ using (var serviceScope = app.Services.CreateScope())
                 [UpdatedAt]          DATETIME2      NOT NULL DEFAULT GETUTCDATE(),
                 INDEX [IX_MaintenanceCalls_PropertyUnitId] ([PropertyUnitId])
             );
+        END
+    ");
+
+    // 📜 Sole-mandate history. One property can have many SoleMandates,
+    // but only ONE active at a time — enforced at the DB level via a
+    // filtered unique index on (PropertyId) WHERE IsActive = 1.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[SoleMandates]') AND type = N'U')
+        BEGIN
+            CREATE TABLE [SoleMandates] (
+                [SoleMandateId]     int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [PropertyId]        int             NOT NULL,
+                [TenantId]          nvarchar(50)    NOT NULL,
+                [StartDate]         datetime2       NOT NULL,
+                [EndDate]           datetime2       NOT NULL,
+                [IsActive]          bit             NOT NULL CONSTRAINT DF_SM_IsActive DEFAULT 1,
+                [ClosedAt]          datetime2       NULL,
+                [CreatedByUserId]   nvarchar(100)   NOT NULL CONSTRAINT DF_SM_CreatedBy DEFAULT N'',
+                [CreatedAt]         datetime2       NOT NULL CONSTRAINT DF_SM_CreatedAt DEFAULT SYSUTCDATETIME(),
+                CONSTRAINT [FK_SoleMandates_PropertyAssets] FOREIGN KEY ([PropertyId])
+                    REFERENCES [PropertyAssets]([PropertyId]) ON DELETE CASCADE
+            );
+            CREATE INDEX [IX_SoleMandates_PropertyId_IsActive] ON [SoleMandates] ([PropertyId], [IsActive]);
+            CREATE UNIQUE INDEX [UX_SoleMandates_OneActivePerProperty] ON [SoleMandates] ([PropertyId]) WHERE [IsActive] = 1;
         END
     ");
 
