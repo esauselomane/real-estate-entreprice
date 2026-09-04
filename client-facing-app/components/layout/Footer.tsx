@@ -17,7 +17,7 @@ export default function Footer() {
       <div className="container grid gap-10 py-12 md:grid-cols-3">
         <div>
           <div className="flex items-center gap-3 text-xl font-display font-extrabold text-blue-400">
-            <img src="/logo.svg" alt="Biscove Real Estate Tech logo" className="h-7 w-auto" />
+            <img src="/favicon.jpg" alt="Biscove Real Estate Tech logo" className="h-7 w-auto" />
             Biscove Real Estate Tech
           </div>
           <p className="mt-3 max-w-xs text-sm text-slate-400">{site.description}</p>

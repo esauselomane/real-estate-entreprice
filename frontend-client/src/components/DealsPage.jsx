@@ -27,6 +27,14 @@ const getDealStageValue = (deal) => {
   return String(stage || '');
 };
 
+// 🔒 Closed deals (ClosedWon/ClosedLost) are read-only: no card-click edit,
+// no Progress Deal button. The backend also rejects any PUT/POST on a
+// closed deal so a tampered client can't sneak through.
+const isClosedDeal = (deal) => {
+  const s = getDealStageValue(deal);
+  return s === 'ClosedWon' || s === 'ClosedLost';
+};
+
 export default function DealsPage() {
   const { userRole: currentUserRole } = useAuth();
   const { setBrochureDealTarget: onOpenBrochureBuilder, navigateTo } = useAppUi();
@@ -274,6 +282,7 @@ export default function DealsPage() {
           ) : (
             filteredDeals.map((deal) => (
               <div key={deal.dealId} onClick={() => {
+                if (isClosedDeal(deal)) return; // 🔒 Closed deals are read-only
                 setEditingDeal(deal);
                 setNextStage(getDealStageValue(deal));
                 setNotes(deal.dealNotes || '');
@@ -306,6 +315,15 @@ export default function DealsPage() {
                       Deal: {formatDealStage(deal.dealStage)}
                     </span>
                     <span className="text-xs text-slate-500 font-mono">DL-{deal.dealId}</span>
+                    {/* 🔒 Read-only marker on closed deals — the card body click
+                        no longer opens the edit modal and the Progress Deal
+                        button is hidden below. Backend also rejects any
+                        PUT/POST on a closed deal as defence-in-depth. */}
+                    {isClosedDeal(deal) && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold font-mono text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded border border-slate-700" title="Closed deals are read-only.">
+                        🔒 READ-ONLY
+                      </span>
+                    )}
                     {getDealStageValue(deal) === 'Presentation' && activeCardDealIds.has(deal.dealId) && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold font-mono text-blue-300 bg-blue-950/40 px-2 py-0.5 rounded border border-blue-900 animate-pulse">
                         <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block"></span> Card Active
@@ -335,9 +353,11 @@ export default function DealsPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <Can permission="deals:edit">
-                    <button onClick={() => { setEditingDeal(deal); setNextStage(getDealStageValue(deal)); setNotes(''); }} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Progress Deal</button>
-                  </Can>
+                  {!isClosedDeal(deal) && (
+                    <Can permission="deals:edit">
+                      <button onClick={() => { setEditingDeal(deal); setNextStage(getDealStageValue(deal)); setNotes(''); }} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold py-2 px-3 rounded-xl cursor-pointer">Progress Deal</button>
+                    </Can>
+                  )}
                   {getDealStageValue(deal) === 'Presentation' && (
                     <Can permission="billing:export">
                       <button onClick={() => { onOpenBrochureBuilder && onOpenBrochureBuilder(deal); navigateTo('crm'); }} className="p-2 bg-indigo-950/40 hover:bg-indigo-800 text-indigo-400 rounded-xl border border-indigo-900 cursor-pointer" title="Open brochure card"><Layers size={14} /></button>

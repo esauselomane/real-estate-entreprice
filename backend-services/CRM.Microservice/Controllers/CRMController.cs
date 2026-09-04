@@ -1428,6 +1428,14 @@ namespace CRM.Microservice.Controllers
                 : await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Deal record not found." });
 
+            // 🔒 Closed deals (ClosedWon / ClosedLost) are read-only. The
+            // commission has been locked in (or zeroed) and the audit trail
+            // must stay intact.
+            if (deal.DealStage == DealWorkflowStage.ClosedWon || deal.DealStage == DealWorkflowStage.ClosedLost)
+            {
+                return BadRequest(new { message = "This deal is closed and cannot be edited." });
+            }
+
             // Brokers are pinned to their own account — never trust the payload's
             // agent override. Higher roles can reassign ownership freely.
             var isBroker = callerRole == "Broker";
@@ -1615,6 +1623,14 @@ namespace CRM.Microservice.Controllers
             var tenantId = GetCurrentTenant();
             var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == payload.DealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Target deal record not found." });
+
+            // 🔒 Closed deals (ClosedWon / ClosedLost) are read-only — the
+            // commission has been locked in (or zeroed) and the audit trail
+            // must stay intact.
+            if (deal.DealStage == DealWorkflowStage.ClosedWon || deal.DealStage == DealWorkflowStage.ClosedLost)
+            {
+                return BadRequest(new { message = "This deal is closed and cannot be progressed further." });
+            }
 
             // 🔐 A Broker may only advance deals allocated to themselves.
             if (GetCurrentCanonicalRole() == "Broker" && !CallerIsAssignedTo(deal.AllocatedBrokerIds, GetCurrentUserId()))
@@ -2173,6 +2189,13 @@ namespace CRM.Microservice.Controllers
             var tenantId = GetCurrentTenant();
             var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Deal record not found." });
+
+            // 🔒 Closed deals: splits are locked because the realised
+            // commission has already been distributed.
+            if (deal.DealStage == DealWorkflowStage.ClosedWon || deal.DealStage == DealWorkflowStage.ClosedLost)
+            {
+                return BadRequest(new { message = "This deal is closed and commission splits cannot be edited." });
+            }
 
             if (request.Splits == null || !request.Splits.Any())
             {
