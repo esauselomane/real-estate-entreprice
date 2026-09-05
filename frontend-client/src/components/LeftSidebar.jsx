@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Home, Search, Users, Briefcase, BarChart3, ChevronLeft, ChevronRight, LogOut, Shield, Map, UserPlus, Settings } from 'lucide-react';
+import { Home, Search, Users, Briefcase, BarChart3, ChevronLeft, ChevronRight, LogOut, Shield, Map, UserPlus, Settings, Activity } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { useAgency } from '../contexts/AgencyContext.jsx';
@@ -17,6 +17,10 @@ export default function LeftSidebar() {
   // Base structural links mapped directly to permissions
   const navItems = [
     { name: 'Dashboard', view: 'dashboard', icon: Home, permission: 'properties:view' },
+    // 📊 Broker dashboard — visible to everyone with deals:view.
+    // Brokers see it as the default landing; admins use it as a submenu
+    // with a broker filter dropdown to drill into one agent.
+    { name: 'Broker Dashboard', view: 'broker-dashboard', icon: Activity, permission: 'deals:view' },
     { name: 'Property Search', view: 'search', icon: Search, permission: 'properties:view' },
     { name: 'Property Map', view: 'map', icon: Map, permission: 'properties:view' },
     { name: 'Leads', view: 'leads', icon: UserPlus, permission: 'leads:view' },

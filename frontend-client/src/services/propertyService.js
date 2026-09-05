@@ -443,5 +443,70 @@ export const propertyService = {
     }
   },
 
+  // 🏠/🏢 PROPERTY + UNIT AMENITIES
+  getAmenities: async (propertyId) => {
+    try {
+      const response = await apiClient.get(`/properties/${propertyId}/amenities`, { params: propertyService._tenantQueryParams() });
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Amenities sync failed.'));
+    }
+  },
 
+  upsertAmenity: async (propertyId, payload, unitId = null) => {
+    try {
+      const params = { ...propertyService._tenantQueryParams() };
+      if (unitId) params.unitId = unitId;
+      const response = await apiClient.post(`/properties/${propertyId}/amenities`, payload, { params });
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Amenity save failed.'));
+    }
+  },
+
+  deleteAmenity: async (propertyId, amenityId) => {
+    try {
+      const response = await apiClient.delete(`/properties/${propertyId}/amenities/${amenityId}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Amenity delete failed.'));
+    }
+  },
+
+  // 📚 SuperAdmin amenity catalogue
+  getAmenityTypes: async () => {
+    try {
+      const response = await apiClient.get('/properties/amenity-types', { params: propertyService._tenantQueryParams() });
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Catalogue sync failed.'));
+    }
+  },
+
+  getAllAmenityTypes: async () => {
+    try {
+      const response = await apiClient.get('/properties/amenity-types/all', { params: propertyService._tenantQueryParams() });
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Catalogue sync failed.'));
+    }
+  },
+
+  createAmenityType: async (payload) => {
+    try {
+      const response = await apiClient.post('/properties/amenity-types', payload);
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Amenity type create failed.'));
+    }
+  },
+
+  updateAmenityType: async (id, payload) => {
+    try {
+      const response = await apiClient.put(`/properties/amenity-types/${id}`, payload);
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Amenity type update failed.'));
+    }
+  },
 };

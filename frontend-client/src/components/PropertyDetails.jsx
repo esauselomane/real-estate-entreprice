@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import {
    ArrowLeft, MapPin, FileText, User, Home, CheckCircle2,
    ExternalLink, Image, Plus, Trash2, Layers,
-   Building, Check, Loader2, AlertCircle, FileSignature, Wrench, FolderLock, Pencil,
-   X, Save, Upload, Download, History, ChevronDown, ChevronUp, Calendar
+    Building, Check, Loader2, AlertCircle, FileSignature, Wrench, FolderLock, Pencil,
+    X, Save, Upload, Download, History, ChevronDown, ChevronUp, Calendar,
+    ParkingMeter, Ship, Wind, Heart, Wifi, Zap, Shield
   } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import { crmService } from '../services/crmService.js';
@@ -29,6 +30,56 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const [propertyOps, setPropertyOps] = useState([]);
   const [propertyOpsLoading, setPropertyOpsLoading] = useState(false);
   const [propertyOpsError, setPropertyOpsError] = useState('');
+
+  // 🏠/🏢 AMENITIES
+  const [amenitiesData, setAmenitiesData] = useState(null);
+  const [amenitiesLoading, setAmenitiesLoading] = useState(false);
+  const [amenitySaving, setAmenitySaving] = useState(false);
+  const [amenityError, setAmenityError] = useState('');
+  const [amenityForm, setAmenityForm] = useState({}); // { amenityTypeId, scope:'property'|'unit', unitId?, booleanValue, numberValue, notes }
+  const [amenityEditing, setAmenityEditing] = useState(null); // existing row being edited
+  const [amenityTypes, setAmenityTypes] = useState([]); // catalogue for the add-form dropdown
+
+  const handleSaveAmenity = async (e) => {
+    e.preventDefault();
+    if (!amenityForm.amenityTypeId) return;
+    setAmenitySaving(true);
+    try {
+      const unitId = amenityForm.scope === 'unit' ? amenityForm.unitId : null;
+      const payload = {
+        amenityTypeId: Number(amenityForm.amenityTypeId),
+        booleanValue: amenityForm.booleanValue,
+        numberValue: amenityForm.numberValue,
+        notes: amenityForm.notes,
+      };
+      await propertyService.upsertAmenity(property.propertyId, payload, unitId);
+      const resp = await propertyService.getAmenities(propertyId);
+      setAmenitiesData(resp);
+      setAmenityForm({});
+      setAmenityEditing(null);
+      setAmenityError('');
+    } catch (err) {
+      setAmenityError((err && err.message) || 'Failed to save amenity.');
+    } finally {
+      setAmenitySaving(false);
+    }
+  };
+
+  // Load the amenity catalogue once when the property has loaded (admins get
+  // the active types; non-admins just see the types already attached).
+  useEffect(() => {
+    if (!property) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await propertyService.getAmenityTypes();
+        if (!cancelled) setAmenityTypes(Array.isArray(list) ? list : []);
+      } catch {
+        if (!cancelled) setAmenityTypes([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [property]);
 
   // 🔗 UNIT WORKSPACE MODAL: editable details + lease/history + maintenance + document vault
   // The legacy OperationalRecord-backed "Leases" tab has been replaced by a real
@@ -114,7 +165,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         const ops = await crmService.getOperationalRecordsForUnit('', propertyId, null);
         setPropertyOps(ops || []);
       } catch (err) {
-        setPropertyOpsError(err || 'Could not load property operations.');
+        setPropertyOpsError((err && err.message) || 'Could not load property operations.');
         setPropertyOps([]);
       } finally {
         setPropertyOpsLoading(false);
@@ -126,7 +177,19 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         setPlatforms(platList || []);
       } catch (platformError) {
         setPlatforms([]);
-        setErrorMessage(platformError || 'Failed to load syndication platforms.');
+        setErrorMessage((platformError && platformError.message) || 'Failed to load syndication platforms.');
+      }
+
+      // Load amenities (both scopes) + whether unit-level add is permitted.
+      try {
+        setAmenitiesLoading(true);
+        const amen = await propertyService.getAmenities(propertyId);
+        setAmenitiesData(amen || { items: [] });
+      } catch (err) {
+        setAmenityError((err && err.message) || 'Failed to load amenities.');
+        setAmenitiesData({ isResidential: false, canAddUnitAmenities: true, items: [] });
+      } finally {
+        setAmenitiesLoading(false);
       }
     } catch (err) {
       setErrorMessage(typeof err === 'string' ? err : 'Failed to load property details from database.');
@@ -182,7 +245,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         );
         setUnitOpsRecords(recs || []);
       } catch (err) {
-        setUnitOpsError(err || 'Could not load unit records.');
+        setUnitOpsError((err && err.message) || 'Could not load unit records.');
       } finally {
         setUnitOpsLoading(false);
       }
@@ -205,7 +268,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       const active = (list || []).find((l) => l.isCurrent) || null;
       hydrateLeaseForm(active);
     } catch (err) {
-      setUnitLeasesError(err || 'Could not load unit leases.');
+      setUnitLeasesError((err && err.message) || 'Could not load unit leases.');
     } finally {
       setUnitLeasesLoading(false);
     }
@@ -277,7 +340,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       setTimeout(() => setUnitLeasesSuccess(''), 2000);
       await loadUnitLeases();
     } catch (err) {
-      setUnitLeasesError(err || 'Could not save lease.');
+      setUnitLeasesError((err && err.message) || 'Could not save lease.');
     }
   };
 
@@ -290,7 +353,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       setTimeout(() => setUnitLeasesSuccess(''), 2000);
       await loadUnitLeases();
     } catch (err) {
-      setUnitLeasesError(err || 'Could not end lease.');
+      setUnitLeasesError((err && err.message) || 'Could not end lease.');
     }
   };
 
@@ -304,7 +367,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       if (leaseEditingId === lease.unitLeaseId) hydrateLeaseForm(null);
       await loadUnitLeases();
     } catch (err) {
-      setUnitLeasesError(err || 'Could not delete lease.');
+      setUnitLeasesError((err && err.message) || 'Could not delete lease.');
     }
   };
 
@@ -391,7 +454,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       );
       setUnitOpsRecords(recs || []);
     } catch (err) {
-      setUnitOpsError(err || 'Could not save this record.');
+      setUnitOpsError((err && err.message) || 'Could not save this record.');
     }
   };
 
@@ -433,7 +496,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       setUnitEditSuccess('Unit details updated.');
       setTimeout(() => setUnitEditSuccess(''), 2000);
     } catch (err) {
-      setUnitEditError(err || 'Could not update unit details.');
+      setUnitEditError((err && err.message) || 'Could not update unit details.');
     }
   };
 
@@ -485,7 +548,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         setTimeout(() => setUnitDocSuccess(''), 2000);
         resetDocForm();
       } catch (err) {
-      setUnitDocError(err || 'Could not upload this document.');
+      setUnitDocError((err && err.message) || 'Could not upload this document.');
     } finally {
       setUnitDocUploading(false);
     }
@@ -499,7 +562,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       setUnitDocSuccess('Document removed.');
       setTimeout(() => setUnitDocSuccess(''), 1500);
     } catch (err) {
-      setUnitDocError(err || 'Could not remove this document.');
+      setUnitDocError((err && err.message) || 'Could not remove this document.');
     }
   };
 
@@ -622,7 +685,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       });
       setProperty(saved); setSubUnits(saved.subUnits || subUnits); setIsEditingProperty(false);
       setActionSuccessMessage('Property details saved to the backend.');
-    } catch (err) { setErrorMessage(err || 'Could not save property details.'); }
+    } catch (err) { setErrorMessage((err && err.message) || 'Could not save property details.'); }
   };
 
   if (isLoading) {
@@ -976,6 +1039,167 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                 ))
               )}
             </div>
+          </div>
+
+          {/* 🏠/🏢 PROPERTY & UNIT AMENITIES */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Layers size={18} className="text-emerald-400" />
+                <h4 className="text-sm font-bold text-white uppercase tracking-wider">Amenities</h4>
+              </div>
+              {amenityError && (
+                <span className="text-[10px] text-red-400 bg-red-950/40 px-2 py-1 rounded border border-red-900">{amenityError}</span>
+              )}
+            </div>
+
+            {amenitiesLoading ? (
+              <div className="text-xs text-slate-500 flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> Loading amenities…</div>
+            ) : (
+              (() => {
+                const items = amenitiesData?.items || [];
+                const isResidential = !!amenitiesData?.isResidential;
+                const canAddUnit = !!amenitiesData?.canAddUnitAmenities;
+                const propertyAmenities = items.filter((a) => !a.propertyUnitId);
+                const unitAmenities = items.filter((a) => !!a.propertyUnitId);
+
+                const renderAmenityRow = (a) => (
+                  <div key={a.amenityId} className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {a.amenityName === 'Parking' ? <ParkingMeter size={14} className="text-slate-400" /> : null}
+                      {a.amenityName === 'PetsAllowed' ? <Heart size={14} className="text-red-400" /> : null}
+                      {a.amenityName === 'Gym' ? <Wind size={14} className="text-indigo-400" /> : null}
+                      {a.amenityName === 'SwimmingPool' ? <Layers size={14} className="text-cyan-400" /> : null}
+                      {a.amenityName === 'Security' ? <Shield size={14} className="text-amber-400" /> : null}
+                      <div className="min-w-0">
+                        <span className="text-xs font-semibold text-white truncate">{a.label || a.amenityName}</span>
+                        <span className="block text-[10px] text-slate-500 truncate">{isResidential && a.isResidentialOnly ? 'Residential-only' : ''} {a.propertyUnitId ? `· Unit #${a.propertyUnitId}` : '· Property-level'}</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {a.requiresBoolean !== undefined && a.requiresBoolean !== null && a.requiresBoolean
+                        ? (a.booleanValue
+                          ? <span className="text-xs font-bold text-emerald-400">Allowed</span>
+                          : <span className="text-xs font-semibold text-slate-400">No</span>)
+                        : a.requiresNumber
+                          ? <span className="text-xs font-bold text-white">{a.numberValue ?? 0} {a.numberValue === 1 ? 'bay' : 'bays'}</span>
+                          : <span className="text-[10px] text-slate-500">—</span>}
+                    </div>
+                  </div>
+                );
+
+                return (
+                  <div className="space-y-3.5">
+                    {/* Add form (property-level always; unit-level only for non-residential) */}
+                    <form onSubmit={handleSaveAmenity} className="p-3.5 bg-slate-950/50 border border-slate-800 rounded-xl grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                      <div className="md:col-span-2">
+                        <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Amenity</label>
+                        <select
+                          value={amenityForm.amenityTypeId || ''}
+                          onChange={(e) => setAmenityForm({ ...amenityForm, amenityTypeId: Number(e.target.value), scope: amenityForm.scope || 'property' })}
+                          className="w-full text-xs bg-slate-900 border border-slate-700 rounded-lg text-white px-2 py-1.5 focus:border-blue-500"
+                        >
+                          <option value="">— select amenity —</option>
+                          {amenityTypes.map((t) => (
+                            <option key={t.amenityTypeId} value={t.amenityTypeId}>{t.label || t.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Scope</label>
+                        <select
+                          value={amenityForm.scope || 'property'}
+                          onChange={(e) => setAmenityForm({ ...amenityForm, scope: e.target.value, unitId: undefined })}
+                          className="w-full text-xs bg-slate-900 border border-slate-700 rounded-lg text-white px-2 py-1.5 focus:border-blue-500"
+                          disabled={isResidential} // residential = property-level only
+                        >
+                          <option value="property">Property-level</option>
+                          <option value="unit" disabled={!canAddUnit}>Unit-level</option>
+                        </select>
+                        {isResidential && (
+                          <p className="text-[9px] text-amber-400 mt-1">Locked: residential properties can't add unit-level amenities.</p>
+                        )}
+                      </div>
+
+                      {amenityForm.scope === 'unit' && canAddUnit && (
+                        <div className="md:col-span-2">
+                          <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Unit</label>
+                          <select
+                            value={amenityForm.unitId || ''}
+                            onChange={(e) => setAmenityForm({ ...amenityForm, unitId: Number(e.target.value) })}
+                            className="w-full text-xs bg-slate-900 border border-slate-700 rounded-lg text-white px-2 py-1.5 focus:border-blue-500"
+                          >
+                            {subUnits.map((u) => (
+                              <option key={u.propertyUnitId} value={u.propertyUnitId}>#{u.propertyUnitId} — {u.unitNumber}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      <div className="md:col-span-2">
+                        {amenityForm.amenityTypeId && amenityTypes.find((t) => t.amenityTypeId === amenityForm.amenityTypeId)?.requiresBoolean ? (
+                          <label className="flex items-center gap-2 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={!!amenityForm.booleanValue}
+                              onChange={(e) => setAmenityForm({ ...amenityForm, booleanValue: e.target.checked })}
+                              className="w-4 h-4 rounded bg-slate-900 border-slate-600 text-blue-500 focus:ring-blue-500"
+                            />
+                            <span className="text-slate-300">Enabled (pets allowed / feature available)</span>
+                          </label>
+                        ) : amenityForm.amenityTypeId && amenityTypes.find((t) => t.amenityTypeId === amenityForm.amenityTypeId)?.requiresNumber ? (
+                          <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">
+                            Quantity
+                            <input
+                              type="number" min={0}
+                              value={amenityForm.numberValue ?? ''}
+                              onChange={(e) => setAmenityForm({ ...amenityForm, numberValue: Number(e.target.value) })}
+                              className="w-full mt-1 text-xs bg-slate-900 border border-slate-700 rounded-lg text-white px-2 py-1.5 focus:border-blue-500"
+                            />
+                          </label>
+                        ) : <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Value — select an amenity that carries a quantity or toggle</label>}
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Note</label>
+                        <input
+                          type="text"
+                          value={amenityForm.notes || ''}
+                          onChange={(e) => setAmenityForm({ ...amenityForm, notes: e.target.value })}
+                          placeholder="e.g. visitor bays reserved"
+                          className="w-full text-xs bg-slate-900 border border-slate-700 rounded-lg text-white px-2 py-1.5 focus:border-blue-500"
+                        />
+                      </div>
+
+                      {amenitySaving ? null : (
+                        <div className="md:col-span-full flex justify-end">
+                          <button type="submit" disabled={amenitySaving || !amenityForm.amenityTypeId} className="inline-flex items-center gap-1 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-40">
+                            <Save size={12} /> {amenityForm.amenityTypeId ? 'Save amenity' : 'Choose an amenity first'}
+                          </button>
+                        </div>
+                      )}
+                    </form>
+
+                    {propertyAmenities.length > 0 && (
+                      <div className="space-y-1">
+                        <div className="text-[10px] uppercase text-slate-500 font-bold">Property-level amenities</div>
+                        {propertyAmenities.map(renderAmenityRow)}
+                      </div>
+                    )}
+                    {unitAmenities.length > 0 && (
+                      <div className="space-y-1">
+                        <div className="text-[10px] uppercase text-slate-500 font-bold">Unit-level amenities</div>
+                        {unitAmenities.map(renderAmenityRow)}
+                      </div>
+                    )}
+                    {items.length === 0 && (
+                      <p className="text-xs text-slate-500">No amenities attached yet. Parking (number of bays) and Pets allowed (residential toggle) are supported.</p>
+                    )}
+                  </div>
+                );
+              })()
+            )}
           </div>
 
           {/* 🧩 UNIT WORKSPACE MODAL: editable details + leases/maintenance + document vault */}

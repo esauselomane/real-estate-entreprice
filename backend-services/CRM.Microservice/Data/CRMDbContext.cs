@@ -23,6 +23,7 @@ namespace CRM.Microservice.Data
         public DbSet<BrochureCard> BrochureCards { get; set; } = null!;
         public DbSet<BrochureCardLine> BrochureCardLines { get; set; } = null!;
         public DbSet<DealBrokerSplit> DealBrokerSplits { get; set; } = null!;
+        public DbSet<Notification> Notifications { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -75,6 +76,13 @@ namespace CRM.Microservice.Data
                 .WithMany(d => d.BrokerSplits)
                 .HasForeignKey(s => s.DealId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // 🛎️ Per-user inbox: index by (UserId, IsRead, CreatedAt) so
+            // the bell can list unread-then-recent cheaply.
+            modelBuilder.Entity<Notification>()
+                .HasIndex(n => new { n.UserId, n.IsRead, n.CreatedAt });
+            modelBuilder.Entity<Notification>()
+                .HasIndex(n => new { n.TenantId, n.CreatedAt });
         }
     }
 }

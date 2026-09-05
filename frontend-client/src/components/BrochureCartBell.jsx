@@ -19,10 +19,23 @@ export default function BrochureCartBell() {
   const wrapperRef = useRef(null);
   const { setBrochureDealTarget, navigateTo } = useAppUi();
 
+  // 🛑 Mount-guard: when App crashes and remounts in a tight loop, this bell
+  // remounts each tick and would fire loadCarts() instantly every time,
+  // producing a request storm. The guard enforces a minimum cooldown between
+  // mount-triggered fetches AND a single in-flight slot so we can never fire
+  // two requests concurrently.
+  const lastFetchRef = useRef(0);
+  const inFlightRef = useRef(false);
+
   // Load the active-cart list. Refresh when the dropdown opens and on a
   // slow polling interval (every 30s) so the badge stays roughly current
   // while the user is in the app.
   const loadCarts = async () => {
+    if (inFlightRef.current) return; // de-dup concurrent mounts
+    const now = Date.now();
+    if (now - lastFetchRef.current < 2_000) return; // 2s mount-cooldown
+    inFlightRef.current = true;
+    lastFetchRef.current = now;
     setIsLoading(true);
     setError('');
     try {
@@ -31,6 +44,7 @@ export default function BrochureCartBell() {
     } catch (err) {
       setError(err?.message || 'Failed to load brochure carts.');
     } finally {
+      inFlightRef.current = false;
       setIsLoading(false);
     }
   };
@@ -39,7 +53,7 @@ export default function BrochureCartBell() {
     loadCarts();
     const handle = setInterval(loadCarts, 30_000);
     return () => clearInterval(handle);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (isOpen) loadCarts();

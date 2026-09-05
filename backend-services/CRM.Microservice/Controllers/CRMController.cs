@@ -88,7 +88,21 @@ namespace CRM.Microservice.Controllers
             List<string> baseVisible;
             if (string.IsNullOrEmpty(tenant) || role == "PlatformAdmin")
             {
-                baseVisible = new List<string>();
+                if (role == "PlatformAdmin")
+                {
+                    // Every tenant on the platform — pulled from the agency table
+                    // so PlatformAdmin "all" mode actually surfaces data instead
+                    // of returning an empty set and zeroing every metric.
+                    baseVisible = await _context.AgencyRecords
+                        .Select(a => a.TenantId)
+                        .Where(t => t != null && t != "")
+                        .Distinct()
+                        .ToListAsync();
+                }
+                else
+                {
+                    baseVisible = new List<string>();
+                }
             }
             else
             {
@@ -1491,6 +1505,39 @@ namespace CRM.Microservice.Controllers
             return Ok(deal);
         }
 
+        // 📝 Append a timestamped note to a deal's DealNotes. Used by the
+        // broker dashboard "Review" action so the broker can log an intervention
+        // (e.g. "Reviewed — awaiting broker signature") directly into the deal
+        // audit trail without first fetching the existing notes.
+        [HttpPost("deal/{dealId:int}/notes")]
+        public async Task<IActionResult> AppendDealNote(int dealId, [FromBody] DealNotePayload payload)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("deals:edit"))
+            {
+                _logger.LogWarning("AppendDealNote: forbidden — caller lacks deals:edit permission");
+                return Forbid();
+            }
+
+            var callerRole = GetCurrentCanonicalRole();
+            var callerId = GetCurrentUserId();
+            var isPlatformAdmin = callerRole == "PlatformAdmin";
+            var tenantId = GetCurrentTenant();
+            var deal = isPlatformAdmin
+                ? await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId)
+                : await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            if (deal == null) return NotFound(new { message = "Deal record not found." });
+
+            if (deal.DealStage == DealWorkflowStage.ClosedWon || deal.DealStage == DealWorkflowStage.ClosedLost)
+                return BadRequest(new { message = "This deal is closed and cannot be edited." });
+
+            var entry = $"[Reviewed by {callerId} on {DateTime.UtcNow:yyyy-MM-dd HH:mm 'UTC'}]: {payload?.NoteText ?? string.Empty}".TrimEnd();
+            deal.DealNotes = string.IsNullOrWhiteSpace(deal.DealNotes) ? entry : deal.DealNotes + "\n" + entry;
+            deal.LastStageUpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+            return Ok(deal);
+        }
+
 
         [HttpPost("reallocate")]
         public async Task<IActionResult> ReallocateTarget([FromBody] ReallocatePayload payload)
@@ -2258,6 +2305,380 @@ namespace CRM.Microservice.Controllers
             contact.LinkedDealIds = string.Join(',', linked);
             await _context.SaveChangesAsync();
             return Ok(new { message = "Contact linked to deal.", linkedDealIds = contact.LinkedDealIds });
+        }
+
+        // ============================================================
+        // 🛎️ BROKER DASHBOARD ENDPOINTS
+        // ============================================================
+
+        // 📊 GCI, Company Dollar, Active Listings, Average DOM, monthly
+        // trend — all scoped to the active tenant. When a PlatformAdmin or
+        // AgencyAdmin passes ?brokerId=BRK-XXXX the metrics are restricted
+        // to deals allocated to that broker; otherwise they aggregate the
+        // whole tenant. When the caller IS a broker (no brokerId given),
+        // they're pinned to their own UserId for safety.
+        [Authorize]
+        [HttpGet("report/broker-metrics")]
+        public async Task<IActionResult> GetBrokerMetrics([FromQuery] string? tenantId, [FromQuery] string? brokerId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("billing:view"))
+                return Forbid();
+
+            var tenantIds = await GetVisibleTenantIdsAsync(tenantId);
+            if (tenantIds.Count == 0) return Ok(new { gci = 0m, companyDollar = 0m, activeListings = 0, averageDom = 0, monthlyTrend = new object[0], dealCount = 0, closedWonCount = 0 });
+
+            var role = GetCurrentCanonicalRole();
+            var callerId = GetCurrentUserId();
+
+            // 🔐 Broker scope: if the caller IS a broker and didn't pass a
+            // brokerId, pin to themselves. Admins with no brokerId see the
+            // tenant aggregate.
+            string? effectiveBrokerId = brokerId;
+            if (role == "Broker")
+            {
+                if (!string.IsNullOrWhiteSpace(brokerId) && brokerId != callerId)
+                    return Forbid();
+                effectiveBrokerId = callerId;
+            }
+
+            // Base query: deals in scope, optionally filtered to one broker.
+            var deals = _context.DealRecords
+                .Where(d => tenantIds.Contains(d.TenantId)
+                    && (effectiveBrokerId == null || d.AllocatedBrokerIds == effectiveBrokerId || d.AllocatedBrokerIds.Contains(effectiveBrokerId + ",")
+                        || d.AllocatedBrokerIds.Contains("," + effectiveBrokerId)
+                        || d.AllocatedBrokerIds == effectiveBrokerId));
+
+            // GCI = sum of commissionValue (Percent: txn × pct/100, Amount: fixed)
+            // over all deals in scope.
+            var gci = await deals.SumAsync(d => (decimal?)(
+                d.CommissionType == CommissionTypes.Percent
+                    ? d.TransactionValue * d.CommissionValue / 100m
+                    : d.CommissionValue)) ?? 0m;
+
+            // Company Dollar = GCI × the configured split (default 70% / 30%)
+            // for now: companyDollar = 70% of GCI (broker split is configurable
+            // per-deal but the system default is 30% broker / 70% brokerage).
+            var companyDollar = Math.Round(gci * 0.7m, 2);
+
+            // Active listings: call the property service to count
+            // for-sale + for-rent properties in the visible tenant.
+            // The CRM service doesn't share a DB with property, so we
+            // call over HTTP and ask for a page-size=1 with a huge
+            // pageSize just to read X-Total-Count.
+            int activeListings = 0;
+            double averageDom = 0;
+            try
+            {
+                var propertyBaseUrl = HttpContext.RequestServices
+                    .GetRequiredService<IConfiguration>()["Services:PropertyBaseUrl"]
+                    ?? "http://localhost:5002";
+                using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
+                var tenantList = string.Join(',', tenantIds);
+                var resp = await http.GetAsync($"/api/properties/active-listings-count?tenantId={Uri.EscapeDataString(tenantList)}"
+                    + (effectiveBrokerId != null ? $"&linkedBrokerId={Uri.EscapeDataString(effectiveBrokerId)}" : ""));
+                if (resp.IsSuccessStatusCode)
+                {
+                    var raw = await resp.Content.ReadAsStringAsync();
+                    var obj = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(raw);
+                    activeListings = obj.GetProperty("activeListings").GetInt32();
+                    averageDom = obj.GetProperty("averageDom").GetDouble();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "GetBrokerMetrics: could not fetch active-listings count from property service");
+            }
+
+            // Monthly trend (last 6 months) — GCI vs CompanyDollar per month.
+            var sixMonthsAgo = DateTime.UtcNow.AddMonths(-5);
+            var trend = await deals
+                .Where(d => d.CreatedAt >= new DateTime(sixMonthsAgo.Year, sixMonthsAgo.Month, 1))
+                .GroupBy(d => new { d.CreatedAt.Year, d.CreatedAt.Month })
+                .Select(g => new
+                {
+                    Year = g.Key.Year,
+                    Month = g.Key.Month,
+                    Gci = g.Sum(d => d.CommissionType == CommissionTypes.Percent
+                        ? d.TransactionValue * d.CommissionValue / 100m
+                        : d.CommissionValue),
+                    ClosedCount = g.Count(d => d.DealStage == DealWorkflowStage.ClosedWon)
+                })
+                .OrderBy(x => x.Year).ThenBy(x => x.Month)
+                .ToListAsync();
+            var monthlyTrend = trend.Select(t => new
+            {
+                period = $"{t.Year}-{t.Month:D2}",
+                gci = Math.Round(t.Gci, 2),
+                companyDollar = Math.Round(t.Gci * 0.7m, 2),
+                closedCount = t.ClosedCount
+            }).ToList();
+
+            // Trend vs last month (for KPI trend badges).
+            var thisMonthGci = trend.LastOrDefault()?.Gci ?? 0m;
+            var lastMonthGci = trend.Count >= 2 ? trend[^2].Gci : 0m;
+            var trendPct = lastMonthGci == 0m ? 0m : Math.Round((thisMonthGci - lastMonthGci) / lastMonthGci * 100m, 1);
+
+            return Ok(new
+            {
+                gci = Math.Round(gci, 2),
+                companyDollar = Math.Round(companyDollar, 2),
+                activeListings,
+                averageDom,
+                monthlyTrend,
+                gciTrendPct = trendPct,
+                dealCount = await deals.CountAsync(),
+                closedWonCount = await deals.CountAsync(d => d.DealStage == DealWorkflowStage.ClosedWon)
+            });
+        }
+
+        // 📋 Agent performance leaderboard: list of every broker in the
+        // active tenant with their active listing count, deals closed, and
+        // total GCI generated. When a brokerId is given as a filter, the
+        // leaderboard still returns ALL brokers but marks which one is
+        // selected, so the admin can compare.
+        [Authorize]
+        [HttpGet("report/broker-leaderboard-v2")]
+        public async Task<IActionResult> GetBrokerLeaderboardV2([FromQuery] string? tenantId, [FromQuery] string? brokerId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("billing:view"))
+                return Forbid();
+
+            var tenantIds = await GetVisibleTenantIdsAsync(tenantId);
+            if (tenantIds.Count == 0) return Ok(Array.Empty<object>());
+
+            // Brokers in the visible tenant scope (Email is a soft proxy for "active").
+            var brokers = await _context.BrokerRecords
+                .Where(b => tenantIds.Contains(b.TenantId) && b.Email != "")
+                .Select(b => new { b.BrokerId, b.FullName, b.TenantId })
+                .ToListAsync();
+
+            // Aggregate per-broker deal metrics.
+            var deals = await _context.DealRecords
+                .Where(d => tenantIds.Contains(d.TenantId))
+                .Select(d => new { d.AllocatedBrokerIds, d.DealStage, d.CommissionType, d.CommissionValue, d.TransactionValue })
+                .ToListAsync();
+
+            var rows = brokers.Select(b =>
+            {
+                var mine = deals.Where(d => BrokerMatches(d.AllocatedBrokerIds, b.BrokerId)).ToList();
+                var gci = mine.Sum(d => d.CommissionType == CommissionTypes.Percent
+                    ? d.TransactionValue * d.CommissionValue / 100m
+                    : d.CommissionValue);
+                return new
+                {
+                    brokerId = b.BrokerId,
+                    name = b.FullName,
+                    activeListings = 0, // populated below from property service if we ever want to cross-call
+                    dealsClosed = mine.Count(d => d.DealStage == DealWorkflowStage.ClosedWon),
+                    totalGci = Math.Round(gci, 2)
+                };
+            })
+            .OrderByDescending(r => r.totalGci)
+            .ToList();
+
+            return Ok(rows);
+        }
+
+        // Helper: check if the given brokerId appears in the comma-separated
+        // AllocatedBrokerIds field. Used by the leaderboard + metrics.
+        private static bool BrokerMatches(string allocatedBrokerIds, string brokerId)
+        {
+            if (string.IsNullOrEmpty(allocatedBrokerIds)) return false;
+            return allocatedBrokerIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(id => string.Equals(id, brokerId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // 📥 Compliance inbox: high-urgency items the broker must action.
+        // Two categories:
+        //   1. Expiring mandates — properties in the tenant with an active
+        //      sole mandate whose EndDate is within 14 days (or already past).
+        //      We reach into the property service via the public SoleMandates
+        //      table; the CRM service doesn't have direct access to that DB
+        //      so we call the property service over HTTP.
+        //   2. Awaiting broker signature — deals in the Negotiation stage
+        //      (i.e. awaiting the broker to push them to ProposalQuoteSent).
+        [Authorize]
+        [HttpGet("compliance/inbox")]
+        public async Task<IActionResult> GetComplianceInbox([FromQuery] string? tenantId, [FromQuery] string? brokerId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("deals:view"))
+                return Forbid();
+
+            var tenantIds = await GetVisibleTenantIdsAsync(tenantId);
+            if (tenantIds.Count == 0) return Ok(Array.Empty<object>());
+
+            var role = GetCurrentCanonicalRole();
+            var callerId = GetCurrentUserId();
+            string? effectiveBrokerId = brokerId;
+            if (role == "Broker")
+            {
+                if (!string.IsNullOrWhiteSpace(brokerId) && brokerId != callerId)
+                    return Forbid();
+                effectiveBrokerId = callerId;
+            }
+
+            var items = new List<object>();
+
+            // (2) Awaiting-broker-signature: deals in Negotiation stage.
+            var awaiting = await _context.DealRecords
+                .Where(d => tenantIds.Contains(d.TenantId)
+                    && d.DealStage == DealWorkflowStage.Negotiation
+                    && (effectiveBrokerId == null || BrokerMatches(d.AllocatedBrokerIds, effectiveBrokerId)))
+                .OrderBy(d => d.LastStageUpdatedAt)
+                .Take(20)
+                .Select(d => new
+                {
+                    itemId = $"deal-{d.DealId}",
+                    category = "compliance.awaiting_signature",
+                    severity = "info",
+                    title = $"Deal DL-{d.DealId} awaits broker signature",
+                    body = $"Buyer: {d.BuyerClientId} • Seller: {d.SellerClientId} • R {d.TransactionValue.ToString("N2")}",
+                    linkType = "deal",
+                    linkId = d.DealId.ToString(),
+                    icon = "📝"
+                })
+                .ToListAsync();
+            items.AddRange(awaiting);
+
+            // (1) Expiring mandates: call the property service over HTTP.
+            // We send a comma-separated list of tenantIds and the brokerId
+            // so the property service can scope its sole-mandate query.
+            try
+            {
+                var propertyBaseUrl = HttpContext.RequestServices
+                    .GetRequiredService<IConfiguration>()["Services:PropertyBaseUrl"]
+                    ?? "http://localhost:5002";
+                using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
+                var tenantList = string.Join(',', tenantIds);
+                var url = $"/api/properties/expiring-mandates?tenantId={Uri.EscapeDataString(tenantList)}"
+                    + (effectiveBrokerId != null ? $"&brokerId={Uri.EscapeDataString(effectiveBrokerId)}" : "")
+                    + "&days=14";
+                var resp = await http.GetAsync(url);
+                if (resp.IsSuccessStatusCode)
+                {
+                    var raw = await resp.Content.ReadAsStringAsync();
+                    var expiring = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(raw);
+                    foreach (var m in expiring.EnumerateArray())
+                    {
+                        var endDate = DateTime.Parse(m.GetProperty("endDate").GetString()!);
+                        var daysLeft = (int)Math.Ceiling((endDate - DateTime.UtcNow).TotalDays);
+                        items.Add(new
+                        {
+                            itemId = $"mandate-{m.GetProperty("soleMandateId").GetInt32()}",
+                            category = "compliance.expiring_mandate",
+                            severity = daysLeft <= 0 ? "critical" : daysLeft <= 7 ? "high" : "warning",
+                            title = daysLeft <= 0
+                                ? $"Mandate EXPIRED on property {m.GetProperty("propertyId").GetInt32()}"
+                                : $"Sole mandate expires in {daysLeft} day{(daysLeft == 1 ? "" : "s")} (property {m.GetProperty("propertyId").GetInt32()})",
+                            body = $"End date: {endDate:yyyy-MM-dd}",
+                            linkType = "property",
+                            linkId = m.GetProperty("propertyId").GetInt32().ToString(),
+                            icon = daysLeft <= 0 ? "🚨" : "⚠️",
+                            daysLeft
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "GetComplianceInbox: could not fetch expiring mandates from property service");
+            }
+
+            return Ok(items.OrderBy(i => ((dynamic)i).severity == "critical" ? 0 : 1).ToList());
+        }
+
+        // 🛎️ Notification inbox for the current user (or admin-targeted user).
+        [Authorize]
+        [HttpGet("notifications")]
+        public async Task<IActionResult> GetNotifications([FromQuery] string? tenantId, [FromQuery] bool unreadOnly = false, [FromQuery] int limit = 50)
+        {
+            var role = GetCurrentCanonicalRole();
+            var callerId = GetCurrentUserId();
+            var tenantIds = await GetVisibleTenantIdsAsync(tenantId);
+            if (tenantIds.Count == 0) return Ok(Array.Empty<object>());
+
+             var q = _context.Notifications
+                 .Where(n =>
+                     // User-targeted notifications follow the user across tenants:
+                     // an admin acting from a different (or "all-tenants") context
+                     // can still reach the broker, who reads them from their own
+                     // tenant view.
+                     n.UserId == callerId
+                     // Tenant-broadcast notifications (no recipient) are scoped
+                     // to whatever the caller can see.
+                     || (string.IsNullOrEmpty(n.UserId) && tenantIds.Contains(n.TenantId))
+                 );
+
+            if (unreadOnly) q = q.Where(n => !n.IsRead);
+
+            var items = await q
+                .OrderByDescending(n => n.CreatedAt)
+                .Take(Math.Clamp(limit, 1, 200))
+                .Select(n => new
+                {
+                    n.NotificationId,
+                    n.Category,
+                    n.Title,
+                    n.Body,
+                    n.LinkType,
+                    n.LinkId,
+                    n.IsRead,
+                    n.CreatedAt
+                })
+                .ToListAsync();
+
+            var unreadCount = await _context.Notifications
+                .CountAsync(n => (n.UserId == callerId || (string.IsNullOrEmpty(n.UserId) && tenantIds.Contains(n.TenantId))) && !n.IsRead);
+
+            return Ok(new { items, unreadCount });
+        }
+
+        // ✏️ Mark one notification as read.
+        [Authorize]
+        [HttpPost("notifications/{notificationId:int}/read")]
+        public async Task<IActionResult> MarkNotificationRead(int notificationId)
+        {
+            var role = GetCurrentCanonicalRole();
+            var callerId = GetCurrentUserId();
+            var tenantIds = await GetVisibleTenantIdsAsync(null);
+             var n = await _context.Notifications.FirstOrDefaultAsync(x => x.NotificationId == notificationId
+                 && (x.UserId == callerId || tenantIds.Contains(x.TenantId)));
+            if (n == null) return NotFound(new { message = "Notification not found." });
+            n.IsRead = true;
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Marked as read." });
+        }
+
+        // ➕ Remind agent: admin clicks "Remind Agent" on a compliance item
+        // → create a notification for the broker (or all brokers on the deal).
+        [Authorize]
+        [HttpPost("notifications")]
+        public async Task<IActionResult> CreateNotification([FromBody] CreateNotificationPayload payload)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("deals:edit"))
+                return Forbid();
+             if (payload == null) return BadRequest(new { message = "Payload is required." });
+             var tenantIds = await GetVisibleTenantIdsAsync(null);
+            // The notification lives in the admin's tenant — first one.
+            var tenantId = tenantIds.FirstOrDefault();
+            if (string.IsNullOrEmpty(tenantId))
+                return BadRequest(new { message = "No visible tenant for the caller." });
+
+            var n = new Notification
+            {
+                TenantId = tenantId,
+                UserId = payload.UserId,
+                Category = string.IsNullOrWhiteSpace(payload.Category) ? "reminder" : payload.Category,
+                Title = payload.Title,
+                Body = payload.Body ?? string.Empty,
+                LinkType = payload.LinkType ?? string.Empty,
+                LinkId = payload.LinkId ?? string.Empty,
+                IsRead = false,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.Notifications.Add(n);
+            await _context.SaveChangesAsync();
+            return Created($"/crm/notifications/{n.NotificationId}", n);
         }
     }
 }

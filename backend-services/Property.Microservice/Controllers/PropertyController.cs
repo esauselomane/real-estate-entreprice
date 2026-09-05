@@ -1618,5 +1618,212 @@ namespace Property.Microservice.Controllers
         await _context.SaveChangesAsync();
         return Ok(new { message = "Mandate closed." });
     }
+
+    // 📊 Active-listing count + average DOM for the broker dashboard.
+    // `tenantId` may be a comma-separated list of tenantIds so the caller
+    // can pass an agency subtree in one go.
+    [HttpGet("active-listings-count")]
+    public async Task<IActionResult> GetActiveListingsCount(
+        [FromQuery] string? tenantId = null,
+        [FromQuery] string? linkedBrokerId = null)
+    {
+        var tenantIds = (tenantId ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        if (tenantIds.Count == 0) return Ok(new { activeListings = 0, averageDom = 0 });
+
+        var q = _context.PropertyAssets
+            .Where(p => tenantIds.Contains(p.TenantId) && (p.IsForSale || p.IsForRent));
+        var count = await q.CountAsync();
+        if (count == 0) return Ok(new { activeListings = 0, averageDom = 0 });
+        var avg = await q.Select(p => (double)EF.Functions.DateDiffDay(p.CreatedAt, DateTime.UtcNow)).AverageAsync();
+        return Ok(new { activeListings = count, averageDom = (int)Math.Round(avg) });
+    }
+
+    // ⚠️ Compliance endpoint: active sole mandates whose EndDate is within
+    // the next `days` days (or already in the past). Used by the CRM
+    // service's broker compliance inbox. `tenantId` may be a comma-separated
+    // list of tenantIds so the caller can pass an agency subtree in one go.
+    [HttpGet("expiring-mandates")]
+    public async Task<IActionResult> GetExpiringMandates(
+        [FromQuery] string? tenantId = null,
+        [FromQuery] int days = 14,
+        [FromQuery] string? brokerId = null)
+    {
+        var tenantIds = (tenantId ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        if (tenantIds.Count == 0) return Ok(Array.Empty<object>());
+
+        var cutoff = DateTime.UtcNow.AddDays(days);
+        var query = _context.SoleMandates
+            .Where(m => tenantIds.Contains(m.TenantId) && m.IsActive && m.EndDate <= cutoff);
+        var rows = await query
+            .OrderBy(m => m.EndDate)
+            .Select(m => new
+            {
+                m.SoleMandateId,
+                m.PropertyId,
+                m.TenantId,
+                m.StartDate,
+                endDate = m.EndDate,
+                m.CreatedByUserId
+            })
+            .ToListAsync();
+        return Ok(rows);
+    }
+
+    // ============================================================
+    // 🏠/🏢 PROPERTY + UNIT AMENITIES
+    // ============================================================
+
+    // A DTO that carries the amenity type metadata the UI needs to render the
+    // right input (toggle vs number) and respects the residential-only flag.
+    private class AmenityDto
+    {
+        public int AmenityId { get; set; }
+        public string TenantId { get; set; } = string.Empty;
+        public int PropertyId { get; set; }
+        public int? PropertyUnitId { get; set; }
+        public int AmenityTypeId { get; set; }
+        public string AmenityName { get; set; } = string.Empty;
+        public string? Label { get; set; }
+        public bool RequiresBoolean { get; set; }
+        public bool RequiresNumber { get; set; }
+        public bool IsResidentialOnly { get; set; }
+        public bool? BooleanValue { get; set; }
+        public int? NumberValue { get; set; }
+        public string? Notes { get; set; }
+        public bool IsActive { get; set; }
+    }
+
+    // 📦 List every amenity (both scopes) for a property, decorated with the
+    // type metadata the frontend uses to render toggles/numbers.
+    [HttpGet("{propertyId:int}/amenities")]
+    public async Task<IActionResult> GetPropertyAmenities(int propertyId)
+    {
+        var property = await _context.PropertyAssets
+            .Include(p => p.PropertyTypeDetails)
+            .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
+        if (property == null) return NotFound(new { message = "Property not found." });
+
+        var isResidential = string.Equals(property.PropertyTypeDetails?.Name, "Residential", StringComparison.OrdinalIgnoreCase);
+
+        var rows = await _context.PropertyUnitAmenities
+            .Where(a => a.PropertyId == propertyId && a.IsActive)
+            .Include(a => a.AmenityType)
+            .Select(a => new AmenityDto
+            {
+                AmenityId = a.AmenityId,
+                TenantId = a.TenantId,
+                PropertyId = a.PropertyId,
+                PropertyUnitId = a.PropertyUnitId,
+                AmenityTypeId = a.AmenityTypeId,
+                AmenityName = a.AmenityType!.Name,
+                Label = a.AmenityType.Label,
+                RequiresBoolean = a.AmenityType.RequiresBoolean,
+                RequiresNumber = a.AmenityType.RequiresNumber,
+                IsResidentialOnly = a.AmenityType.IsResidentialOnly,
+                BooleanValue = a.BooleanValue,
+                NumberValue = a.NumberValue,
+                Notes = a.Notes,
+                IsActive = a.IsActive
+            })
+            .ToListAsync();
+
+        // Tell the UI whether unit-level add is allowed for this property.
+        return Ok(new
+        {
+            isResidential,
+            canAddUnitAmenities = !isResidential,
+            items = rows
+        });
+    }
+
+    // 🅰️ Upsert a single amenity. `unitId` is optional; when omitted the
+    // amenity is property-level. Residential assets always get property-level
+    // amenities only — passing a unitId on a residential property is rejected.
+    [HttpPost("{propertyId:int}/amenities")]
+    public async Task<IActionResult> UpsertPropertyAmenity(int propertyId, [FromQuery] int? unitId, [FromBody] AmenityUpsertDto dto)
+    {
+        var property = await _context.PropertyAssets
+            .Include(p => p.PropertyTypeDetails)
+            .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
+        if (property == null) return NotFound(new { message = "Property not found." });
+
+        var isResidential = string.Equals(property.PropertyTypeDetails?.Name, "Residential", StringComparison.OrdinalIgnoreCase);
+        if (isResidential && unitId.HasValue)
+        {
+            return Conflict(new { message = "Residential properties cannot have unit-level amenities." });
+        }
+
+        var amenityType = await _context.AmenityTypes
+            .FirstOrDefaultAsync(t => t.AmenityTypeId == dto.AmenityTypeId && t.IsActive);
+        if (amenityType == null) return BadRequest(new { message = "Invalid or inactive amenity type." });
+
+        // Residential-only amenity types may only attach to residential assets.
+        if (amenityType.IsResidentialOnly && !isResidential)
+        {
+            return Conflict(new { message = amenityType.Name + " is only valid for residential properties." });
+        }
+
+        if (unitId.HasValue)
+        {
+            var unit = await _context.PropertyUnits.FirstOrDefaultAsync(u => u.PropertyUnitId == unitId.Value && u.PropertyId == propertyId);
+            if (unit == null) return BadRequest(new { message = "Unit not found on this property." });
+        }
+
+        var existing = await _context.PropertyUnitAmenities
+            .FirstOrDefaultAsync(a => a.PropertyId == propertyId
+                && a.AmenityTypeId == dto.AmenityTypeId
+                && a.PropertyUnitId == unitId);
+
+        if (existing == null)
+        {
+            existing = new PropertyUnitAmenity
+            {
+                TenantId = property.TenantId,
+                PropertyId = propertyId,
+                PropertyUnitId = unitId,
+                AmenityTypeId = dto.AmenityTypeId,
+                IsActive = true
+            };
+            _context.PropertyUnitAmenities.Add(existing);
+        }
+
+        if (amenityType.RequiresBoolean) existing.BooleanValue = dto.BooleanValue;
+        if (amenityType.RequiresNumber)  existing.NumberValue = dto.NumberValue;
+        existing.Notes = dto.Notes;
+
+            await _context.SaveChangesAsync();
+            await _context.Entry(existing).Reference(a => a.AmenityType).LoadAsync();
+            return Ok(new
+            {
+                existing.AmenityId,
+                existing.PropertyId,
+                existing.PropertyUnitId,
+                amenityName = amenityType.Name,
+                amenityType.Label,
+                amenityType.RequiresBoolean,
+                amenityType.RequiresNumber,
+                amenityType.IsResidentialOnly,
+                existing.BooleanValue,
+                existing.NumberValue,
+                existing.Notes,
+                existing.IsActive
+            });
+    }
+
+    // 🗑️ Soft-delete (deactivate) an amenity. Hard deletes would orphan audit; we keep the row.
+    [HttpDelete("{propertyId:int}/amenities/{amenityId:int}")]
+    public async Task<IActionResult> DeletePropertyAmenity(int propertyId, int amenityId)
+    {
+        var amenity = await _context.PropertyUnitAmenities
+            .FirstOrDefaultAsync(a => a.AmenityId == amenityId && a.PropertyId == propertyId && a.IsActive);
+        if (amenity == null) return NotFound(new { message = "Amenity not found." });
+        amenity.IsActive = false;
+        await _context.SaveChangesAsync();
+        return Ok(new { message = "Amenity removed." });
+    }
 }
 }

@@ -25,7 +25,20 @@ namespace Property.Microservice.Data
 
             context.SaveChanges();
 
-            if (!context.ExternalPlatforms.Any())
+            // 📚 Seed the amenity catalogue the SuperAdmin workspace manages.
+            if (!context.AmenityTypes.Any())
+            {
+                context.AmenityTypes.AddRange(
+                    new Property.Microservice.Models.AmenityType { Name = "Parking",      Label = "Allocated parking bays", RequiresNumber = true, IsResidentialOnly = false },
+                    new Property.Microservice.Models.AmenityType { Name = "PetsAllowed",  Label = "Pets allowed",          RequiresBoolean = true, IsResidentialOnly = true  },
+                    new Property.Microservice.Models.AmenityType { Name = "Gym",          Label = "Gym",                   RequiresBoolean = true,  IsResidentialOnly = false },
+                    new Property.Microservice.Models.AmenityType { Name = "SwimmingPool", Label = "Swimming pool",         RequiresBoolean = true,  IsResidentialOnly = false },
+                    new Property.Microservice.Models.AmenityType { Name = "Security",     Label = "24/7 security",         RequiresBoolean = true,  IsResidentialOnly = false },
+                    new Property.Microservice.Models.AmenityType { Name = "AirConditioning", Label = "Air conditioning", RequiresBoolean = true, IsResidentialOnly = false }
+                );
+            }
+
+            context.SaveChanges();
             {
                 context.ExternalPlatforms.AddRange(
                     new Property.Microservice.Models.ExternalPlatform { PlatformName = "Property24", BaseUrlAddress = "https://property24.com" },

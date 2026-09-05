@@ -18,6 +18,8 @@ namespace Property.Microservice.Data
         public DbSet<UnitLease> UnitLeases { get; set; }
         public DbSet<MaintenanceCall> MaintenanceCalls { get; set; }
         public DbSet<SoleMandate> SoleMandates { get; set; }
+        public DbSet<AmenityType> AmenityTypes { get; set; }
+        public DbSet<PropertyUnitAmenity> PropertyUnitAmenities { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -44,6 +46,36 @@ namespace Property.Microservice.Data
                 .WithMany(p => p.SoleMandates)
                 .HasForeignKey(m => m.PropertyId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // 🏠/🏢 Amenities: one instance of a given amenity per (property, unit-or-null) scope.
+            // Two filtered unique indexes cover both scopes:
+            //   - property-level (PropertyUnitId IS NULL)
+            //   - unit-level     (PropertyUnitId IS NOT NULL)
+            modelBuilder.Entity<PropertyUnitAmenity>()
+                .HasIndex(a => new { a.PropertyId, a.AmenityTypeId })
+                .IsUnique()
+                .HasFilter("[PropertyUnitId] IS NULL");
+            modelBuilder.Entity<PropertyUnitAmenity>()
+                .HasIndex(a => new { a.PropertyId, a.PropertyUnitId, a.AmenityTypeId })
+                .IsUnique()
+                .HasFilter("[PropertyUnitId] IS NOT NULL");
+            modelBuilder.Entity<PropertyUnitAmenity>()
+                .HasOne(a => a.Property)
+                .WithMany()
+                .HasForeignKey(a => a.PropertyId)
+                .OnDelete(DeleteBehavior.Cascade);
+            // NO ACTION on the unit + type FKs to avoid the multiple-cascade-path
+            // cycle that occurs when a property (and thus its units) is deleted.
+            modelBuilder.Entity<PropertyUnitAmenity>()
+                .HasOne(a => a.PropertyUnit)
+                .WithMany()
+                .HasForeignKey(a => a.PropertyUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PropertyUnitAmenity>()
+                .HasOne(a => a.AmenityType)
+                .WithMany()
+                .HasForeignKey(a => a.AmenityTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
         }
     }
 }

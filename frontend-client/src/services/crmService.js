@@ -404,14 +404,25 @@ export const crmService = {
       }
     },
 
-   updateDeal: async (dealId, payload) => {
-     try {
-       const response = await apiClient.put(`/crm/deal/${dealId}`, payload);
-       return response.data;
-     } catch (error) {
-       throw normalizeError(error.response?.data?.message, 'Failed to update deal.');
-     }
-   },
+    updateDeal: async (dealId, payload) => {
+      try {
+        const response = await apiClient.put(`/crm/deal/${dealId}`, payload);
+        return response.data;
+      } catch (error) {
+        throw normalizeError(error.response?.data?.message, 'Failed to update deal.');
+      }
+    },
+
+    // 📝 Append a timestamped review note to a deal's DealNotes.
+    addDealReviewNote: async (dealId, noteText = '') => {
+      try {
+        const response = await apiClient.post(`/crm/deal/${dealId}/notes`, { noteText });
+        return response.data;
+      } catch (error) {
+        throw normalizeError(error.response?.data?.message, 'Failed to save deal note.');
+      }
+    },
+
 
    // 🚀 Promote a lead to a deal with automatic property matching (rent/sale).
    promoteLeadToDeal: async (leadId, options = {}) => {
@@ -605,5 +616,76 @@ export const crmService = {
   linkContactToDeal: async (contactId, dealId) => {
     const response = await apiClient.post(`/crm/contacts/${contactId}/link-deal/${dealId}`);
     return response.data;
+  },
+
+  // ============================================================
+  // 🛎️ BROKER DASHBOARD + NOTIFICATIONS
+  // ============================================================
+
+  // 📊 KPI metrics for the broker dashboard. Pass brokerId to filter
+  // to a single broker; omit to aggregate the whole tenant.
+  getBrokerMetrics: async (brokerId = null) => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      if (brokerId) params.brokerId = brokerId;
+      const response = await apiClient.get('/crm/report/broker-metrics', { params });
+      return response.data;
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Broker metrics sync failed.');
+    }
+  },
+
+  // 📋 Agent performance leaderboard.
+  getBrokerLeaderboard: async (brokerId = null) => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      if (brokerId) params.brokerId = brokerId;
+      const response = await apiClient.get('/crm/report/broker-leaderboard-v2', { params });
+      return response.data || [];
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Leaderboard sync failed.');
+    }
+  },
+
+  // 📥 Compliance inbox (expiring mandates + awaiting-broker-signature).
+  getComplianceInbox: async (brokerId = null) => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      if (brokerId) params.brokerId = brokerId;
+      const response = await apiClient.get('/crm/compliance/inbox', { params });
+      return response.data || [];
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Compliance inbox sync failed.');
+    }
+  },
+
+  // 🛎️ Notification inbox.
+  getNotifications: async ({ unreadOnly = false, limit = 50 } = {}) => {
+    try {
+      const response = await apiClient.get('/crm/notifications', {
+        params: { unreadOnly, limit, ...crmService._tenantQueryParams() }
+      });
+      return response.data || { items: [], unreadCount: 0 };
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Notifications sync failed.');
+    }
+  },
+
+  markNotificationRead: async (notificationId) => {
+    try {
+      const response = await apiClient.post(`/crm/notifications/${notificationId}/read`);
+      return response.data;
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Mark-read failed.');
+    }
+  },
+
+  createNotification: async ({ userId, category, title, body, linkType, linkId }) => {
+    try {
+      const response = await apiClient.post('/crm/notifications', { userId, category, title, body, linkType, linkId });
+      return response.data;
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Notification create failed.');
+    }
   }
 };

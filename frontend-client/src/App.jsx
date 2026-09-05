@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import LeftSidebar from './components/LeftSidebar.jsx';
 import PropertySearch from './components/PropertySearch.jsx';
 import PropertyDetails from './components/PropertyDetails.jsx';
@@ -16,6 +16,8 @@ import LeadsPage from './components/LeadsPage.jsx';
 import DealsPage from './components/DealsPage.jsx';
 import TenantSwitcher from './components/TenantSwitcher.jsx';
 import BrochureCartBell from './components/BrochureCartBell.jsx';
+import BrokerDashboard from './components/BrokerDashboard.jsx';
+import NotificationsBell from './components/NotificationsBell.jsx';
 
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useAppUi } from './contexts/AppUiContext.jsx';
@@ -81,6 +83,18 @@ export default function App() {
       await register(registerName, registerEmail, registerPassword, registerRole);
     } catch { /* error handled in AuthContext */ }
   };
+
+  // 🛡️ Brokers default to the Broker Dashboard on first login. The other
+  // roles stay on the generic Role Dashboard. Declared ABOVE the early
+  // returns so the hook order is stable across auth→app transitions (rules
+  // of hooks). The effect is guarded inside the body — it only navigates
+  // when the user is a Broker still sitting on the default dashboard.
+  useEffect(() => {
+    if (isLoggedIn && userRole === 'Broker' && currentView === 'dashboard') {
+      navigateTo('broker-dashboard');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn]);
 
   // 0. ACTIVATION GATE: If not logged in but a token query param is present, show set-password
   if (!isLoggedIn && activationToken) {
@@ -203,7 +217,7 @@ export default function App() {
 
         </div>
       </div>
-    );
+     );
   }
 
   // 2. MAIN SYSTEM DASHBOARD VIEW: Render workspace layers after successful authentication
@@ -220,6 +234,7 @@ export default function App() {
             <h2 className="text-2xl font-bold text-white tracking-tight">
               {currentView === 'search' && "Property Asset Registry"}
               {currentView === 'dashboard' && "Role Dashboard"}
+              {currentView === 'broker-dashboard' && "Broker Dashboard"}
               {currentView === 'details' && "Asset Portfolio Insights"}
               {currentView === 'client' && "Legal Entity Dossier"}
               {currentView === 'crm' && "Corporate CRM Pipeline"}
@@ -236,6 +251,7 @@ export default function App() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <NotificationsBell />
             <BrochureCartBell />
             <TenantSwitcher />
           </div>
@@ -268,6 +284,7 @@ export default function App() {
         })()}
 
         {/* ⚙️ Dynamic UI view routing execution conditional dispatcher matrices */}
+        {currentView === 'broker-dashboard' && <BrokerDashboard />}
         {currentView === 'dashboard' && <RoleDashboard />}
 
         {currentView === 'search' && (

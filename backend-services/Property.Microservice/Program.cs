@@ -133,9 +133,8 @@ using (var serviceScope = app.Services.CreateScope())
         END
     ");
 
-    // 📜 Sole-mandate history. One property can have many SoleMandates,
-    // but only ONE active at a time — enforced at the DB level via a
-    // filtered unique index on (PropertyId) WHERE IsActive = 1.
+    // 📏 Sole-mandate indexes (defined as unique filtered indexes in SQL raw
+    // below; EF also mirrors them so the in-memory model is consistent).
     databaseContext.Database.ExecuteSqlRaw(@"
         IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[SoleMandates]') AND type = N'U')
         BEGIN
@@ -155,6 +154,70 @@ using (var serviceScope = app.Services.CreateScope())
             CREATE INDEX [IX_SoleMandates_PropertyId_IsActive] ON [SoleMandates] ([PropertyId], [IsActive]);
             CREATE UNIQUE INDEX [UX_SoleMandates_OneActivePerProperty] ON [SoleMandates] ([PropertyId]) WHERE [IsActive] = 1;
         END
+    ");
+
+    // 🏠/🏢 Property + Unit amenities. Single table, scope decided by the
+    // nullable PropertyUnitId discriminator. Composite unique indexes keep one
+    // instance of each amenity per (property) and per (property, unit).
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[AmenityTypes]') AND type = N'U')
+        BEGIN
+            CREATE TABLE [AmenityTypes] (
+                [AmenityTypeId]      INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [Name]               NVARCHAR(50)      NOT NULL,
+                [RequiresBoolean]    BIT               NOT NULL CONSTRAINT DF_AT_RequiresBool DEFAULT 0,
+                [RequiresNumber]     BIT               NOT NULL CONSTRAINT DF_AT_RequiresNum DEFAULT 0,
+                [IsResidentialOnly]  BIT               NOT NULL CONSTRAINT DF_AT_ResOnly DEFAULT 0,
+                [Label]              NVARCHAR(100)     NULL,
+                [IsActive]           BIT               NOT NULL CONSTRAINT DF_AT_IsActive DEFAULT 1,
+                CONSTRAINT [UX_AmenityTypes_Name] UNIQUE ([Name])
+            );
+        END
+        IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[PropertyUnitAmenities]') AND type = N'U')
+        BEGIN
+            CREATE TABLE [PropertyUnitAmenities] (
+                [AmenityId]         INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [TenantId]          NVARCHAR(50)      NOT NULL,
+                [PropertyId]        INT               NOT NULL,
+                [PropertyUnitId]    INT               NULL,
+                [AmenityTypeId]     INT               NOT NULL,
+                [BooleanValue]      BIT               NULL,
+                [NumberValue]       INT               NULL,
+                [Notes]             NVARCHAR(250)     NULL,
+                [IsActive]          BIT               NOT NULL CONSTRAINT DF_PUA_IsActive DEFAULT 1,
+                [CreatedAt]         DATETIME2         NOT NULL CONSTRAINT DF_PUA_CreatedAt DEFAULT SYSUTCDATETIME(),
+                CONSTRAINT [FK_PUA_PropertyAssets] FOREIGN KEY ([PropertyId])
+                    REFERENCES [PropertyAssets]([PropertyId]) ON DELETE CASCADE,
+                CONSTRAINT [FK_PUA_PropertyUnits] FOREIGN KEY ([PropertyUnitId])
+                    REFERENCES [PropertyUnits]([PropertyUnitId]) ON DELETE NO ACTION,
+                CONSTRAINT [FK_PUA_AmenityTypes] FOREIGN KEY ([AmenityTypeId])
+                    REFERENCES [AmenityTypes]([AmenityTypeId]) ON DELETE NO ACTION
+            );
+            CREATE INDEX [IX_PUA_Property_Tenant] ON [PropertyUnitAmenities] ([PropertyId], [TenantId]);
+        END
+    ");
+
+    // Composite uniqueness per scope. Filtered indexes are the idiomatic
+    // SQL Server way to express "one row per amenity for this scope".
+    databaseContext.Database.ExecuteSqlRaw(@"
+        -- property-level scope (unit = NULL): one row per (property, amenity)
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes i
+            JOIN sys.objects o ON i.object_id = o.object_id
+            WHERE o.name = N'PropertyUnitAmenities' AND i.name = N'UX_PUA_Property_Level'
+        )
+            CREATE UNIQUE INDEX [UX_PUA_Property_Level]
+                ON [PropertyUnitAmenities] ([PropertyId], [AmenityTypeId])
+                WHERE [PropertyUnitId] IS NULL AND [IsActive] = 1;
+        -- unit-level scope: one row per (property, unit, amenity)
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes i
+            JOIN sys.objects o ON i.object_id = o.object_id
+            WHERE o.name = N'PropertyUnitAmenities' AND i.name = N'UX_PUA_Unit_Level'
+        )
+            CREATE UNIQUE INDEX [UX_PUA_Unit_Level]
+                ON [PropertyUnitAmenities] ([PropertyId], [PropertyUnitId], [AmenityTypeId])
+                WHERE [PropertyUnitId] IS NOT NULL AND [IsActive] = 1;
     ");
 
     // 📈 New listing-eligibility flags: an asset may be marketed for SALE

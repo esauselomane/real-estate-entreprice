@@ -304,6 +304,29 @@ using (var serviceScope = app.Services.CreateScope())
         END
     ");
 
+    // 🛎️ Per-broker notification inbox. The bell on the broker dashboard
+    // reads from this table; admins create rows when they click
+    // "Remind Agent" on a compliance item.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[Notifications]') AND type = N'U')
+        BEGIN
+            CREATE TABLE [Notifications] (
+                [NotificationId]  int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [TenantId]        nvarchar(50)   NOT NULL,
+                [UserId]          nvarchar(100)  NOT NULL,
+                [Category]        nvarchar(50)   NOT NULL CONSTRAINT DF_Notif_Category DEFAULT N'system',
+                [Title]           nvarchar(200)  NOT NULL,
+                [Body]            nvarchar(MAX)  NOT NULL CONSTRAINT DF_Notif_Body DEFAULT N'',
+                [LinkType]        nvarchar(50)   NOT NULL CONSTRAINT DF_Notif_LinkType DEFAULT N'',
+                [LinkId]          nvarchar(50)   NOT NULL CONSTRAINT DF_Notif_LinkId DEFAULT N'',
+                [IsRead]          bit            NOT NULL CONSTRAINT DF_Notif_IsRead DEFAULT 0,
+                [CreatedAt]       datetime2      NOT NULL CONSTRAINT DF_Notif_CreatedAt DEFAULT SYSUTCDATETIME()
+            );
+            CREATE INDEX [IX_Notifications_UserId_IsRead_CreatedAt] ON [Notifications] ([UserId], [IsRead], [CreatedAt] DESC);
+            CREATE INDEX [IX_Notifications_TenantId_CreatedAt] ON [Notifications] ([TenantId], [CreatedAt] DESC);
+        END
+    ");
+
     CRMSeedData.EnsureSeeded(databaseContext);
 }
 
