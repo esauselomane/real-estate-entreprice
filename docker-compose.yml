@@ -44,9 +44,73 @@ services:
     networks:
       - realestate-mesh-network
 
+  # 📧 4. EMAIL CATCHER: Mailpit for local email testing
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: realestate-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - realestate-mesh-network
+
+  # 🔍 5. PROBE ENGINE: Blackbox Exporter for HTTP health checks
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.24.0
+    container_name: realestate-blackbox-exporter
+    ports:
+      - "9115:9115"
+    volumes:
+      - ./monitoring/blackbox/blackbox.yml:/etc/blackbox_exporter/blackbox.yml:ro
+    command:
+      - '--config.file=/etc/blackbox_exporter/blackbox.yml'
+    networks:
+      - realestate-mesh-network
+
+  # 📊 6. METRICS COLLECTION: Prometheus
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: realestate-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - blackbox-exporter
+    networks:
+      - realestate-mesh-network
+
+  # 📈 7. METRICS VISUALIZATION: Grafana
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: realestate-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+    depends_on:
+      - prometheus
+    networks:
+      - realestate-mesh-network
+
 # 💾 PERSISTENT DATA STORAGE INFRASTRUCTURE STORAGE MATRIX
 volumes:
   sqlserver-data-vault:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
     driver: local
 
 # 🕸️ ISOLATED LOGICAL BACKEND BRIDGING RECEPTACLE NETWORKS

@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+scrape_configs:
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx_or_404]
+    static_configs:
+      - targets:
+        - http://host.docker.internal:5001/health
+        - http://host.docker.internal:5002/health
+        - http://host.docker.internal:5003/health
+        - http://host.docker.internal:5000
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 172.22.0.2:9115

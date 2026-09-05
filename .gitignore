@@ -13,3 +13,8 @@ aider-env
 *aider-env
 *aider-env/
 .qodo*
+# Next.js build output
+.next/
+out/
+.env*
+agents.md

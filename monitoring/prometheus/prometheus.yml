@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+scrape_configs:
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx_or_404]
+    static_configs:
+      - targets:
+        - http://identity-service:5001/health
+        - http://property-service:5002/health
+        - http://crm-service:5003/health
+        - http://developer-api:5006/health
+        - http://gateway:5000/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

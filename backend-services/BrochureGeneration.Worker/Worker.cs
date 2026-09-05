@@ -1,46 +1,194 @@
 using Confluent.Kafka;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using QuestPDF.Fluent;
-using QuestPDF.Helpers;
-using QuestPDF.Infrastructure;
+using PuppeteerSharp;
 using System;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace BrochureGeneration.Worker
 {
+    internal record BrochureSubUnit
+    {
+        public int PropertyId { get; set; }
+        public string PropertyDescription { get; set; } = string.Empty;
+        public decimal Latitude { get; set; }
+        public decimal Longitude { get; set; }
+        public string UnitNumber { get; set; } = string.Empty;
+        public string UnitDescription { get; set; } = string.Empty;
+        public decimal NetRentableAreaSqM { get; set; }
+        public decimal? RentalRate { get; set; }
+        public decimal? RentEscalationPercentage { get; set; }
+        public int? LeaseTermMonths { get; set; }
+        public decimal? SalePrice { get; set; }
+        public List<string> SelectedImageRefs { get; set; } = new();
+    }
+
     public class BrochureKafkaConsumerWorker : BackgroundService
     {
         private readonly ILogger<BrochureKafkaConsumerWorker> _logger;
         private readonly ConsumerConfig _consumerConfig;
+        private readonly string _gatewayUrl;
         private const string TopicName = "brochure-generation-requests";
 
-        // Centralized Strong-Typed Typography Style Sheet Matrix to stop compilation breaks
-        private readonly TextStyle _titleStyle = TextStyle.Default.FontFamily("Arial").FontSize(24).Bold().Color("#FFFFFF");
-        private readonly TextStyle _subTitleStyle = TextStyle.Default.FontFamily("Arial").FontSize(16).Bold().Color("#38BDF8");
-        private readonly TextStyle _headerStyle = TextStyle.Default.FontFamily("Arial").FontSize(14).Bold().Color("#0F172A");
-        private readonly TextStyle _sectionHeaderStyle = TextStyle.Default.FontFamily("Arial").FontSize(11).Bold().Color("#475569");
-        private readonly TextStyle _bodyStyle = TextStyle.Default.FontFamily("Arial").FontSize(10).Color("#334155");
-        private readonly TextStyle _metaStyle = TextStyle.Default.FontFamily("Arial").FontSize(9).Italic().Color("#94A3B8");
-        private readonly TextStyle _alertHeaderStyle = TextStyle.Default.FontFamily("Arial").FontSize(10).Bold().Color("#1E40AF");
-        private readonly TextStyle _alertPriceStyle = TextStyle.Default.FontFamily("Arial").FontSize(16).Bold().Color("#1E3A8A");
+        private static readonly HttpClient _http = new HttpClient();
 
-        public BrochureKafkaConsumerWorker(ILogger<BrochureKafkaConsumerWorker> logger)
+        public BrochureKafkaConsumerWorker(ILogger<BrochureKafkaConsumerWorker> logger, IConfiguration configuration)
         {
             _logger = logger;
+            _gatewayUrl = configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
             _consumerConfig = new ConsumerConfig
             {
-                BootstrapServers = "localhost:9092",
+                BootstrapServers = configuration["Kafka:BootstrapServers"] ?? "localhost:9092",
                 GroupId = "brochure-generator-group",
                 AutoOffsetReset = AutoOffsetReset.Earliest,
                 EnableAutoCommit = false
             };
-            QuestPDF.Settings.License = LicenseType.Community;
         }
+
+        private static async Task<byte[]?> DownloadImageBytesAsync(string url, int maxRetries = 3)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return null;
+            for (var attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    using var response = await _http.GetAsync(url);
+                    if (!response.IsSuccessStatusCode) return null;
+                    return await response.Content.ReadAsByteArrayAsync();
+                }
+                catch
+                {
+                    if (attempt == maxRetries) return null;
+                    await Task.Delay(500);
+                }
+            }
+            return null;
+        }
+
+        private static string ToBase64(byte[] bytes) => Convert.ToBase64String(bytes);
+
+        private static string EscapeHtml(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return string.Empty;
+            return text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+        }
+
+        private static string BuildBrochureHtml(
+            string brokerName, string brokerEmail, string brokerPhone,
+            string companyName, string logoDataUrl,
+            string clientName, string clientEmail, string clientPhone,
+            string marketClass, decimal tenantAllowance,
+            List<BrochureSubUnit> subUnits)
+        {
+            var logoHtml = string.IsNullOrEmpty(logoDataUrl)
+                ? $"<div style=\"width:60px;height:60px;background:#1E293B;border:1px solid #334155;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#0F172A;font-weight:bold;font-size:14px;\">{EscapeHtml(companyName.Split(' ').Select(w => w.Length > 0 ? w[0].ToString() : string.Empty).Take(3).Aggregate("", (a, b) => a + b))}</div>"
+                : $"<img src=\"{logoDataUrl}\" style=\"width:60px;height:60px;object-fit:contain;border-radius:8px;border:1px solid #334155;\" />";
+
+            var coverHtml = $@"
+            <div style=""font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0F172A; page-break-after: always;"">
+              <div style=""padding: 40px;"">
+                <h1 style=""font-size: 28px; font-weight: 600; margin: 0 0 20px 0;"">REAL ESTATE PORTFOLIO PROPOSAL</h1>
+                <div style=""display: flex; align-items: center; gap: 12px; margin-bottom: 60px;"">
+                  {logoHtml}
+                  <span style=""font-size: 18px; font-weight: bold;"">{EscapeHtml(companyName)}</span>
+                </div>
+                <div style=""border-top: 1px solid #334155; padding-top: 20px; margin-bottom: 30px;"">
+                  <p style=""font-size: 11px; color: #94A3B8; margin: 0 0 4px 0;"">PREPARED BY:</p>
+                  <p style=""font-size: 16px; font-weight: bold; margin: 0;"">{EscapeHtml(brokerName)}</p>
+                  <p style=""font-size: 11px; color: #94A3B8; margin: 4px 0 0 0;"">{EscapeHtml(brokerEmail)}</p>
+                  <p style=""font-size: 11px; color: #94A3B8; margin: 4px 0 0 0;"">{EscapeHtml(brokerPhone)}</p>
+                </div>
+                <div style=""border-top: 1px solid #334155; padding-top: 20px;"">
+                  <p style=""font-size: 11px; color: #94A3B8; margin: 0 0 4px 0;"">PREPARED FOR:</p>
+                  <p style=""font-size: 16px; font-weight: bold; margin: 0;"">{EscapeHtml(clientName)}</p>
+                  {(string.IsNullOrEmpty(clientEmail) ? "" : $"<p style=\"font-size: 11px; color: #94A3B8; margin: 4px 0 0 0;\">{EscapeHtml(clientEmail)}</p>")}
+                  {(string.IsNullOrEmpty(clientPhone) ? "" : $"<p style=\"font-size: 11px; color: #94A3B8; margin: 4px 0 0 0;\">{EscapeHtml(clientPhone)}</p>")}
+                </div>
+              </div>
+            </div>";
+
+            var mapPageHtml = $@"
+            <div style=""font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0F172A; page-break-after: always; padding: 24px;"">
+              <h2 style=""font-size: 18px; font-weight: bold; margin: 0 0 20px 0; padding-bottom: 10px; border-bottom: 1px solid #E2E8F0;"">LOCATION & MAPPING</h2>
+              <p style=""font-size: 12px; color: #334155; margin: 0 0 16px 0;"">All units included in this proposal:</p>
+              <div id=""map"" style=""width: 100%; height: 500px; border: 1px solid #94A3B8; border-radius: 6px;""></div>
+              <script src=""https://unpkg.com/leaflet@1.9.4/dist/leaflet.js""></script>
+              <link rel=""stylesheet"" href=""https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"" />
+              <script>
+                var map = L.map('map').setView([0, 0], 2);
+                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                  attribution: '&copy; OpenStreetMap contributors',
+                  maxZoom: 19
+                }}).addTo(map);
+                var markers = [];
+                {string.Join("", subUnits.Select((u, i) => $"markers.push(L.marker([{u.Latitude}, {u.Longitude}]).addTo(map).bindPopup('<b>{EscapeHtml(u.UnitNumber)}</b><br>{EscapeHtml(u.UnitDescription)}'));"))}
+                if (markers.length > 0) {{
+                  var group = new L.featureGroup(markers);
+                  map.addLayer(group);
+                  map.fitBounds(group.getBounds().pad(0.2));
+                  map.setZoom(map.getZoom() - 1);
+                }}
+                setTimeout(function() {{ window.brochureReady = true; }}, 1000);
+              </script>
+            </div>";
+
+            var unitPagesHtml = subUnits.Select(unit =>
+            {
+                var rentalHtml = marketClass.Equals("Rental", StringComparison.OrdinalIgnoreCase) ? $@"
+                <div style=""margin-top: 20px;"">
+                  <h3 style=""font-size: 13px; font-weight: bold; margin: 0 0 8px 0;"">RENTAL TERMS</h3>
+                  <p style=""font-size: 12px; color: #334155; margin: 0 0 4px 0;"">Monthly Rental Rate: R {unit.RentalRate?.ToString("N2") ?? "0.00"}</p>
+                  <p style=""font-size: 12px; color: #334155; margin: 0 0 4px 0;"">Annual Escalation: {unit.RentEscalationPercentage?.ToString("F2") ?? "0.00"}%</p>
+                  <p style=""font-size: 12px; color: #334155; margin: 0;"">Lease Term: {unit.LeaseTermMonths?.ToString() ?? "12"} months</p>
+                </div>" : $@"
+                <div style=""margin-top: 20px;"">
+                  <h3 style=""font-size: 13px; font-weight: bold; margin: 0 0 8px 0;"">SALE DETAILS</h3>
+                  <p style=""font-size: 14px; font-weight: bold; color: #0F172A; margin: 0 0 4px 0;"">Purchase Price: R {unit.SalePrice?.ToString("N2") ?? "0.00"} (Excl VAT)</p>
+                  {(unit.SalePrice.HasValue ? $"<p style=\"font-size: 12px; color: #334155; margin: 0;\">Estimated Bond Repayment (80% over 20 yrs): R {(unit.SalePrice.Value * 0.8m * 0.11m / 12).ToString("N2")} /month</p>" : "")}
+                </div>";
+
+                var imagesHtml = unit.SelectedImageRefs.Any() ? $@"
+                <div style=""margin-top: 20px;"">
+                  <h3 style=""font-size: 13px; font-weight: bold; margin: 0 0 10px 0;"">UNIT IMAGES</h3>
+                  <div style=""display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;"">
+                    {string.Join("", unit.SelectedImageRefs.Select((img, idx) => $"<img src=\"{EscapeHtml(img)}\" style=\"height: 70px; width: 100%; object-fit: cover; border: 1px solid #CBD5E1; border-radius: 4px; display: block;\" />"))}
+                  </div>
+                </div>" : "";
+
+                return $@"
+                <div style=""font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0F172A; page-break-after: always; padding: 24px;"">
+                  <h2 style=""font-size: 18px; font-weight: bold; margin: 0 0 16px 0; padding-bottom: 10px; border-bottom: 1px solid #E2E8F0;"">UNIT: {EscapeHtml(unit.UnitNumber)}</h2>
+                  <p style=""font-size: 12px; color: #334155; margin: 0 0 6px 0;""><strong>Unit Description:</strong> {EscapeHtml(unit.UnitDescription)}</p>
+                  <p style=""font-size: 12px; color: #334155; margin: 0 0 16px 0;""><strong>Net Rentable Area:</strong> {unit.NetRentableAreaSqM:F2} m²</p>
+                  {rentalHtml}
+                  {imagesHtml}
+                </div>";
+            });
+
+            return $@"<!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset=""utf-8"">
+              <style>
+                @page {{ size: A4; margin: 0; }}
+                body {{ margin: 0; padding: 0; }}
+                img {{ max-width: 100%; height: auto; }}
+              </style>
+            </head>
+            <body>
+              {coverHtml}
+              {mapPageHtml}
+              {string.Join("", unitPagesHtml)}
+            </body>
+            </html>";
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             using var consumer = new ConsumerBuilder<string, string>(_consumerConfig).Build();
@@ -72,11 +220,18 @@ namespace BrochureGeneration.Worker
             }
             consumer.Close();
         }
+
         private async Task<bool> ProcessGenerationEventAsync(string messageJson)
         {
             try
             {
-                // 1. Deserialize incoming transactional context parameters
+                await new BrowserFetcher().DownloadAsync();
+                using var browser = await Puppeteer.LaunchAsync(new LaunchOptions
+                {
+                    Headless = true,
+                    Args = new[] { "--no-sandbox", "--disable-setuid-sandbox" }
+                });
+
                 using var jsonDoc = JsonDocument.Parse(messageJson);
                 var root = jsonDoc.RootElement;
 
@@ -84,162 +239,86 @@ namespace BrochureGeneration.Worker
                 string brokerName = root.GetProperty("BrokerName").GetString() ?? "Unassigned broker";
                 string brokerEmail = root.GetProperty("BrokerEmail").GetString() ?? "s.jenkins@apexluxury.co.za";
                 string brokerPhone = root.GetProperty("BrokerPhone").GetString() ?? "+27118845000";
-                string companyRef = root.GetProperty("CompanyReferenceNumber").GetString() ?? "PROP-REF-991";
-                string marketClass = root.GetProperty("MarketClass").GetString() ?? "Rental"; 
+                string companyName = root.GetProperty("CompanyName").GetString() ?? "Agency";
+                string companyLogoUrl = root.GetProperty("CompanyLogoUrl").GetString() ?? string.Empty;
+                string clientName = root.GetProperty("ClientName").GetString() ?? "Valued Client";
+                string clientEmail = root.GetProperty("ClientEmail").GetString() ?? string.Empty;
+                string clientPhone = root.GetProperty("ClientPhone").GetString() ?? string.Empty;
+                string marketClass = root.GetProperty("MarketClass").GetString() ?? "Rental";
                 decimal tenantAllowance = root.GetProperty("TenantInstallationAllowance").GetDecimal();
-                string addressStr = root.GetProperty("CompleteAddress").GetString() ?? "Unknown Address Link";
-                decimal latCoord = root.GetProperty("Latitude").GetDecimal();
-                decimal lngCoord = root.GetProperty("Longitude").GetDecimal();
+                int brochureCardId = root.TryGetProperty("BrochureCardId", out var bcProp) ? bcProp.GetInt32() : 0;
 
-                var selectedImages = root.GetProperty("SelectedImages").EnumerateArray()
-                    .Select(img => img.GetString() ?? string.Empty)
-                    .Where(str => !string.IsNullOrEmpty(str))
-                    .Take(5)
+                var subUnits = root.GetProperty("SubUnits").EnumerateArray()
+                    .Select(u => new BrochureSubUnit
+                    {
+                        PropertyId = u.GetProperty("PropertyId").GetInt32(),
+                        PropertyDescription = u.GetProperty("PropertyDescription").GetString() ?? string.Empty,
+                        Latitude = u.TryGetProperty("Latitude", out var latEl) && latEl.ValueKind != JsonValueKind.Null ? latEl.GetDecimal() : 0,
+                        Longitude = u.TryGetProperty("Longitude", out var lonEl) && lonEl.ValueKind != JsonValueKind.Null ? lonEl.GetDecimal() : 0,
+                        UnitNumber = u.GetProperty("UnitNumber").GetString() ?? "Suite",
+                        UnitDescription = u.GetProperty("UnitDescription").GetString() ?? string.Empty,
+                        NetRentableAreaSqM = u.GetProperty("NetRentableAreaSqM").GetDecimal(),
+                        RentalRate = u.TryGetProperty("RentalRate", out var rEl) && rEl.ValueKind != JsonValueKind.Null ? rEl.GetDecimal() : (decimal?)null,
+                        RentEscalationPercentage = u.TryGetProperty("RentEscalationPercentage", out var eEl) && eEl.ValueKind != JsonValueKind.Null ? eEl.GetDecimal() : (decimal?)null,
+                        LeaseTermMonths = u.TryGetProperty("LeaseTermMonths", out var tEl) && tEl.ValueKind != JsonValueKind.Null ? tEl.GetInt32() : (int?)null,
+                        SalePrice = u.TryGetProperty("SalePrice", out var sEl) && sEl.ValueKind != JsonValueKind.Null ? sEl.GetDecimal() : (decimal?)null,
+                        SelectedImageRefs = u.TryGetProperty("SelectedImageRefs", out var iEl) && iEl.ValueKind == JsonValueKind.Array
+                            ? iEl.EnumerateArray().Select(img => img.GetString() ?? string.Empty).Where(str => !string.IsNullOrEmpty(str)).Take(5).ToList()
+                            : new List<string>()
+                    })
                     .ToList();
 
-                var subUnits = root.GetProperty("SubUnits").EnumerateArray().ToList();
+                _logger.LogInformation($"[BROCHURE PAYLOAD] DealId={dealId} BrokerName={brokerName} ClientName={clientName} Units={subUnits.Count}");
 
-                // 2. ORCHESTRATE ASYNC MULTI-PAGE QUESTPDF COMPILER DESK
-                var compiledDocumentBytes = Document.Create(container =>
+                var logoBytes = !string.IsNullOrEmpty(companyLogoUrl) ? await DownloadImageBytesAsync(companyLogoUrl) : null;
+                var logoDataUrl = logoBytes != null ? $"data:image/png;base64,{ToBase64(logoBytes)}" : string.Empty;
+
+                var html = BuildBrochureHtml(brokerName, brokerEmail, brokerPhone, companyName, logoDataUrl, clientName, clientEmail, clientPhone, marketClass, tenantAllowance, subUnits);
+
+                byte[] compiledDocumentBytes;
+                using (var page = await browser.NewPageAsync())
                 {
-                    // --- PAGE 1: BRANDED COVER PRESENTATION PROFILE ---
-                    container.Page(page =>
+                    await page.SetUserAgentAsync("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36");
+                    await page.SetContentAsync(html);
+                    await page.WaitForNetworkIdleAsync(new WaitForNetworkIdleOptions { Timeout = 120000 });
+                    await page.EvaluateExpressionAsync("document.fonts.ready");
+                    await page.EvaluateExpressionAsync("window.brochureReady || true");
+                    compiledDocumentBytes = await page.PdfDataAsync(new PdfOptions
                     {
-                        page.Size(PageSizes.A4);
-                        page.Margin(2, Unit.Centimetre);
-                        page.Background("#0F172A"); 
-
-                        page.Content().Column(col =>
-                        {
-                            col.Spacing(20);
-                            col.Item().Text("REAL ESTATE PORTFOLIO PROPOSAL").Style(_titleStyle);
-                            col.Item().Text($"Ecosystem System Broker Index: {companyRef}").Style(_metaStyle);
-
-                            col.Item().PaddingTop(100).BorderTop(1).BorderColor("#334155").Column(bCol =>
-                            {
-                                bCol.Spacing(6);
-                                bCol.Item().Text("PREPARED BY REGISTERED OPERATIONAL HANDLER:").Style(_metaStyle);
-                                bCol.Item().Text(brokerName).Style(_subTitleStyle);
-                                bCol.Item().Text($"Direct Email Line: {brokerEmail}").Style(_metaStyle);
-                                bCol.Item().Text($"Direct Contact Str: {brokerPhone}").Style(_metaStyle);
-                            });
-                        });
+                        Format = PuppeteerSharp.Media.PaperFormat.A4,
+                        PrintBackground = true
                     });
+                }
 
-                    // --- PAGE 2: TRANSIT GRID GEOSPATIAL MAP RECEPTACLE SHEET ---
-                    container.Page(page =>
-                    {
-                        page.Size(PageSizes.A4);
-                        page.Margin(1.5f, Unit.Centimetre);
-                        page.Background("#F8FAFC");
-
-                        page.Header().PaddingBottom(10).Text("GEOSPATIAL SITUATIONAL SITING MAP").Style(_headerStyle);
-                        
-                        page.Content().Column(col =>
-                        {
-                            col.Spacing(15);
-                            col.Item().Text($"Master Asset Location Target: {addressStr}").Style(_bodyStyle);
-                            
-                            col.Item().Height(300).Background("#CBD5E1").Border(1).BorderColor("#94A3B8").Column(mapCol =>
-                            {
-                                // Fix: Alignment modifiers placed securely directly on the structural grid items
-                                mapCol.Item().Padding(10).AlignCenter().Text("[Interactive Multi-Pin Placement Render Engine Canvas Area]").Style(_sectionHeaderStyle);
-                                mapCol.Item().PaddingTop(100).AlignCenter().Text($"📌 Active Pin Plot Point Array Context Path: Lat {latCoord} / Lng {lngCoord}").Style(_headerStyle);
-                            });
-                            col.Item().Text("* Brochures grouped with multiple selection entries will render localized markers across this placement box area.").Style(_metaStyle);
-                        });
-                    });
-                    // --- PAGE 3: MASTER ASSET FINANCIAL CONDITIONS INCENTIVES ---
-                    container.Page(page =>
-                    {
-                        page.Size(PageSizes.A4);
-                        page.Margin(1.5f, Unit.Centimetre);
-                        page.Background("#FFFFFF");
-
-                        page.Header().PaddingBottom(10).Text("FINANCIAL MATRIX & STRUCTURAL SPECIFICATIONS").Style(_headerStyle);
-
-                        page.Content().Column(col =>
-                        {
-                            col.Spacing(15);
-                            col.Item().Text($"Asset Classification Context: FOR {marketClass.ToUpper()}").Style(_subTitleStyle);
-
-                            // Renders New Numerical Tenant Installation Fit-Out Incentive Box
-                            col.Item().Background("#EFF6FF").Border(1).BorderColor("#BFDBFE").Padding(12).Column(tiCol =>
-                            {
-                                tiCol.Item().Text("TENANT INSTALLATION (TI) ALLOWANCE INCENTIVE").Style(_alertHeaderStyle);
-                                tiCol.Item().Text($"R {tenantAllowance.ToString("N2")} Total Incentive Budget Allocation").Style(_alertPriceStyle);
-                            });
-
-                            // --- 🔀 CONDITIONAL LAYOUT FINANCIAL DATA FORKING PIPELINE ---
-                            if (marketClass.Equals("Rental", StringComparison.OrdinalIgnoreCase))
-                            {
-                                decimal rentRate = root.TryGetProperty("BaseRentalRate", out var rProp) ? rProp.GetDecimal() : 0;
-                                decimal escalation = root.TryGetProperty("RentEscalationPercentage", out var eProp) ? eProp.GetDecimal() : 0;
-                                int terms = root.TryGetProperty("LeaseTermMonths", out var tProp) ? tProp.GetInt32() : 12;
-
-                                col.Item().Text($"Baseline Monthly Rental: R {rentRate.ToString("N2")} /month").Style(_bodyStyle);
-                                col.Item().Text($"Annual Compound Escalation Rate: {escalation.ToString("F2")}% per Annum").Style(_bodyStyle);
-                                col.Item().Text($"Mandated Initial Lease Commitment Duration: {terms} Months").Style(_bodyStyle);
-                            }
-                            else 
-                            {
-                                decimal saleCost = root.TryGetProperty("SalePrice", out var sProp) ? sProp.GetDecimal() : 0;
-                                col.Item().Text($"Total Structural Acquisition Purchase Price: R {saleCost.ToString("N2")} (Excl VAT)").Style(_headerStyle);
-                            }
-
-                            // Output image choice thumbnails loop grid container inside the brochure canvas sheet
-                            if (selectedImages.Any())
-                            {
-                                col.Item().PaddingTop(20).Text("AGENCY REGISTERED IMAGE ATTACHMENTS (MAX 5)").Style(_sectionHeaderStyle);
-                                col.Item().Grid(grid =>
-                                {
-                                    grid.Spacing(10);
-                                    grid.Columns(3);
-                                    foreach (var imgName in selectedImages)
-                                    {
-                                        grid.Item().Height(80).Background("#E2E8F0").Border(1).BorderColor("#CBD5E1").Padding(5).AlignCenter().Text(imgName).Style(_bodyStyle);
-                                    }
-                                });
-                            }
-                        });
-                    });
-                    // --- PAGE 4+: GRANULAR SUB-UNIT INDIVIDUAL BREAKDOWN MATRIX SHEETS ---
-                    foreach (var unit in subUnits)
-                    {
-                        container.Page(page =>
-                        {
-                            page.Size(PageSizes.A4);
-                            page.Margin(1.5f, Unit.Centimetre);
-                            page.Background("#F8FAFC");
-
-                            string uNumber = unit.GetProperty("UnitNumber").GetString() ?? "Suite";
-                            string uDesc = unit.GetProperty("UnitDescription").GetString() ?? "No Space Log Description Provided";
-                            decimal uArea = unit.GetProperty("NetRentableAreaSqM").GetDecimal();
-
-                            page.Header().PaddingBottom(10).Text($"SUB-UNIT OVERVIEW DISCLOSURE: {uNumber}").Style(_headerStyle);
-
-                            page.Content().Column(col =>
-                            {
-                                col.Spacing(12);
-                                col.Item().Text($"Net Rentable Area Space Dimension (NRA): {uArea.ToString("F2")} m²").Style(_bodyStyle);
-                                col.Item().PaddingTop(40).Text("Functional Configuration Specifications Description:").Style(_sectionHeaderStyle);
-                                col.Item().Text(uDesc).Style(_bodyStyle);
-
-                                col.Item().PaddingTop(40).Height(150).Background("#E2E8F0").Border(1).BorderColor("#CBD5E1").Padding(10)
-                                    .AlignCenter().Text($"[Sub-Unit Specific Architectural Image Frame for {uNumber}]").Style(_metaStyle);
-                            });
-                        });
-                    }
-                }).GeneratePdf();
-
-                // 3. PERSIST THE COMPILED BINARY STORAGE ARTIFACT RECORD ONTO DISK VOLUMES
-                string destinationDirectory = Path.Combine(AppContext.BaseDirectory, "GeneratedBrochures");
+                string destinationDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "GeneratedBrochures"));
                 if (!Directory.Exists(destinationDirectory)) Directory.CreateDirectory(destinationDirectory);
 
                 string finalFilePath = Path.Combine(destinationDirectory, $"Brochure_Deal_{dealId}.pdf");
                 await File.WriteAllBytesAsync(finalFilePath, compiledDocumentBytes);
 
                 _logger.LogInformation($"[COMPILATION SUCCESSFUL]: PDF Brochure payload saved to target node disk: '{finalFilePath}'");
+
+                if (brochureCardId > 0)
+                {
+                    var callbackPayload = new
+                    {
+                        DealId = dealId,
+                        CardId = brochureCardId,
+                        FilePath = finalFilePath,
+                        GeneratedAt = DateTime.UtcNow
+                    };
+                    try
+                    {
+                        var httpContent = new StringContent(JsonSerializer.Serialize(callbackPayload), Encoding.UTF8, "application/json");
+                        var callbackUri = $"{_gatewayUrl}/crm/brochure-cards/{brochureCardId}/generated";
+                        var callbackResponse = await _http.PostAsync(callbackUri, httpContent);
+                        _logger.LogInformation($"[CALLBACK OK]: CRM notified of brochure completion for card {brochureCardId}. HTTP {(int)callbackResponse.StatusCode}");
+                    }
+                    catch (Exception cbEx)
+                    {
+                        _logger.LogWarning($"[CALLBACK SKIPPED]: Brochure PDF saved but CRM callback failed for card {brochureCardId}. Reason: {cbEx.Message}");
+                    }
+                }
                 return true;
             }
             catch (Exception ex)

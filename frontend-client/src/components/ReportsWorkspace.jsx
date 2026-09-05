@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, PieChart, TrendingUp, CalendarRange, DollarSign } from 'lucide-react';
-import { crmService } from '../services/ crmService.js';
+import { crmService } from '../services/crmService.js';
+import { useTenant } from '../contexts/TenantContext.jsx';
 
 export default function ReportsWorkspace() {
   const [report, setReport] = useState({ totalLeads: 0, totalDeals: 0, totalRevenue: 0, monthlyBreakdown: [] });
   const [year, setYear] = useState(new Date().getFullYear());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const { activeTenantId, activeAgency, isAllTenants } = useTenant();
 
   useEffect(() => {
     const load = async () => {
@@ -15,14 +17,14 @@ export default function ReportsWorkspace() {
         const data = await crmService.getCRMReportOverview(year);
         setReport(data || { totalLeads: 0, totalDeals: 0, totalRevenue: 0, monthlyBreakdown: [] });
       } catch (err) {
-        setError(err || 'Report load failed.');
+        setError((err && err.message) || 'Report load failed.');
       } finally {
         setIsLoading(false);
       }
     };
 
     load();
-  }, [year]);
+  }, [year, activeTenantId]);
 
   const peakMonth = useMemo(() => {
     return [...(report.monthlyBreakdown || [])].sort((a, b) => b.revenue - a.revenue)[0] || null;

@@ -12,24 +12,22 @@ namespace ImageProcessor.Worker
         private readonly IConsumer<string, string> _kafkaConsumer;
         private readonly string _storageRootPath;
 
-        public Worker(ILogger<Worker> logger)
+        public Worker(ILogger<Worker> logger, IConfiguration configuration)
         {
             _logger = logger;
 
-            // 1. Establish the local drive storage vaults path mapping definitions
             _storageRootPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "PropertyMediaVault");
             if (!Directory.Exists(_storageRootPath))
             {
                 Directory.CreateDirectory(_storageRootPath);
             }
 
-            // 2. Configure the background message polling properties cluster connection rules
             var consumerConfig = new ConsumerConfig
             {
-                BootstrapServers = "localhost:9092",
+                BootstrapServers = configuration["Kafka:BootstrapServers"] ?? "localhost:9092",
                 GroupId = "realestate-image-processor-group",
                 AutoOffsetReset = AutoOffsetReset.Earliest,
-                EnableAutoCommit = false // Manual commit ensures processing confirmation safety
+                EnableAutoCommit = false
             };
 
             _kafkaConsumer = new ConsumerBuilder<string, string>(consumerConfig).Build();
@@ -74,6 +72,8 @@ namespace ImageProcessor.Worker
         // --- 🖼️ GRAPHICS PROCESSING ALGORITHM: GENERATE THUMB, MEDIUM, & LARGE VARIANTS ---
         private async Task ProcessAndPersistImageVariantsAsync(PropertyImageTask task)
         {
+            _logger.LogInformation("[IMAGE PROCESSING START]: PropertyId={PropertyId} FileName={FileName} DataLength={DataLength}",
+                task.PropertyId, task.FileName, task.Base64Data?.Length ?? 0);
             try
             {
                 // 1. Convert the transmission Base64 text string safely back into raw image bytes

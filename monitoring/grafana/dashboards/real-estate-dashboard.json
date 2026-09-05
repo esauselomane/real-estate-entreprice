@@ -1,0 +1,210 @@
+{
+  "dashboard": {
+    "title": "Real Estate Platform - Service Health",
+    "uid": "real-estate-health",
+    "timezone": "browser",
+    "refresh": "15s",
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Identity Service",
+        "type": "stat",
+        "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "up{job=\"identity\"}",
+            "legendFormat": "Identity",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "value": "0", "displayText": "Down", "color": "red" },
+              { "type": "value", "value": "1", "displayText": "Up", "color": "green" }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 1, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Property Service",
+        "type": "stat",
+        "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "up{job=\"property\"}",
+            "legendFormat": "Property",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "value": "0", "displayText": "Down", "color": "red" },
+              { "type": "value", "value": "1", "displayText": "Up", "color": "green" }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 1, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "CRM Service",
+        "type": "stat",
+        "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "up{job=\"crm\"}",
+            "legendFormat": "CRM",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "value": "0", "displayText": "Down", "color": "red" },
+              { "type": "value", "value": "1", "displayText": "Up", "color": "green" }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 1, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Developer API",
+        "type": "stat",
+        "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "up{job=\"developer-api\"}",
+            "legendFormat": "Developer API",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "value": "0", "displayText": "Down", "color": "red" },
+              { "type": "value", "value": "1", "displayText": "Up", "color": "green" }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 1, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "API Gateway",
+        "type": "stat",
+        "gridPos": { "x": 0, "y": 4, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "up{job=\"gateway\"}",
+            "legendFormat": "Gateway",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "value": "0", "displayText": "Down", "color": "red" },
+              { "type": "value", "value": "1", "displayText": "Up", "color": "green" }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 1, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Client-Facing App",
+        "type": "stat",
+        "gridPos": { "x": 6, "y": 4, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "up{job=\"client-facing\"}",
+            "legendFormat": "Client-Facing",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "value": "0", "displayText": "Down", "color": "red" },
+              { "type": "value", "value": "1", "displayText": "Up", "color": "green" }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 1, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Frontend Client (Admin)",
+        "type": "stat",
+        "gridPos": { "x": 12, "y": 4, "w": 6, "h": 4 },
+        "targets": [
+          {
+            "expr": "up{job=\"frontend-client\"}",
+            "legendFormat": "Frontend Client",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "value": "0", "displayText": "Down", "color": "red" },
+              { "type": "value", "value": "1", "displayText": "Up", "color": "green" }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 1, "color": "green" }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

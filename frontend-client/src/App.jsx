@@ -1,155 +1,106 @@
-import React, { useState, useEffect } from 'react';
-import LeftSidebar from './components/ LeftSidebar.jsx';
-import PropertySearch from './components/ PropertySearch.jsx';
-import PropertyDetails from './components/ PropertyDetails.jsx';
+import { useEffect, useState } from 'react';
+import LeftSidebar from './components/LeftSidebar.jsx';
+import PropertySearch from './components/PropertySearch.jsx';
+import PropertyDetails from './components/PropertyDetails.jsx';
 import ClientDetails from './components/ClientDetails.jsx';
 import CRMWorkspace from './components/CRMWorkspace.jsx';
-import PropertyMapWorkspace from './components/ PropertyMapWorkspace.jsx';
+import PropertyMapWorkspace from './components/PropertyMapWorkspace.jsx';
 import OwnersTenantsWorkspace from './components/OwnersTenantsWorkspace.jsx';
 import ReportsWorkspace from './components/ReportsWorkspace.jsx';
 import SystemAdminWorkspace from './components/SystemAdminWorkspace.jsx';
-import BrochureBuilderWorkspace from './components/ BrochureBuilderWorkspace.jsx';
-import OperationsWorkspace from './components/OperationsWorkspace.jsx';
+import BrochureBuilderWorkspace from './components/BrochureBuilderWorkspace.jsx';
 import RoleDashboard from './components/RoleDashboard.jsx';
+import RolePermissionsPage from './components/RolePermissionsPage.jsx';
+import SetPassword from './components/SetPassword.jsx';
+import LeadsPage from './components/LeadsPage.jsx';
+import DealsPage from './components/DealsPage.jsx';
+import TenantSwitcher from './components/TenantSwitcher.jsx';
+import BrochureCartBell from './components/BrochureCartBell.jsx';
+import BrokerDashboard from './components/BrokerDashboard.jsx';
+import NotificationsBell from './components/NotificationsBell.jsx';
 
-// 🔌 Import our clean encapsulated API microservices client wrappers
-import { authService } from './services/authService.js';
-import { crmService } from './services/ crmService.js';
+import { useAuth } from './contexts/AuthContext.jsx';
+import { useAppUi } from './contexts/AppUiContext.jsx';
+import { useAgency } from './contexts/AgencyContext.jsx';
+import { usePermission } from './contexts/PermissionContext.jsx';
+import { useTenant } from './contexts/TenantContext.jsx';
+import { isTrialUser, getTrialExpiry } from './services/authService.js';
+import './index.css';
 
 export default function App() {
-  const normalizeRole = (role) => ({ SuperAdmin: 'PlatformAdmin', Manager: 'AgencyAdmin', Agent: 'Broker', Admin: 'AgencyAdmin' }[role] || role || 'Broker');
-  // Authentication session parameters
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userRole, setUserRole] = useState('Agent'); 
-  const [activeProfile, setActiveProfile] = useState(null);
-  const [isRegistering, setIsRegistering] = useState(false);
-  
-  // Login input states
+  const {
+    isLoggedIn,
+    userRole,
+    isRegistering,
+    errorMessage,
+    isConnecting,
+    login,
+    register,
+    setRegistering,
+  } = useAuth();
+
+  const {
+    currentView,
+    selectedPropertyId,
+    selectedClientData,
+    activeBrochureDealTarget,
+    navigateTo,
+    selectProperty,
+    navigateToClient,
+    clearBrochureDealTarget,
+  } = useAppUi();
+
+  const { currentAgency } = useAgency();
+  const { hasPermission } = usePermission();
+  const { isAllTenants } = useTenant();
+
+  const activationToken = !isLoggedIn ? new URLSearchParams(window.location.search).get('token') : null;
+
+  const handlePasswordSet = () => {
+    window.location.href = window.location.pathname;
+  };
+
+  // --- Login form local bindings (form-specific, not shared app state) ---
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
+  // --- Register form local bindings ---
   const [registerName, setRegisterName] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [registerRole, setRegisterRole] = useState('Broker');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [isConnecting, setIsConnecting] = useState(false);
-
-  // 🧭 System central sub-view workspace routing state parameters
-  const [currentView, setCurrentView] = useState('dashboard');
-  const [selectedPropertyId, setSelectedPropertyId] = useState(null);
-  const [selectedClientData, setSelectedClientData] = useState({ id: null, type: '', name: '' });
-  const [selectedWorkspace, setSelectedWorkspace] = useState('properties');
-
-  // Multi-tenant profile configurations synchronized from response envelopes
-  const [currentAgency, setCurrentAgency] = useState({
-    name: "Resolving Workspace...",
-    logoInitials: ".."
-  });
-
-  const [activeBrochureDealTarget, setActiveBrochureDealTarget] = useState(null);
-
-
-  // 🔄 LIFECYCLE RECOVERY: Restores user login session records upon browser tab reloads
-  useEffect(() => {
-    const rawSavedProfile = localStorage.getItem('user_profile_data');
-    const storedToken = localStorage.getItem('user_session_jwt');
-    
-    if (rawSavedProfile && storedToken) {
-      const parsedProfile = JSON.parse(rawSavedProfile);
-      setActiveProfile(parsedProfile);
-      setUserRole(normalizeRole(parsedProfile.role));
-      setActiveProfile({ ...parsedProfile, role: normalizeRole(parsedProfile.role) });
-      setIsLoggedIn(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!activeProfile?.tenantId) return;
-    crmService.getAgencies().then((agencies) => {
-      const agency = (agencies || []).find((item) => item.agencyId === activeProfile.tenantId) || agencies?.[0];
-      if (agency) setCurrentAgency({
-        name: agency.name,
-        logoInitials: agency.name.split(/\s+/).map((word) => word[0]).join('').slice(0, 3).toUpperCase()
-      });
-    }).catch(() => setCurrentAgency({ name: activeProfile.tenantId, logoInitials: activeProfile.tenantId.slice(-3) }));
-  }, [activeProfile]);
-
-  const handleSelectProperty = (propertyId) => {
-    setSelectedPropertyId(propertyId);
-    setCurrentView('details');
-  };
-
-  const handleNavigateToClient = (clientOrId, type, name) => {
-    if (clientOrId && typeof clientOrId === 'object') {
-      setSelectedClientData({
-        id: clientOrId.id || '',
-        type: clientOrId.type || 'Client',
-        name: clientOrId.name || 'Client Profile'
-      });
-    } else {
-      setSelectedClientData({
-        id: clientOrId || '',
-        type: type || 'Client',
-        name: name || 'Client Profile'
-      });
-    }
-    setCurrentView('client');
-  };
-
-  const userRoleProfile = userRole;
-
-  const navigateTo = (view) => {
-    setActiveBrochureDealTarget(null);
-    setCurrentView(view);
-  };
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    setErrorMessage('');
-    setIsConnecting(true);
-
     try {
-      const loginPayload = await authService.login(email, password);
-      const normalizedProfile = { ...loginPayload.profile, role: normalizeRole(loginPayload.profile.role) };
-      setActiveProfile(normalizedProfile);
-      setUserRole(normalizedProfile.role);
-      
-      setIsLoggedIn(true);
-    } catch (err) {
-      setErrorMessage(err || 'Connection timed out. Ensure your Ocelot gateway service container is active.');
-    } finally {
-      setIsConnecting(false);
-    }
+      await login(email, password);
+    } catch { /* error handled in AuthContext */ }
   };
 
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
-    setErrorMessage('');
-    setIsConnecting(true);
-
     try {
-      await authService.registerUser({
-        fullName: registerName,
-        email: registerEmail,
-        passwordHash: registerPassword,
-        systemRole: registerRole,
-        tenantId: 'TEN-001'
-      });
-
-      setIsRegistering(false);
-      setEmail(registerEmail);
-      setPassword(registerPassword);
-      setErrorMessage('Registration successful. You can now sign in.');
-      setRegisterName('');
-      setRegisterEmail('');
-      setRegisterPassword('');
-      setRegisterRole('Broker');
-    } catch (err) {
-      setErrorMessage(err || 'Registration failed. Please try again.');
-    } finally {
-      setIsConnecting(false);
-    }
+      await register(registerName, registerEmail, registerPassword, registerRole);
+    } catch { /* error handled in AuthContext */ }
   };
+
+  // 🛡️ Brokers default to the Broker Dashboard on first login. The other
+  // roles stay on the generic Role Dashboard. Declared ABOVE the early
+  // returns so the hook order is stable across auth→app transitions (rules
+  // of hooks). The effect is guarded inside the body — it only navigates
+  // when the user is a Broker still sitting on the default dashboard.
+  useEffect(() => {
+    if (isLoggedIn && userRole === 'Broker' && currentView === 'dashboard') {
+      navigateTo('broker-dashboard');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn]);
+
+  // 0. ACTIVATION GATE: If not logged in but a token query param is present, show set-password
+  if (!isLoggedIn && activationToken) {
+    return <SetPassword activationToken={activationToken} onPasswordSet={handlePasswordSet} />;
+  }
+
   // 1. GATEWAY SCREEN VIEW: Render security login card layout if unauthenticated
   if (!isLoggedIn) {
     return (
@@ -160,7 +111,7 @@ export default function App() {
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none"></div>
 
         {/* Premium Animated Rotating Card Container */}
-        <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-8 rounded-2xl shadow-2xl shadow-black/50 animate-spin-twice">
+        <div className="card w-full max-w-md">
           
           {/* Logo and Greeting Header */}
           <div className="text-center mb-8">
@@ -176,21 +127,22 @@ export default function App() {
           <div className="flex rounded-xl border border-slate-700 bg-slate-950/50 p-1 mb-6">
             <button
               type="button"
-              onClick={() => setIsRegistering(false)}
-              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${!isRegistering ? 'bg-blue-600 text-white' : 'text-slate-300'}`}
+              onClick={() => setRegistering(false)}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition btn-primary`}
             >
               Sign In
             </button>
             <button
               type="button"
-              onClick={() => setIsRegistering(true)}
-              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition ${isRegistering ? 'bg-blue-600 text-white' : 'text-slate-300'}`}
+              onClick={() => setRegistering(true)}
+              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition text-slate-300 hover:text-white hidden`}
             >
               Register
             </button>
           </div>
 
-          {isRegistering ? (
+          {/* eslint-disable no-constant-condition, no-constant-binary-expression */}
+          {false && isRegistering ? (
             <form onSubmit={handleRegisterSubmit} className="space-y-5">
               {errorMessage && (
                 <div className={`p-3 rounded-xl text-xs font-medium ${errorMessage.includes('successful') ? 'bg-emerald-950/40 border border-emerald-900 text-emerald-400' : 'bg-red-950/40 border border-red-900 text-red-400'} animate-pulse`}>
@@ -222,9 +174,9 @@ export default function App() {
                 </select>
               </div>
 
-              <button type="submit" disabled={isConnecting} className="w-full py-3 mt-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:bg-emerald-800 disabled:text-slate-400 text-white font-semibold rounded-xl shadow-lg shadow-emerald-600/20 hover:shadow-emerald-500/30 transition-all duration-200 cursor-pointer">
+               <button type="submit" disabled={isConnecting} className="btn-success">
                 {isConnecting ? 'Creating Account...' : 'Create Account'}
-              </button>
+               </button>
             </form>
           ) : (
             <form onSubmit={handleLoginSubmit} className="space-y-5">
@@ -251,7 +203,7 @@ export default function App() {
 
               <button
                 type="submit" disabled={isConnecting}
-                className="w-full py-3 mt-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:bg-blue-800 disabled:text-slate-400 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/20 hover:shadow-blue-500/30 transition-all duration-200 cursor-pointer"
+                className="btn-primary"
               >
                 {isConnecting ? "Validating Tokens..." : "Sign In to Dashboard"}
               </button>
@@ -265,14 +217,15 @@ export default function App() {
 
         </div>
       </div>
-    );
+     );
   }
+
   // 2. MAIN SYSTEM DASHBOARD VIEW: Render workspace layers after successful authentication
   return (
     <div className="flex bg-slate-950 min-h-screen text-slate-100">
-      
+
       {/* 🧭 Collapsible Side Navigation Drawer Shell */}
-      <LeftSidebar userRole={userRole} currentAgency={currentAgency} activeProfile={activeProfile} onLogout={authService.logout} currentView={currentView} onNavigate={navigateTo} />
+      <LeftSidebar />
 
       {/* 📊 Main Dynamic Workspace Content Window Canvas */}
       <div className="flex-1 p-8 overflow-y-auto max-h-screen">
@@ -281,107 +234,74 @@ export default function App() {
             <h2 className="text-2xl font-bold text-white tracking-tight">
               {currentView === 'search' && "Property Asset Registry"}
               {currentView === 'dashboard' && "Role Dashboard"}
+              {currentView === 'broker-dashboard' && "Broker Dashboard"}
               {currentView === 'details' && "Asset Portfolio Insights"}
               {currentView === 'client' && "Legal Entity Dossier"}
               {currentView === 'crm' && "Corporate CRM Pipeline"}
               {currentView === 'owners-tenants' && "Owner & Tenant Directory"}
               {currentView === 'reports' && "Performance Reports"}
               {currentView === 'map' && "Property Map"}
-              {currentView === 'operations' && "Property Operations"}
               {currentView === 'admin' && "SuperAdmin Control Board"}
+              {currentView === 'roles' && "Role & Permission Management"}
             </h2>
-            <p className="text-slate-400 text-sm">Multi-tenant spatial intelligence portal for {currentAgency.name}</p>
+            <p className="text-slate-400 text-sm">
+              {isAllTenants
+                ? 'Multi-tenant spatial intelligence portal — viewing all tenants'
+                : `Multi-tenant spatial intelligence portal for ${currentAgency.name}`}
+            </p>
           </div>
-          
-          {/* Quick Action Navigation Testing Hub & Active Module Selector Bar */}
           <div className="flex items-center gap-3">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-1.5 flex gap-1 shadow-md flex-wrap">
-              <button
-                onClick={() => navigateTo('search')}
-                type="button"
-                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'search' || currentView === 'details' || currentView === 'client' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Properties
-              </button>
-              <button 
-                onClick={() => navigateTo('map')}
-                type="button"
-                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'map' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Property Map
-              </button>
-              <button 
-                onClick={() => navigateTo('crm')}
-                type="button"
-                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'crm' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Leads & CRM
-              </button>
-              <button 
-                onClick={() => navigateTo('owners-tenants')}
-                type="button"
-                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'owners-tenants' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Owners/Tenants
-              </button>
-              <button 
-                onClick={() => navigateTo('reports')}
-                type="button"
-                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'reports' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Reports
-              </button>
-              <button
-                onClick={() => navigateTo('operations')}
-                type="button"
-                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'operations' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Operations
-              </button>
-              {(userRole === 'PlatformAdmin' || userRole === 'AgencyAdmin') && (
-                <button 
-                  onClick={() => navigateTo('admin')}
-                  type="button"
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${currentView === 'admin' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                >
-                  System Admin
-                </button>
-              )}
-            </div>
-
-            {/* Profile Action Indicator with Dynamic Sign Out Handle Trigger */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-2 flex items-center gap-3 shadow-md">
-              <div className="flex flex-col text-right">
-                <span className="text-xs text-white font-bold">{activeProfile?.name || "Agent Session"}</span>
-                <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">{userRole} Scope</span>
-              </div>
-              <button
-                onClick={() => authService.logout()}
-                type="button"
-                className="text-xs bg-slate-950 border border-slate-700 hover:bg-red-950/20 hover:text-red-400 font-semibold px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
-              >
-                Sign Out
-              </button>
-            </div>
+            <NotificationsBell />
+            <BrochureCartBell />
+            <TenantSwitcher />
           </div>
         </header>
 
+        {/* 🎯 TRIAL BANNER — prominently shown at the top for trial accounts */}
+        {isTrialUser() && (() => {
+          const expiry = getTrialExpiry();
+          const isExpired = expiry && new Date(expiry) < new Date();
+          const formatted = expiry ? new Date(expiry).toLocaleDateString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric' }) : 'soon';
+          return (
+            <div className={`mb-6 p-4 rounded-2xl border flex items-center gap-3 ${
+              isExpired
+                ? 'bg-red-950/40 border-red-800 text-red-200'
+                : 'bg-amber-950/40 border-amber-700 text-amber-200'
+            }`}>
+              <div className={`text-2xl ${isExpired ? 'text-red-400' : 'text-amber-400'}`}>⚠️</div>
+              <div className="flex-1">
+                <p className="text-sm font-bold uppercase tracking-wider">
+                  {isExpired ? 'Trial Expired' : 'Trial Period Active'}
+                </p>
+                <p className="text-xs opacity-90">
+                  {isExpired
+                    ? 'Your trial has ended. Please contact support to upgrade.'
+                    : `Your 14-day free trial expires on ${formatted}.`}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ⚙️ Dynamic UI view routing execution conditional dispatcher matrices */}
-        {currentView === 'dashboard' && <RoleDashboard profile={activeProfile} onNavigate={navigateTo} />}
+        {currentView === 'broker-dashboard' && <BrokerDashboard />}
+        {currentView === 'dashboard' && <RoleDashboard />}
+
         {currentView === 'search' && (
-          <PropertySearch onSelectProperty={handleSelectProperty} />
+          <PropertySearch onSelectProperty={selectProperty} />
         )}
 
         {currentView === 'crm' && activeBrochureDealTarget ? (
           <BrochureBuilderWorkspace 
             dealData={activeBrochureDealTarget} 
-            onBack={() => setActiveBrochureDealTarget(null)} 
+            onBack={clearBrochureDealTarget} 
           />
         ) : currentView === 'crm' ? (
-          <CRMWorkspace 
-            currentUserRole={userRoleProfile}
-            onOpenBrochureBuilder={(deal) => setActiveBrochureDealTarget(deal)} 
-          />
+          <CRMWorkspace />
+        ) : currentView === 'leads' ? (
+          <LeadsPage />
+        ) : currentView === 'deals' ? (
+          <DealsPage />
         ) : null}
 
         {currentView === 'owners-tenants' && (
@@ -393,18 +313,14 @@ export default function App() {
         )}
 
         {currentView === 'map' && (
-          <PropertyMapWorkspace />
-        )}
-
-        {currentView === 'operations' && (
-          <OperationsWorkspace />
+          <PropertyMapWorkspace onSelectProperty={selectProperty} />
         )}
 
         {currentView === 'details' && (
           <PropertyDetails 
             propertyId={selectedPropertyId} 
-            onBack={() => setCurrentView('search')} 
-            onNavigateToClient={handleNavigateToClient}
+            onBack={() => navigateTo('search')} 
+            onNavigateToClient={navigateToClient}
           />
         )}
 
@@ -413,12 +329,15 @@ export default function App() {
             clientId={selectedClientData.id}
             clientType={selectedClientData.type}
             clientName={selectedClientData.name}
-            onBack={() => setCurrentView('details')}
+            onBack={() => navigateTo('details')}
           />
         )}
 
-        {currentView === 'admin' && (userRole === 'PlatformAdmin' || userRole === 'AgencyAdmin') && (
+        {currentView === 'admin' && hasPermission('agencies:view') && (
           <SystemAdminWorkspace />
+        )}
+        {currentView === 'roles' && hasPermission('system:roles:manage') && (
+          <RolePermissionsPage />
         )}
       </div>
 

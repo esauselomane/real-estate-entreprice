@@ -9,7 +9,7 @@ echo "🔄 RESTARTING FULL REAL ESTATE ECOSYSTEM"
 echo "===================================================="
 
 echo "Stopping any processes still bound to app ports..."
-for port in 5000 5001 5002 5003 5173; do
+for port in 3000 5000 5001 5002 5003 5173; do
   pids=$(lsof -ti tcp:"$port" 2>/dev/null || true)
   if [ -n "$pids" ]; then
     echo "  -> killing processes on port $port: $pids"
@@ -20,6 +20,7 @@ done
 pkill -f 'dotnet run' || true
 pkill -f 'vite' || true
 pkill -f 'npm run dev' || true
+pkill -f 'next dev' || true
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   echo "Docker daemon is not running or Docker Desktop is not started."
@@ -79,13 +80,14 @@ echo "Starting backend services..."
 
 echo "Starting frontend..."
 (cd frontend-client && nohup npm run dev -- --host 0.0.0.0 >/tmp/vite.log 2>&1 &)
+(cd client-facing-app && nohup npm run dev -- -p 3000 >/tmp/client_facing.log 2>&1 &)
 
 echo "Waiting for gateway and frontend to respond..."
 started=false
 for _ in {1..80}; do
-  if curl -s http://localhost:5000 >/dev/null 2>&1 && curl -s http://localhost:5173 >/dev/null 2>&1; then
+  if curl -s http://localhost:5000 >/dev/null 2>&1 && curl -s http://localhost:5173 >/dev/null 2>&1 && curl -s http://localhost:3000 >/dev/null 2>&1; then
     started=true
-    echo "✅ Gateway and frontend are live."
+    echo "✅ Gateway and frontends are live."
     break
   fi
   sleep 1
@@ -101,6 +103,9 @@ curl -I http://localhost:5000 2>/dev/null || true
 
 echo "--- frontend status ---"
 curl -I http://localhost:5173 2>/dev/null || true
+
+echo "--- client-facing app status ---"
+curl -I http://localhost:3000 2>/dev/null || true
 
 echo "===================================================="
 echo "🎉 RESTART SCRIPT COMPLETE"
