@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { DollarSign, TrendingUp, UserPlus, User, Loader2, Building2, Edit2, Search } from 'lucide-react';
+import { Banknote, TrendingUp, UserPlus, User, Loader2, Building2, Edit2, Search } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import Can from '../components/Can.jsx';
+import SearchableSelect from '../components/SearchableSelect.jsx';
 
 export default function CRMWorkspace() {
   const { hasPermission } = usePermission();
@@ -23,10 +24,21 @@ export default function CRMWorkspace() {
   const [editingCompany, setEditingCompany] = useState(null);
   const [editingLegalEntity, setEditingLegalEntity] = useState(null);
   const [editingContact, setEditingContact] = useState(null);
+  const [isCompanyFormOpen, setIsCompanyFormOpen] = useState(false);
+  const [isLegalEntityFormOpen, setIsLegalEntityFormOpen] = useState(false);
   const [isContactFormOpen, setIsContactFormOpen] = useState(false);
+  const [companyForm, setCompanyForm] = useState({
+    businessName: '', registrationNumber: '', vatNumber: '', corporateWebsite: '',
+    headOfficeAddress: '', corporateCreditLimit: 0, industryVertical: 'Real Estate Investment',
+    associatedLegalEntityId: ''
+  });
+  const [legalEntityForm, setLegalEntityForm] = useState({
+    registeredLegalName: '', associatedCompanyId: '', entityTypeClassifier: 'Private Company',
+    taxRegistrationIndex: '', deedsOfficeIdentifier: ''
+  });
   const [contactForm, setContactForm] = useState({
     fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
-    contactRoleType: 'Buyer', associatedCompanyId: '', associatedLegalEntityId: '',
+    contactRoleType: 'Buyer', associatedCompanyId: '',
     linkedDealIds: '', area: '', budget: ''
   });
 
@@ -44,15 +56,19 @@ export default function CRMWorkspace() {
         crmService.getActiveBrochureCards().catch(() => [])
       ]);
 
-      if (activeTab === 'companies') {
-        const res = await crmService.getCompanies();
-        setCompanies((res || []).items || (res || []));
-        setCompaniesTotalCount((res || []).totalCount || 0);
-      } else if (activeTab === 'legalEntities') {
-        const res = await crmService.getLegalEntities();
-        setLegalEntities((res || []).items || (res || []));
-        setLegalEntitiesTotalCount((res || []).totalCount || 0);
-      } else if (activeTab === 'contacts') {
+      // Companies + legal entities are always loaded so the inline create
+      // pickers and the contact form's company autocomplete always have a
+      // source list to resolve the currently-linked record's display name.
+      const [companiesRes, legalRes] = await Promise.all([
+        crmService.getCompanies(),
+        crmService.getLegalEntities()
+      ]);
+      setCompanies((companiesRes || []).items || (companiesRes || []));
+      setCompaniesTotalCount((companiesRes || []).totalCount || 0);
+      setLegalEntities((legalRes || []).items || (legalRes || []));
+      setLegalEntitiesTotalCount((legalRes || []).totalCount || 0);
+
+      if (activeTab === 'contacts') {
         const res = await crmService.getContacts();
         setContacts((res || []).items || (res || []));
         setContactsTotalCount((res || []).totalCount || 0);
@@ -124,8 +140,13 @@ export default function CRMWorkspace() {
     e.preventDefault();
     if (!editingContact) return;
     try {
+      // The contact's legal entity is derived from its company (the backend
+      // infers/clears AssociatedLegalEntityId from AssociatedCompanyId), so we
+      // never forward a stale legal-entity id from the hydrated edit record.
+      const { associatedLegalEntityId, ...contactPayload } = editingContact;
       await crmService.updateContact({
-        ...editingContact,
+        ...contactPayload,
+        associatedLegalEntityId: '',
         linkedDealIds: editingContact.linkedDealIds || ''
       });
       setEditingContact(null);
@@ -144,13 +165,44 @@ export default function CRMWorkspace() {
       });
       setContactForm({
         fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
-        contactRoleType: 'Buyer', associatedCompanyId: '', associatedLegalEntityId: '',
+        contactRoleType: 'Buyer', associatedCompanyId: '',
         linkedDealIds: '', area: '', budget: ''
       });
       setIsContactFormOpen(false);
       await loadActiveWorkspaceData();
     } catch (err) {
       alert(err || 'Failed to create contact.');
+    }
+  };
+
+  const handleCreateCompany = async (e) => {
+    e.preventDefault();
+    try {
+      await crmService.createCompany(companyForm);
+      setCompanyForm({
+        businessName: '', registrationNumber: '', vatNumber: '', corporateWebsite: '',
+        headOfficeAddress: '', corporateCreditLimit: 0, industryVertical: 'Real Estate Investment',
+        associatedLegalEntityId: ''
+      });
+      setIsCompanyFormOpen(false);
+      await loadActiveWorkspaceData();
+    } catch (err) {
+      alert(err || 'Failed to create company.');
+    }
+  };
+
+  const handleCreateLegalEntity = async (e) => {
+    e.preventDefault();
+    try {
+      await crmService.createLegalEntity(legalEntityForm);
+      setLegalEntityForm({
+        registeredLegalName: '', associatedCompanyId: '', entityTypeClassifier: 'Private Company',
+        taxRegistrationIndex: '', deedsOfficeIdentifier: ''
+      });
+      setIsLegalEntityFormOpen(false);
+      await loadActiveWorkspaceData();
+    } catch (err) {
+      alert(err || 'Failed to create legal entity.');
     }
   };
 
@@ -193,7 +245,7 @@ export default function CRMWorkspace() {
             <span className="text-2xl font-black text-emerald-400 mt-1 block">R {summaryReport.totalPipelineEstimatedValue.toLocaleString()}</span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-emerald-950/40 border border-emerald-900 flex items-center justify-center text-emerald-400">
-            <DollarSign size={18} />
+            <Banknote size={18} />
           </div>
         </div>
       </div>
@@ -244,24 +296,164 @@ export default function CRMWorkspace() {
       ) : (
         <div className="space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
-            <Can permission="users:create">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsContactFormOpen(!isContactFormOpen);
-                  if (!isContactFormOpen) {
-                    setContactForm({
-                      fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
-                      contactRoleType: 'Buyer', associatedCompanyId: '', associatedLegalEntityId: '',
-                      linkedDealIds: '', area: '', budget: ''
-                    });
-                  }
-                }}
-                className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white cursor-pointer"
-              >
-                <UserPlus size={14} /> New Contact {isContactFormOpen ? '▲' : '▼'}
-              </button>
-            </Can>
+            <div className="flex flex-wrap items-center gap-2">
+              {activeTab === 'companies' && (
+                <Can permission="agencies:create">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCompanyFormOpen(!isCompanyFormOpen);
+                      if (!isCompanyFormOpen) {
+                        setCompanyForm({
+                          businessName: '', registrationNumber: '', vatNumber: '', corporateWebsite: '',
+                          headOfficeAddress: '', corporateCreditLimit: 0, industryVertical: 'Real Estate Investment',
+                          associatedLegalEntityId: ''
+                        });
+                      }
+                    }}
+                    className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white cursor-pointer"
+                  >
+                    <Building2 size={14} /> Add Company {isCompanyFormOpen ? '▲' : '▼'}
+                  </button>
+                </Can>
+              )}
+              {activeTab === 'legalEntities' && (
+                <Can permission="agencies:create">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsLegalEntityFormOpen(!isLegalEntityFormOpen);
+                      if (!isLegalEntityFormOpen) {
+                        setLegalEntityForm({
+                          registeredLegalName: '', associatedCompanyId: '', entityTypeClassifier: 'Private Company',
+                          taxRegistrationIndex: '', deedsOfficeIdentifier: ''
+                        });
+                      }
+                    }}
+                    className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white cursor-pointer"
+                  >
+                    <Banknote size={14} /> Add Legal Entity {isLegalEntityFormOpen ? '▲' : '▼'}
+                  </button>
+                </Can>
+              )}
+              {activeTab === 'contacts' && (
+                <Can permission="users:create">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsContactFormOpen(!isContactFormOpen);
+                      if (!isContactFormOpen) {
+                        setContactForm({
+                          fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
+                          contactRoleType: 'Buyer', associatedCompanyId: '',
+                          linkedDealIds: '', area: '', budget: ''
+                        });
+                      }
+                    }}
+                    className="flex items-center gap-2 text-xs font-bold text-slate-300 hover:text-white cursor-pointer"
+                  >
+                    <UserPlus size={14} /> New Contact {isContactFormOpen ? '▲' : '▼'}
+                  </button>
+                </Can>
+              )}
+            </div>
+            {isCompanyFormOpen && (
+              <form onSubmit={handleCreateCompany} className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Business Operating Name</label><input required type="text" value={companyForm.businessName} onChange={(e) => setCompanyForm({ ...companyForm, businessName: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Registration No</label><input type="text" value={companyForm.registrationNumber} onChange={(e) => setCompanyForm({ ...companyForm, registrationNumber: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">VAT Number</label><input type="text" value={companyForm.vatNumber} onChange={(e) => setCompanyForm({ ...companyForm, vatNumber: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Website</label><input type="text" value={companyForm.corporateWebsite} onChange={(e) => setCompanyForm({ ...companyForm, corporateWebsite: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Head Office Address</label><input type="text" value={companyForm.headOfficeAddress} onChange={(e) => setCompanyForm({ ...companyForm, headOfficeAddress: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Credit Limit</label><input type="number" value={companyForm.corporateCreditLimit} onChange={(e) => setCompanyForm({ ...companyForm, corporateCreditLimit: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Industry Vertical</label><input type="text" value={companyForm.industryVertical} onChange={(e) => setCompanyForm({ ...companyForm, industryVertical: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1 lg:col-span-3">
+                  <label className="text-[10px] text-slate-400 uppercase">Parent Legal Entity</label>
+                  <SearchableSelect
+                    placeholder="Search legal entities..."
+                    value={legalEntities.find((l) => l.legalEntityId === companyForm.associatedLegalEntityId) || null}
+                    onChange={(obj) => setCompanyForm({ ...companyForm, associatedLegalEntityId: obj?.legalEntityId || '' })}
+                    onSearch={crmService.searchLegalEntities}
+                    itemKey={(l) => l.legalEntityId}
+                    itemLabel={(l) => l.registeredLegalName}
+                    itemSubtext={(l) => l.taxRegistrationIndex}
+                    emptyMessage="No legal entities match."
+                  />
+                </div>
+                <div className="lg:col-span-3 flex gap-3 pt-1"><button type="submit" className="py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer">Create Company</button><button type="button" onClick={() => setIsCompanyFormOpen(false)} className="py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl border border-slate-800 cursor-pointer">Cancel</button></div>
+              </form>
+            )}
+
+            {isLegalEntityFormOpen && (
+              <form onSubmit={handleCreateLegalEntity} className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Registered Legal Name</label><input required type="text" value={legalEntityForm.registeredLegalName} onChange={(e) => setLegalEntityForm({ ...legalEntityForm, registeredLegalName: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-[10px] text-slate-400 uppercase">Company</label>
+                  <SearchableSelect
+                    placeholder="Search companies..."
+                    value={companies.find((c) => c.companyId === legalEntityForm.associatedCompanyId) || null}
+                    onChange={(obj) => setLegalEntityForm({ ...legalEntityForm, associatedCompanyId: obj?.companyId || '' })}
+                    onSearch={crmService.searchCompanies}
+                    itemKey={(c) => c.companyId}
+                    itemLabel={(c) => c.businessName}
+                    itemSubtext={(c) => c.registrationNumber}
+                    emptyMessage="No companies match."
+                  />
+                </div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Entity Type</label><select value={legalEntityForm.entityTypeClassifier} onChange={(e) => setLegalEntityForm({ ...legalEntityForm, entityTypeClassifier: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option>Private Company</option><option>Public Company</option><option>Partnership</option><option>Trust</option><option>Non-Profit Company</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Tax Registration Index</label><input type="text" value={legalEntityForm.taxRegistrationIndex} onChange={(e) => setLegalEntityForm({ ...legalEntityForm, taxRegistrationIndex: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Deeds Office Identifier</label><input type="text" value={legalEntityForm.deedsOfficeIdentifier} onChange={(e) => setLegalEntityForm({ ...legalEntityForm, deedsOfficeIdentifier: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="lg:col-span-3 flex gap-3 pt-1"><button type="submit" className="py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer">Create Legal Entity</button><button type="button" onClick={() => setIsLegalEntityFormOpen(false)} className="py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl border border-slate-800 cursor-pointer">Cancel</button></div>
+              </form>
+            )}
+
+            {isCompanyFormOpen && (
+              <form onSubmit={handleCreateCompany} className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Business Name</label><input required type="text" value={companyForm.businessName} onChange={(e) => setCompanyForm({ ...companyForm, businessName: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Registration No</label><input type="text" value={companyForm.registrationNumber} onChange={(e) => setCompanyForm({ ...companyForm, registrationNumber: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">VAT Number</label><input type="text" value={companyForm.vatNumber} onChange={(e) => setCompanyForm({ ...companyForm, vatNumber: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Corporate Website</label><input type="text" placeholder="https://..." value={companyForm.corporateWebsite} onChange={(e) => setCompanyForm({ ...companyForm, corporateWebsite: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Head Office Address</label><input type="text" value={companyForm.headOfficeAddress} onChange={(e) => setCompanyForm({ ...companyForm, headOfficeAddress: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Credit Limit</label><input type="number" min="0" value={companyForm.corporateCreditLimit} onChange={(e) => setCompanyForm({ ...companyForm, corporateCreditLimit: parseFloat(e.target.value) || 0 })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1 lg:col-span-2"><label className="text-[10px] text-slate-400 uppercase">Industry Vertical</label><input type="text" value={companyForm.industryVertical} onChange={(e) => setCompanyForm({ ...companyForm, industryVertical: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1 lg:col-span-3">
+                  <label className="text-[10px] text-slate-400 uppercase">Parent Legal Entity</label>
+                  <SearchableSelect
+                    placeholder="Search legal entities..."
+                    value={legalEntities.find((l) => l.legalEntityId === companyForm.associatedLegalEntityId) || null}
+                    onChange={(obj) => setCompanyForm({ ...companyForm, associatedLegalEntityId: obj?.legalEntityId || '' })}
+                    onSearch={crmService.searchLegalEntities}
+                    itemKey={(l) => l.legalEntityId}
+                    itemLabel={(l) => l.registeredLegalName}
+                    itemSubtext={(l) => l.taxRegistrationIndex}
+                    emptyMessage="No legal entities match."
+                  />
+                </div>
+                <div className="lg:col-span-3 flex gap-3 pt-1"><button type="submit" className="py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer">Create Company</button><button type="button" onClick={() => setIsCompanyFormOpen(false)} className="py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl border border-slate-800 cursor-pointer">Cancel</button></div>
+              </form>
+            )}
+
+            {isLegalEntityFormOpen && (
+              <form onSubmit={handleCreateLegalEntity} className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Registered Legal Name</label><input required type="text" value={legalEntityForm.registeredLegalName} onChange={(e) => setLegalEntityForm({ ...legalEntityForm, registeredLegalName: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Parent Company</label>
+                  <SearchableSelect
+                    placeholder="Search companies..."
+                    value={companies.find((c) => c.companyId === legalEntityForm.associatedCompanyId) || null}
+                    onChange={(obj) => setLegalEntityForm({ ...legalEntityForm, associatedCompanyId: obj?.companyId || '' })}
+                    onSearch={crmService.searchCompanies}
+                    itemKey={(c) => c.companyId}
+                    itemLabel={(c) => c.businessName}
+                    itemSubtext={(c) => c.registrationNumber}
+                    emptyMessage="No companies match."
+                  />
+                </div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Entity Type</label><select value={legalEntityForm.entityTypeClassifier} onChange={(e) => setLegalEntityForm({ ...legalEntityForm, entityTypeClassifier: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option>Private Company</option><option>Public Company</option><option>Partnership</option><option>Trust</option><option>Non-Profit Company</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Tax Registration Index</label><input type="text" value={legalEntityForm.taxRegistrationIndex} onChange={(e) => setLegalEntityForm({ ...legalEntityForm, taxRegistrationIndex: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Deeds Office Identifier</label><input type="text" value={legalEntityForm.deedsOfficeIdentifier} onChange={(e) => setLegalEntityForm({ ...legalEntityForm, deedsOfficeIdentifier: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="lg:col-span-3 flex gap-3 pt-1"><button type="submit" className="py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer">Create Legal Entity</button><button type="button" onClick={() => setIsLegalEntityFormOpen(false)} className="py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl border border-slate-800 cursor-pointer">Cancel</button></div>
+              </form>
+            )}
+
             {isContactFormOpen && (
               <form onSubmit={handleCreateContact} className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in">
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Full Name</label><input required type="text" value={contactForm.fullName} onChange={(e) => setContactForm({ ...contactForm, fullName: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
@@ -409,6 +601,35 @@ export default function CRMWorkspace() {
                   />
                 </div>
               </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Legal Entity</label>
+                <SearchableSelect
+                  placeholder="Search legal entities..."
+                  value={legalEntities.find((l) => l.legalEntityId === editingCompany.associatedLegalEntityId) || null}
+                  onChange={(obj) => setEditingCompany({ ...editingCompany, associatedLegalEntityId: obj?.legalEntityId || '' })}
+                  onSearch={crmService.searchLegalEntities}
+                  itemKey={(l) => l.legalEntityId}
+                  itemLabel={(l) => l.registeredLegalName}
+                  itemSubtext={(l) => l.taxRegistrationIndex}
+                  emptyMessage="No legal entities match."
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Legal Entity</label>
+                <SearchableSelect
+                  placeholder="Search legal entities..."
+                  value={legalEntities.find((l) => l.legalEntityId === editingCompany.associatedLegalEntityId) || null}
+                  onChange={(obj) => setEditingCompany({ ...editingCompany, associatedLegalEntityId: obj?.legalEntityId || '' })}
+                  onSearch={crmService.searchLegalEntities}
+                  itemKey={(l) => l.legalEntityId}
+                  itemLabel={(l) => l.registeredLegalName}
+                  itemSubtext={(l) => l.taxRegistrationIndex}
+                  emptyMessage="No legal entities match."
+                />
+                {editingCompany.associatedLegalEntityId && !legalEntities.find((l) => l.legalEntityId === editingCompany.associatedLegalEntityId) && (
+                  <p className="text-[10px] text-slate-500">Linked: {editingCompany.associatedLegalEntityId}</p>
+                )}
+              </div>
               <div className="flex gap-3 pt-3">
                 <button type="button" onClick={() => setEditingCompany(null)} className="flex-1 py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 text-xs font-bold rounded-xl border border-slate-800 cursor-pointer">Cancel</button>
                 <Can permission="agencies:edit">
@@ -435,8 +656,18 @@ export default function CRMWorkspace() {
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Role Type</label><select value={editingContact ? editingContact.contactRoleType : contactForm.contactRoleType} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, contactRoleType: e.target.value }) : setContactForm({ ...contactForm, contactRoleType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option>Buyer</option><option>Seller</option><option>Broker</option></select></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Preferred Area</label><input type="text" placeholder="e.g. Sandton" value={editingContact ? (editingContact.area || '') : contactForm.area} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, area: e.target.value }) : setContactForm({ ...contactForm, area: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Budget</label><input type="text" placeholder="e.g. R 1.5M - 2M" value={editingContact ? (editingContact.budget || '') : contactForm.budget} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, budget: e.target.value }) : setContactForm({ ...contactForm, budget: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Company</label><select value={editingContact ? editingContact.associatedCompanyId || '' : contactForm.associatedCompanyId} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, associatedCompanyId: e.target.value }) : setContactForm({ ...contactForm, associatedCompanyId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option value="">None</option>{companies.map((c) => <option key={c.companyId} value={c.companyId}>{c.businessName}</option>)}</select></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Legal Entity</label><select value={editingContact ? editingContact.associatedLegalEntityId || '' : contactForm.associatedLegalEntityId} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, associatedLegalEntityId: e.target.value }) : setContactForm({ ...contactForm, associatedLegalEntityId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option value="">None</option>{legalEntities.map((l) => <option key={l.legalEntityId} value={l.legalEntityId}>{l.registeredLegalName}</option>)}</select></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Company</label>
+                  <SearchableSelect
+                    placeholder="Search companies..."
+                    value={companies.find((c) => c.companyId === (editingContact ? editingContact.associatedCompanyId : contactForm.associatedCompanyId)) || null}
+                    onChange={(obj) => editingContact ? setEditingContact({ ...editingContact, associatedCompanyId: obj?.companyId || '' }) : setContactForm({ ...contactForm, associatedCompanyId: obj?.companyId || '' })}
+                    onSearch={crmService.searchCompanies}
+                    itemKey={(c) => c.companyId}
+                    itemLabel={(c) => c.businessName}
+                    itemSubtext={(c) => c.registrationNumber}
+                    emptyMessage="No companies match."
+                  />
+                </div>
                 <div className="space-y-1 md:col-span-2">
                   <label className="text-[10px] text-slate-400 uppercase">Linked Deal IDs (CSV)</label>
                   <input type="text" placeholder="e.g. 12,15" value={editingContact ? editingContact.linkedDealIds || '' : contactForm.linkedDealIds} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, linkedDealIds: e.target.value }) : setContactForm({ ...contactForm, linkedDealIds: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" />

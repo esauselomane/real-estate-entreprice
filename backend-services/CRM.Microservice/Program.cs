@@ -4,11 +4,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Register REST Controller frameworks
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(o => o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles);
 
 // 🔐 JWT AUTHENTICATION (issued by the Identity microservice). Tenant is resolved
 // from the bearer token claims rather than the URL — see GetCurrentTenant() in CRMController.
@@ -131,6 +133,27 @@ using (var serviceScope = app.Services.CreateScope())
             CREATE INDEX [IX_CRMContacts_TenantId] ON [CRMContacts] ([TenantId]);
         END
     ");
+
+    // 🛠️ Idempotent migration: company → legal entity association.
+    // A company MAY belong to a legal entity (AssociatedLegalEntityId).
+    // Nullable so existing companies with no entity are unaffected.
+    // On fresh DBs EF Core creates this column + FK from the CRMCompany model;
+    // on existing DBs EnsureCreated is a no-op, so this ALTER backfills the
+    // column/FK to match the model.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF COL_LENGTH(N'[CRMCompanies]', 'AssociatedLegalEntityId') IS NULL
+            ALTER TABLE [CRMCompanies] ADD [AssociatedLegalEntityId] nvarchar(450) NULL;
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.foreign_keys fk
+            WHERE fk.parent_object_id = OBJECT_ID(N'[CRMCompanies]')
+              AND fk.name = N'FK_CRMCompanies_CRMLegalEntities_AssociatedLegalEntityId'
+        )
+        BEGIN
+            ALTER TABLE [CRMCompanies] ADD CONSTRAINT [FK_CRMCompanies_CRMLegalEntities_AssociatedLegalEntityId]
+                FOREIGN KEY ([AssociatedLegalEntityId]) REFERENCES [CRMLegalEntities] ([LegalEntityId]);
+        END
+    ");
+
 
     // Batch 1: create the operational ledger table (for fresh databases) and
     // idempotently backfill the unit-linkage columns onto existing databases.

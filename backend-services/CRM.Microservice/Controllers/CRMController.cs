@@ -932,6 +932,18 @@ namespace CRM.Microservice.Controllers
             // 🔐 Tenant taken from the caller's JWT, never from the request body.
             company.TenantId = GetCurrentTenant();
             company.CreatedAt = DateTime.UtcNow;
+
+            // 🔒 If a legal entity is assigned, it must exist and sit in the
+            // caller's visible tenant subtree.
+            if (!string.IsNullOrEmpty(company.AssociatedLegalEntityId))
+            {
+                var visibleTenants = await GetVisibleTenantIdsAsync();
+                var entity = await _context.CRMLegalEntities
+                    .FirstOrDefaultAsync(e => e.LegalEntityId == company.AssociatedLegalEntityId);
+                if (entity == null) return BadRequest(new { message = "Referenced legal entity not found." });
+                if (visibleTenants.Count > 0 && !visibleTenants.Contains(entity.TenantId)) return Forbid();
+            }
+
             _context.CRMCompanies.Add(company);
             await _context.SaveChangesAsync();
             return Ok(company);
@@ -956,6 +968,20 @@ namespace CRM.Microservice.Controllers
             existing.HeadOfficeAddress = updatedCompany.HeadOfficeAddress;
             existing.CorporateCreditLimit = updatedCompany.CorporateCreditLimit;
             existing.IndustryVertical = updatedCompany.IndustryVertical;
+            existing.AssociatedLegalEntityId = updatedCompany.AssociatedLegalEntityId;
+
+            // 🔒 If a legal entity is assigned, it must exist and sit inside the
+            // caller's visible tenant subtree (defence-in-depth — the permission
+            // gate above is the primary control).
+            if (!string.IsNullOrEmpty(existing.AssociatedLegalEntityId))
+            {
+                var visibleTenants = await GetVisibleTenantIdsAsync();
+                var entity = await _context.CRMLegalEntities
+                    .FirstOrDefaultAsync(e => e.LegalEntityId == existing.AssociatedLegalEntityId);
+                if (entity == null) return BadRequest(new { message = "Referenced legal entity not found." });
+                if (visibleTenants.Count > 0 && !visibleTenants.Contains(entity.TenantId))
+                    return Forbid();
+            }
 
             await _context.SaveChangesAsync();
             return Ok(new { message = "Company parameters updated successfully.", data = existing });
@@ -971,7 +997,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<CRMLegalEntity> query = _context.CRMLegalEntities.Include(e => e.CompanyDetails);
+            IQueryable<CRMLegalEntity> query = _context.CRMLegalEntities.AsNoTracking().Include(e => e.CompanyDetails);
             if (visibleTenants.Count > 0)
                 query = query.Where(e => visibleTenants.Contains(e.TenantId));
             var ordered = query.OrderBy(e => e.RegisteredLegalName);
@@ -1037,6 +1063,7 @@ namespace CRM.Microservice.Controllers
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<CRMContact> query = _context.CRMContacts
+                .AsNoTracking()
                 .Include(c => c.CompanyDetails)
                 .Include(c => c.LegalEntityDetails);
             if (visibleTenants.Count > 0)
@@ -1054,6 +1081,120 @@ namespace CRM.Microservice.Controllers
             return Ok(items);
         }
 
+        // 🔍 Auto-complete search over companies (by name / registration / VAT).
+        [HttpGet("companies/search")]
+        public async Task<IActionResult> SearchCompanies([FromQuery] string q, [FromQuery] int page = 1, [FromQuery] string? tenantId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("SearchCompanies: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            IQueryable<CRMCompany> query = _context.CRMCompanies;
+            if (visibleTenants.Count > 0)
+                query = query.Where(c => visibleTenants.Contains(c.TenantId));
+
+            var term = (q ?? string.Empty).Trim().ToLower();
+            if (!string.IsNullOrEmpty(term))
+            {
+                query = query.Where(c =>
+                    c.BusinessName.ToLower().Contains(term) ||
+                    c.RegistrationNumber.ToLower().Contains(term) ||
+                    c.VatNumber.ToLower().Contains(term));
+            }
+
+            var (items, total) = await PageAsync(query.OrderBy(c => c.BusinessName), page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
+        }
+
+        // 🔍 Auto-complete search over legal entities (by registered name / tax ref / type).
+        [HttpGet("legal-entities/search")]
+        public async Task<IActionResult> SearchLegalEntities([FromQuery] string q, [FromQuery] int page = 1, [FromQuery] string? tenantId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("SearchLegalEntities: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            IQueryable<CRMLegalEntity> query = _context.CRMLegalEntities.AsNoTracking().Include(e => e.CompanyDetails);
+            if (visibleTenants.Count > 0)
+                query = query.Where(e => visibleTenants.Contains(e.TenantId));
+
+            var term = (q ?? string.Empty).Trim().ToLower();
+            if (!string.IsNullOrEmpty(term))
+            {
+                query = query.Where(e =>
+                    e.RegisteredLegalName.ToLower().Contains(term) ||
+                    e.EntityTypeClassifier.ToLower().Contains(term) ||
+                    e.TaxRegistrationIndex.ToLower().Contains(term));
+            }
+
+            var (items, total) = await PageAsync(query.OrderBy(e => e.RegisteredLegalName), page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
+        }
+
+        // --- 📋 ENDPOINT: FETCH A SINGLE LEGAL ENTITY BY ID (edit hydration) ---
+        [HttpGet("legal-entities/{legalEntityId}")]
+        public async Task<IActionResult> GetLegalEntityById([FromRoute] string legalEntityId, [FromQuery] string? tenantId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("GetLegalEntityById: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(legalEntityId))
+            {
+                return BadRequest(new { message = "Legal entity id is required." });
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            var entity = await _context.CRMLegalEntities
+                .AsNoTracking()
+                .Include(e => e.CompanyDetails)
+                .FirstOrDefaultAsync(e => e.LegalEntityId == legalEntityId);
+            if (entity == null) return NotFound(new { message = "Legal entity record not found." });
+
+            if (visibleTenants.Count > 0 && !visibleTenants.Contains(entity.TenantId))
+                return Forbid();
+
+            return Ok(entity);
+        }
+
+        // --- 📋 ENDPOINT: FETCH A SINGLE COMPANY BY ID (edit hydration) ---
+        [HttpGet("companies/{companyId}")]
+        public async Task<IActionResult> GetCompanyById([FromRoute] string companyId, [FromQuery] string? tenantId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("GetCompanyById: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(companyId))
+            {
+                return BadRequest(new { message = "Company id is required." });
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            var company = await _context.CRMCompanies
+                .AsNoTracking()
+                .Include(c => c.LegalEntityDetails)
+                .FirstOrDefaultAsync(c => c.CompanyId == companyId);
+            if (company == null) return NotFound(new { message = "Company record not found." });
+
+            if (visibleTenants.Count > 0 && !visibleTenants.Contains(company.TenantId))
+                return Forbid();
+
+            return Ok(company);
+        }
+
         [HttpGet("contacts/search")]
         public async Task<IActionResult> SearchContacts([FromQuery] string q, [FromQuery] int page = 1, [FromQuery] string? tenantId = null)
         {
@@ -1065,6 +1206,7 @@ namespace CRM.Microservice.Controllers
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<CRMContact> query = _context.CRMContacts
+                .AsNoTracking()
                 .Include(c => c.CompanyDetails)
                 .Include(c => c.LegalEntityDetails);
             if (visibleTenants.Count > 0)
@@ -1084,6 +1226,45 @@ namespace CRM.Microservice.Controllers
             return Ok(items);
         }
 
+        // --- 📋 ENDPOINT: FETCH A SINGLE CONTACT BY ID (edit hydration) ---
+        [HttpGet("contacts/{contactId}")]
+        public async Task<IActionResult> GetContactById([FromRoute] string contactId, [FromQuery] string? tenantId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("users:view"))
+            {
+                _logger.LogWarning("GetContactById: forbidden — caller lacks users:view permission");
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(contactId))
+            {
+                return BadRequest(new { message = "Contact id is required." });
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+
+            var contact = await _context.CRMContacts
+                .Include(c => c.CompanyDetails)
+                .Include(c => c.LegalEntityDetails)
+                .FirstOrDefaultAsync(c => c.ContactId == contactId);
+
+            if (contact == null)
+            {
+                _logger.LogInformation("GetContactById: ContactId={ContactId} not found", contactId);
+                return NotFound(new { message = "Contact record not found." });
+            }
+
+            // Tenant-subtree guard: a contact is only surfaced if its tenant sits
+            // inside the caller's visible subtree (AgencyAdmin/child/PlatformAdmin).
+            if (visibleTenants.Count > 0 && !visibleTenants.Contains(contact.TenantId))
+            {
+                _logger.LogWarning("GetContactById: ContactId={ContactId} outside visible tenants", contactId);
+                return Forbid();
+            }
+
+            return Ok(contact);
+        }
+
         [HttpPost("contact/create")]
         public async Task<IActionResult> CreateContact([FromBody] CRMContact contact)
         {
@@ -1098,6 +1279,16 @@ namespace CRM.Microservice.Controllers
             // 🔐 Tenant taken from the caller's JWT, never from the request body.
             contact.TenantId = GetCurrentTenant();
             contact.CreatedAt = DateTime.UtcNow;
+
+            // 🧠 Infer the contact's legal entity from its company when the
+            // caller didn't supply one — "legal entity can be inferred from company".
+            if (string.IsNullOrEmpty(contact.AssociatedLegalEntityId) && !string.IsNullOrEmpty(contact.AssociatedCompanyId))
+            {
+                var co = await _context.CRMCompanies.FirstOrDefaultAsync(c => c.CompanyId == contact.AssociatedCompanyId);
+                if (co?.AssociatedLegalEntityId != null)
+                    contact.AssociatedLegalEntityId = co.AssociatedLegalEntityId;
+            }
+
             _context.CRMContacts.Add(contact);
             await _context.SaveChangesAsync();
             return Ok(contact);
@@ -1123,6 +1314,15 @@ namespace CRM.Microservice.Controllers
             existing.AssociatedCompanyId = updatedContact.AssociatedCompanyId;
             existing.AssociatedLegalEntityId = updatedContact.AssociatedLegalEntityId;
             existing.LinkedDealIds = updatedContact.LinkedDealIds;
+
+            // 🧠 Re-infer the legal entity from the company if the caller left it blank
+            // but supplied a company (legal entity is inferred from company).
+            if (string.IsNullOrEmpty(existing.AssociatedLegalEntityId) && !string.IsNullOrEmpty(existing.AssociatedCompanyId))
+            {
+                var co = await _context.CRMCompanies.FirstOrDefaultAsync(c => c.CompanyId == existing.AssociatedCompanyId);
+                if (co?.AssociatedLegalEntityId != null)
+                    existing.AssociatedLegalEntityId = co.AssociatedLegalEntityId;
+            }
 
             await _context.SaveChangesAsync();
             return Ok(new { message = "Contact directory record updated successfully.", data = existing });

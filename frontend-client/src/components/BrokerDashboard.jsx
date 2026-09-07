@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import {
-  Briefcase, DollarSign, Home, Clock,   TrendingUp, TrendingDown,
+  Briefcase, Banknote, Home, Clock,   TrendingUp, TrendingDown,
   AlertTriangle, Bell, ChevronRight, Send,
   Users, CheckCircle2, ArrowUp, ArrowDown
 } from 'lucide-react';
@@ -141,7 +141,7 @@ export default function BrokerDashboard() {
     return trend.map((t) => ({
       period: monthLabel(t.period),
       GCI: t.gci,
-      CompanyDollar: t.companyDollar,
+      CompanyRand: t.companyDollar,
     }));
   }, [metrics]);
 
@@ -226,15 +226,15 @@ export default function BrokerDashboard() {
       {/* ROW 1: KPI cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
-          icon={DollarSign}
+          icon={Banknote}
           label="Gross Commission Income (GCI)"
           value={fmtCurrency(metrics?.gci)}
           trend={metrics?.gciTrendPct}
           accent="emerald"
         />
         <KpiCard
-          icon={DollarSign}
-          label="Company Dollar (Net)"
+          icon={Banknote}
+          label="Company Rand (Net)"
           value={fmtCurrency(metrics?.companyDollar)}
           accent="emerald"
         />
@@ -258,7 +258,7 @@ export default function BrokerDashboard() {
           <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
             <TrendingUp size={16} className="text-emerald-400" /> Monthly Revenue Trend
           </h3>
-          <p className="text-xs text-slate-500 mb-4">GCI vs Company Dollar — last 6 months</p>
+          <p className="text-xs text-slate-500 mb-4">GCI vs Company Rand — last 6 months</p>
           <div className="h-64">
             {trendData.length === 0 ? (
               <EmptyState label="No revenue data yet." />
@@ -271,7 +271,7 @@ export default function BrokerDashboard() {
                   <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} formatter={(v) => fmtCurrency(v)} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Line type="monotone" dataKey="GCI" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
-                  <Line type="monotone" dataKey="CompanyDollar" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="CompanyRand" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             )}

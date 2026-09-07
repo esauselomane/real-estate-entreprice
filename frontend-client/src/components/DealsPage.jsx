@@ -8,6 +8,7 @@ import { usePermission } from '../contexts/PermissionContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
 import BrokerPicker from '../components/BrokerPicker.jsx';
+import ContactPicker from '../components/ContactPicker.jsx';
 import Pagination from '../components/Pagination.jsx';
 
 const DEAL_STAGES = ['DiscoveryNeedsAnalysis', 'Presentation', 'ProposalQuoteSent', 'Negotiation', 'ClosedWon', 'ClosedLost'];
@@ -55,6 +56,8 @@ export default function DealsPage() {
   const [notes, setNotes] = useState('');
   const [editForm, setEditForm] = useState({ buyerClientId: '', sellerClientId: '', dealStage: 'DiscoveryNeedsAnalysis', transactionValue: '', commissionType: 'Percent', commissionValue: '', realisedCommission: '', linkedPropertyId: '', dealNotes: '', allocatedBrokerIds: [] });
   const [editSelectedBrokers, setEditSelectedBrokers] = useState([]);
+  const [editSelectedBuyer, setEditSelectedBuyer] = useState(null);
+  const [editSelectedSeller, setEditSelectedSeller] = useState(null);
   const [brokerSplits, setBrokerSplits] = useState([]);
   const [isLoadingSplits, setIsLoadingSplits] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -97,7 +100,27 @@ export default function DealsPage() {
 
   useEffect(() => { loadData(1); }, [activeTenantId]);
 
-  const handleDealPageChange = (newPage) => {
+   // 🧑‍💼 Resolve a buyer/seller contact by id for the ContactPicker. Tries the
+   // in-memory `contacts` cache first, then falls back to a single get-by-id so
+   // the picker shows the pre-selected contact on edit even if it paged out.
+   const hydrateEditContact = async (contactId, setter) => {
+     if (!contactId) {
+       setter(null);
+       return;
+     }
+     const cached = contacts.find((c) => c.contactId === contactId);
+     if (cached) {
+       setter(cached);
+       return;
+     }
+     try {
+       setter(await crmService.getContact(contactId));
+     } catch {
+       setter(null);
+     }
+   };
+
+   const handleDealPageChange = (newPage) => {
     if (newPage < 1) return;
     const maxPage = Math.max(1, Math.ceil(dealTotalCount / DEAL_PAGE_SIZE));
     if (newPage > maxPage) return;
@@ -291,20 +314,22 @@ export default function DealsPage() {
                 const hydratedBrokers = ids
                   .map((id) => brokers.find((b) => b.brokerId === id))
                   .filter(Boolean);
-                setEditSelectedBrokers(hydratedBrokers);
-                setEditForm({
-                  buyerClientId: deal.buyerClientId || '',
-                  sellerClientId: deal.sellerClientId || '',
-                  dealStage: getDealStageValue(deal),
-                  transactionValue: String(deal.transactionValue || ''),
-                  commissionType: deal.commissionType || 'Percent',
-                  commissionValue: String(deal.commissionValue || ''),
-                  realisedCommission: String(deal.realisedCommission || ''),
-                  linkedPropertyId: String(deal.linkedPropertyId || ''),
-                  dealNotes: deal.dealNotes || '',
-                  allocatedBrokerIds: ids
-                });
-              }} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row justify-between lg:items-center gap-4 hover:border-blue-700 transition-colors cursor-pointer">
+                 setEditSelectedBrokers(hydratedBrokers);
+                 setEditForm({
+                   buyerClientId: deal.buyerClientId || '',
+                   sellerClientId: deal.sellerClientId || '',
+                   dealStage: getDealStageValue(deal),
+                   transactionValue: String(deal.transactionValue || ''),
+                   commissionType: deal.commissionType || 'Percent',
+                   commissionValue: String(deal.commissionValue || ''),
+                   realisedCommission: String(deal.realisedCommission || ''),
+                   linkedPropertyId: String(deal.linkedPropertyId || ''),
+                   dealNotes: deal.dealNotes || '',
+                   allocatedBrokerIds: ids
+                 });
+                 hydrateEditContact(deal.buyerClientId, setEditSelectedBuyer);
+                 hydrateEditContact(deal.sellerClientId, setEditSelectedSeller);
+               }} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row justify-between lg:items-center gap-4 hover:border-blue-700 transition-colors cursor-pointer">
                 <div className="space-y-2 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
@@ -387,21 +412,25 @@ export default function DealsPage() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-white uppercase tracking-wider">Edit Deal</h3>
-              <button type="button" onClick={() => { setEditingDeal(null); setNotes(''); }} className="text-slate-400 hover:text-white"><X size={14} /></button>
+              <button type="button" onClick={() => { setEditingDeal(null); setNotes(''); setEditSelectedBuyer(null); setEditSelectedSeller(null); }} className="text-slate-400 hover:text-white"><X size={14} /></button>
             </div>
             <form onSubmit={handleUpdateDealFull} className="space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Buyer Client ID</label>
-                  <select value={editForm.buyerClientId} onChange={(e) => setEditForm({ ...editForm, buyerClientId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500">
-                    <option value="">Select buyer...</option>
-                    {contacts.map((c) => <option key={c.contactId} value={c.contactId}>{c.fullName} ({c.emailAddress})</option>)}
-                  </select>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Buyer Client</label>
+                  <ContactPicker
+                    value={editSelectedBuyer}
+                    onChange={(c) => { setEditSelectedBuyer(c); setEditForm((prev) => ({ ...prev, buyerClientId: c?.contactId || '' })); }}
+                    allowCreate={false}
+                    placeholder="Search buyer by name, email, or phone..."
+                  />
                 </div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Seller Client ID</label>
-                  <select value={editForm.sellerClientId} onChange={(e) => setEditForm({ ...editForm, sellerClientId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500">
-                    <option value="">Select seller...</option>
-                    {contacts.map((c) => <option key={c.contactId} value={c.contactId}>{c.fullName} ({c.emailAddress})</option>)}
-                  </select>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Seller Client</label>
+                  <ContactPicker
+                    value={editSelectedSeller}
+                    onChange={(c) => { setEditSelectedSeller(c); setEditForm((prev) => ({ ...prev, sellerClientId: c?.contactId || '' })); }}
+                    allowCreate={false}
+                    placeholder="Search seller by name, email, or phone..."
+                  />
                 </div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Transaction Value (R)</label><input required type="number" value={editForm.transactionValue} onChange={(e) => setEditForm({ ...editForm, transactionValue: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Linked Property ID</label><input type="number" value={editForm.linkedPropertyId} onChange={(e) => setEditForm({ ...editForm, linkedPropertyId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
@@ -485,7 +514,7 @@ export default function DealsPage() {
                 <Can permission="deals:edit">
                   <button type="submit" className="flex-1 py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold">Save Changes</button>
                 </Can>
-                <button type="button" onClick={() => { setEditingDeal(null); setNotes(''); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300">Cancel</button>
+                <button type="button" onClick={() => { setEditingDeal(null); setNotes(''); setEditSelectedBuyer(null); setEditSelectedSeller(null); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300">Cancel</button>
               </div>
             </form>
           </div>

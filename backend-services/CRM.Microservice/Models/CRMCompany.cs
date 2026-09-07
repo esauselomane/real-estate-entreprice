@@ -24,5 +24,13 @@ namespace CRM.Microservice.Models
 
         public string IndustryVertical { get; set; } = "Real Estate Investment";
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        // 🔗 Optional parent legal entity: "a company may belong to a legal entity".
+        // Kept in addition to CRMLegalEntity.AssociatedCompanyId so both
+        // directions resolve; null means the company has no entity grouping.
+        public string? AssociatedLegalEntityId { get; set; }
+
+        [ForeignKey("AssociatedLegalEntityId")]
+        public CRMLegalEntity? LegalEntityDetails { get; set; }
     }
 }

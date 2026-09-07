@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Building2, UserPlus, Users, Pencil, Trash2, ShieldCheck, Tag, ChevronRight, X, Settings, CircleX, Mail, RefreshCw, AlertCircle, BarChart3, TrendingUp, DollarSign, Trophy } from 'lucide-react';
+import { Building2, UserPlus, Users, Pencil, Trash2, ShieldCheck, Tag, ChevronRight, X, Settings, CircleX, Mail, RefreshCw, AlertCircle, BarChart3, TrendingUp, Banknote, Trophy } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { systemRolesService } from '../services/systemRolesService.js';
@@ -441,8 +441,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   </label>
                   {agencyForm.isTrial && (
                     <>
-                      <input type="date" value={agencyForm.trialStartDate ? agencyForm.trialStartDate.substring(0, 10) : ''} onChange={(e) => setAgencyForm({ ...agencyForm, trialStartDate: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
-                      <input type="date" value={agencyForm.trialEndDate ? agencyForm.trialEndDate.substring(0, 10) : ''} onChange={(e) => setAgencyForm({ ...agencyForm, trialEndDate: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                      <input type="date" aria-label="Trial start date" value={agencyForm.trialStartDate ? agencyForm.trialStartDate.substring(0, 10) : ''} onChange={(e) => setAgencyForm({ ...agencyForm, trialStartDate: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                      <input type="date" aria-label="Trial end date" value={agencyForm.trialEndDate ? agencyForm.trialEndDate.substring(0, 10) : ''} onChange={(e) => setAgencyForm({ ...agencyForm, trialEndDate: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
                     </>
                   )}
 
@@ -773,7 +773,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
             {commissionByStage.length > 0 && (
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
                 <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4">
-                  <DollarSign size={14} className="text-emerald-400" /> Commission by Stage
+                  <Banknote size={14} className="text-emerald-400" /> Commission by Stage
                 </div>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={commissionByStage} layout="vertical" margin={{ top: 5, right: 20, left: 80, bottom: 5 }}>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
-import { Building2, Users, Briefcase, Home, Bell, ShieldCheck, Layers, BarChart2, DollarSign, TrendingUp, PieChart as PieIcon, Award } from 'lucide-react';
+import {   Building2, Users, Briefcase, Home, Bell, ShieldCheck, Layers, BarChart2, Banknote, TrendingUp, PieChart as PieIcon, Award } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { propertyService } from '../services/propertyService.js';
@@ -110,7 +110,7 @@ export default function RoleDashboard() {
           setMetrics([
             { label: 'Agencies', value: agencies.totalCount || agencies.length, icon: Building2 },
             { label: 'Platform controls', value: 'Active', icon: ShieldCheck },
-            { label: 'Closed-won commission', value: `R ${Number(overview.totalRealisedCommission || 0).toLocaleString()}`, icon: DollarSign }
+            { label: 'Closed-won commission', value: `R ${Number(overview.totalRealisedCommission || 0).toLocaleString()}`, icon: Banknote }
           ]);
             // 📊 Server-side aggregates (operationalStatus, isTrial, hasParent) are
             // computed over the ENTIRE filtered universe, not the 20-row page.
@@ -172,7 +172,7 @@ export default function RoleDashboard() {
           setMetrics([
             { label: 'My deals', value: boards.dealCount || boards.verifiedDeals?.length || 0, icon: Briefcase },
             { label: 'Available properties', value: properties.totalCount || properties.length, icon: Home },
-            { label: 'Closed-won commission', value: `R ${Number((commissionStages || []).find((c) => c.period === 'ClosedWon')?.revenue || 0).toLocaleString()}`, icon: DollarSign }
+            { label: 'Closed-won commission', value: `R ${Number((commissionStages || []).find((c) => c.period === 'ClosedWon')?.revenue || 0).toLocaleString()}`, icon: Banknote }
           ]);
             // 📊 Deal-stage distribution uses server-side aggregates so the pie
             // reflects every deal the broker owns in the active tenant scope,
@@ -180,7 +180,7 @@ export default function RoleDashboard() {
             const dealStageBuckets = boards.aggregates?.dealStage || {};
             setCharts([
               { title: 'My deal pipeline stages', icon: Briefcase, kind: 'pie', data: Object.entries(dealStageBuckets).map(([name, value]) => ({ name: formatTitle(name), value })), colors: DEAL_COLORS },
-            { title: 'Commission by stage', icon: DollarSign, kind: 'donut', data: (commissionStages || []).map((c) => ({ name: formatTitle(c.period), value: Number(c.revenue || 0) })) },
+            { title: 'Commission by stage', icon: Banknote, kind: 'donut', data: (commissionStages || []).map((c) => ({ name: formatTitle(c.period), value: Number(c.revenue || 0) })) },
             { title: 'My deal value pipeline', icon: Home, kind: 'bar', data: (boards.verifiedDeals || []).slice(0, 8).map((d) => ({ name: `DL-${d.dealId}`, value: Number(d.transactionValue || 0) })), colors: DEAL_COLORS }
           ]);
         } else if (role === 'Owner') {

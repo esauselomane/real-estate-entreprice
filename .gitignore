@@ -18,3 +18,4 @@ aider-env
 out/
 .env*
 agents.md
+developer-api*

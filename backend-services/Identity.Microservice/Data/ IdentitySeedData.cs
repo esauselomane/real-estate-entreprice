@@ -160,7 +160,16 @@ namespace Identity.Microservice.Data
                  context.TenantAgencies.AddRange(tenantItems);
              }
 
-             var trialTenant = context.TenantAgencies.FirstOrDefault(t => t.TenantId == "TEN-001");
+              // Look up TEN-001 against BOTH the in-memory tracker and the DB.
+              // AddRange above may have already staged a TEN-001 entity in this
+              // same context (when the DB was empty); a DB-only FirstOrDefault
+              // would return null (EF never surfaces Added entities in query
+              // results), causing Add(TEN-001) below to throw:
+              // "entity type 'TenantAgency' cannot be tracked because another
+              //  instance with the same key value for {'TenantId'} is already
+              //  being tracked." Checking .Local first avoids the double-add.
+              var trialTenant = context.TenantAgencies.Local.FirstOrDefault(t => t.TenantId == "TEN-001")
+                  ?? context.TenantAgencies.FirstOrDefault(t => t.TenantId == "TEN-001");
              if (trialTenant == null)
              {
                  trialTenant = new TenantAgency

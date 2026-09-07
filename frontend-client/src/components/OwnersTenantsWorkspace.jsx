@@ -138,7 +138,7 @@ export default function OwnersTenantsWorkspace() {
             <input value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })} placeholder="Phone" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
             <input value={form.primaryLocation} onChange={(e) => setForm({ ...form, primaryLocation: e.target.value })} placeholder="Primary location" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
 
-            <input value={form.budgetLimit} type="number" min="0" onChange={(e) => setForm({ ...form, budgetLimit: Number(e.target.value || 0) })} placeholder="Budget limit (R)" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+            <input value={form.budgetLimit} type="number" aria-label="Budget limit" min="0" onChange={(e) => setForm({ ...form, budgetLimit: Number(e.target.value || 0) })} placeholder="Budget limit (R)" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
           </div>
 
           {/* 📋 Property-type interests (multi-select) */}

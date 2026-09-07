@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, PieChart, TrendingUp, CalendarRange, DollarSign } from 'lucide-react';
+import { BarChart3, PieChart, TrendingUp, CalendarRange, Banknote } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 import { useTenant } from '../contexts/TenantContext.jsx';
 
@@ -55,7 +55,7 @@ export default function ReportsWorkspace() {
             <MetricCard icon={<BarChart3 size={16} />} label="Total Leads" value={report.totalLeads} tone="blue" />
             <MetricCard icon={<PieChart size={16} />} label="Total Deals" value={report.totalDeals} tone="amber" />
             <MetricCard icon={<TrendingUp size={16} />} label="Revenue" value={`R ${Number(report.totalRevenue || 0).toLocaleString()}`} tone="green" />
-            <MetricCard icon={<DollarSign size={16} />} label="Peak Month" value={peakMonth ? peakMonth.period : 'N/A'} tone="purple" />
+            <MetricCard icon={<Banknote size={16} />} label="Peak Month" value={peakMonth ? peakMonth.period : 'N/A'} tone="purple" />
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">

@@ -4,7 +4,6 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { useAgency } from '../contexts/AgencyContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
-import Can from '../components/Can.jsx';
 
 export default function LeftSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
