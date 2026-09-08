@@ -21,7 +21,7 @@ export default function Header() {
         aria-label="Main navigation"
       >
         <Link href="/" className="flex items-center gap-3 text-xl font-display font-extrabold text-blue-400">
-          <img src="/logo.svg" alt="Biscove Real Estate Tech logo" className="h-8 w-auto" />
+          <img src="/logo.jpg" alt="Biscove Real Estate Tech logo" className="h-8 w-auto" />
           Biscove Real Estate Tech
         </Link>
 

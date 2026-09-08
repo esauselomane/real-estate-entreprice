@@ -2,10 +2,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY ["backend-services/CRM.Microservice/CRM.Microservice.csproj", "backend-services/CRM.Microservice/"]
-COPY ["backend-services/CRM.Microservice/Data/ CRMDbContext.cs", "backend-services/CRM.Microservice/Data/"]
-COPY ["backend-services/CRM.Microservice/Controllers/", "backend-services/CRM.Microservice/Controllers/"]
-COPY ["backend-services/CRM.Microservice/Models/", "backend-services/CRM.Microservice/Models/"]
-COPY ["backend-services/CRM.Microservice/Program.cs", "backend-services/CRM.Microservice/"]
+COPY ["backend-services/CRM.Microservice/appsettings.json", "backend-services/CRM.Microservice/"]
+COPY ["backend-services/CRM.Microservice/", "backend-services/CRM.Microservice/"]
 
 RUN dotnet restore "backend-services/CRM.Microservice/CRM.Microservice.csproj"
 RUN dotnet build "backend-services/CRM.Microservice/CRM.Microservice.csproj" -c Release -o /app/build

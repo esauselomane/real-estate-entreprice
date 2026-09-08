@@ -9,8 +9,6 @@ namespace Identity.Microservice.Models
         public string Password { get; set; } = string.Empty;
         public string FromAddress { get; set; } = string.Empty;
         public string FromName { get; set; } = "Real Estate Enterprise";
-        public string SupportEmail { get; set; } = "esauselo@gmail.com";
-        public string? ApiUrl { get; set; }
-        public string? ApiSendPath { get; set; }
+        public string SupportEmail { get; set; } = string.Empty;
     }
 }

@@ -13,10 +13,18 @@ aider-env
 *aider-env
 *aider-env/
 .qodo*
+
+# Environment & secrets
+.env*
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Staging.json
+
 # Next.js build output
 .next/
 out/
-.env*
+
+# Documentation
 agents.md
 developer-api*
 google*

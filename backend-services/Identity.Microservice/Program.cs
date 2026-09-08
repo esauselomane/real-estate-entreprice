@@ -49,15 +49,6 @@ builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProv
 builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddHttpClient();
-builder.Services.AddHttpClient("Mailpit", client =>
-{
-    var mailpitUrl = builder.Configuration.GetSection("Email:ApiUrl").Get<string>();
-    if (!string.IsNullOrEmpty(mailpitUrl))
-    {
-        client.BaseAddress = new Uri(mailpitUrl);
-    }
-});
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "SuperSecretRealEstateEnterpriseCryptographicSigningKey123!";
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "Identity.Microservice";
 var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "RealEstateApp.Client";

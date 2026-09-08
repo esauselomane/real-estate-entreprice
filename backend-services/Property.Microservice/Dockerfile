@@ -2,11 +2,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY ["backend-services/Property.Microservice/Property.Microservice.csproj", "backend-services/Property.Microservice/"]
-COPY ["backend-services/Property.Microservice/Data/ PropertyDbContext.cs", "backend-services/Property.Microservice/Data/"]
-COPY ["backend-services/Property.Microservice/Controllers/", "backend-services/Property.Microservice/Controllers/"]
-COPY ["backend-services/Property.Microservice/Models/", "backend-services/Property.Microservice/Models/"]
-COPY ["backend-services/Property.Microservice/Services/", "backend-services/Property.Microservice/Services/"]
-COPY ["backend-services/Property.Microservice/Program.cs", "backend-services/Property.Microservice/"]
+COPY ["backend-services/Property.Microservice/appsettings.json", "backend-services/Property.Microservice/"]
+COPY ["backend-services/Property.Microservice/", "backend-services/Property.Microservice/"]
 
 RUN dotnet restore "backend-services/Property.Microservice/Property.Microservice.csproj"
 RUN dotnet build "backend-services/Property.Microservice/Property.Microservice.csproj" -c Release -o /app/build
