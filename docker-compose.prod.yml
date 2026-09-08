@@ -70,7 +70,7 @@ services:
       - "${IDENTITY_PORT:-5001}:5001"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=${IDENTITY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
+      - ConnectionStrings__DefaultConnection=Server=172.18.0.3,1433;Database=${IDENTITY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
       - Jwt__Secret=${JWT_SECRET}
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
@@ -101,7 +101,7 @@ services:
       - "${PROPERTY_PORT:-5002}:5002"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=${PROPERTY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
+      - ConnectionStrings__DefaultConnection=Server=172.18.0.3,1433;Database=${PROPERTY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
       - Jwt__Secret=${JWT_SECRET}
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
@@ -130,7 +130,7 @@ services:
       - "${CRM_PORT:-5003}:5003"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=${CRM_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
+      - ConnectionStrings__DefaultConnection=Server=172.18.0.3,1433;Database=${CRM_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
       - Jwt__Secret=${JWT_SECRET}
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
@@ -162,8 +162,8 @@ services:
       - "${DEVELOPER_PORT:-5006}:5006"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DeveloperConnection=Server=sqlserver;Database=${DEVELOPER_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
-      - ConnectionStrings__PropertyConnection=Server=sqlserver;Database=${PROPERTY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
+      - ConnectionStrings__DeveloperConnection=Server=172.18.0.3,1433;Database=${DEVELOPER_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
+      - ConnectionStrings__PropertyConnection=Server=172.18.0.3,1433;Database=${PROPERTY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
       - Jwt__Secret=${JWT_SECRET}
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}

@@ -26,7 +26,7 @@ export const site = {
   name: process.env.NEXT_PUBLIC_SITE_NAME || "Biscove Real Estate Tech",
   tagline: "One platform for full-lifecycle real-estate deals.",
   description:
-    "CRM, property listings, automated brochure generation and market syndication — unified for brokers, agencies and enterprise teams. We align the code, you sell the abode.",
+    "CRM, property listings, automated brochure generation and market syndication - unified for brokers, agencies and enterprise teams. We align the code, you sell the abode.",
   url: process.env.NEXT_PUBLIC_SITE_URL || "https://realestate.example",
 } as const;
 
@@ -77,8 +77,8 @@ export const heroSlides: HeroSlide[] = [
 export const hero: { headline: string; subhead: string; badge?: string; punchline?: string } = {
   headline: "Close more deals with one unified workspace.",
   subhead:
-    "A fully hosted SaaS platform — no servers, no IT overhead, no hosting costs. Just pay per month and save thousands in infrastructure and maintenance.",
-  badge: "SaaS — zero hosting costs",
+    "A fully hosted SaaS platform - no servers, no IT overhead, no hosting costs. Just pay per month and save thousands in infrastructure and maintenance.",
+  badge: "SaaS - zero hosting costs",
   punchline: "We align the code, you sell the abode.",
 };
 
@@ -115,7 +115,7 @@ export const features: Feature[] = [
   },
   {
     title: "Zero hosting costs",
-    description: "Fully hosted SaaS — no servers, no IT overhead, no infrastructure bills.",
+    description: "Fully hosted SaaS - no servers, no IT overhead, no infrastructure bills.",
     icon: "ServerOff",
   },
 ];
@@ -216,15 +216,13 @@ export const pricing: {
 
 export const testimonials: { quote: string; name: string; role: string; logo: string }[] = [
   {
-    quote:
-      "The brochure Worker turned a 2-hour manual task into a 42-second click. Deals move faster now.",
+    quote:"The brochure Worker turned a 2-hour manual task into a 42-second click. Deals move faster now.",
     name: "Thandi Mokoena",
     role: "Director, Mokoena Properties",
     logo: "M",
   },
   {
-    quote:
-      "One workspace for CRM, listings and syndication. Our conversion rate improved noticeably.",
+    quote: "One workspace for CRM, listings and syndication. Our conversion rate improved noticeably.",
     name: "Raj Patel",
     role: "Head of Brokerage, Nexus Group",
     logo: "N",

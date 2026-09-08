@@ -24,7 +24,7 @@ namespace DataImport.Worker.Services
             _configuration = configuration;
 
             var propertyOptions = new DbContextOptionsBuilder<PropertyDbContext>()
-                .UseSqlServer("Server=localhost;Database=Property;Trusted_Connection=True;MultipleActiveResultSets=true")
+                .UseSqlServer("Server=172.18.0.3,1433;Database=Property;Trusted_Connection=True;MultipleActiveResultSets=true")
                 .Options;
             _propertyDbContext = new PropertyDbContext(propertyOptions);
         }

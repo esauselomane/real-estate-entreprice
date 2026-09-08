@@ -18,7 +18,7 @@ read -p "Delete ALL resources in ${PROJECT_ID}? Type 'destroy' to confirm: " con
 [ "$confirm" = "destroy" ] || { echo "Aborted."; exit 1; }
 
 log "Deleting Cloud Run services..."
-for svc in identity-service property-service crm-service developer-api gateway frontend-client client-facing brochure-worker image-worker syndication-worker; do
+for svc in identity-service property-service crm-service gateway frontend-client client-facing brochure-worker image-worker syndication-worker; do
   gcloud run services delete "${svc}" --region="${REGION}" --quiet 2>/dev/null || warn "${svc} not found"
 done
 
@@ -41,7 +41,7 @@ for secret in jwt-secret mssql-password support-email; do
 done
 
 log "Deleting service accounts..."
-for sa in identity property crm developer-api gateway frontend-client client-facing brochure-worker image-worker syndication-worker monitoring; do
+for sa in identity property crm gateway frontend-client client-facing brochure-worker image-worker syndication-worker monitoring; do
   gcloud iam service-accounts delete "${sa}-sa@${PROJECT_ID}.iam.gserviceaccount.com" --quiet 2>/dev/null || true
 done
 

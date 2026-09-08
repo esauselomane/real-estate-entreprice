@@ -9,7 +9,7 @@ export const bibsyKnowledge: BibsyEntry[] = [
   {
     question: "What is Biscove Real Estate Tech?",
     answer:
-      "Biscove Real Estate Tech is a multi-tenant platform for brokers and agencies — CRM for leads and deals, property listings, automated branded brochure generation and market syndication.",
+      "Biscove Real Estate Tech is a multi-tenant platform for brokers and agencies - CRM for leads and deals, property listings, automated branded brochure generation and market syndication.",
     keywords: ["real", "estate", "enterprise", "platform", "what", "is", "app", "software"],
      apiHint: "none",
   },
@@ -30,7 +30,7 @@ export const bibsyKnowledge: BibsyEntry[] = [
   {
     question: "How does brochure automation work?",
     answer:
-      "A broker curates a brochure card per deal, dispatches it, and a background Worker renders a branded PDF in seconds — the deal then automatically advances to Proposal / Quote Sent.",
+      "A broker curates a brochure card per deal, dispatches it, and a background Worker renders a branded PDF in seconds. The deal then automatically advances to Proposal / Quote Sent.",
     keywords: ["brochure", "pdf", "automat", "worker", "render", "generate", "card"],
     apiHint: "none",
   },
@@ -58,21 +58,21 @@ export const bibsyKnowledge: BibsyEntry[] = [
   {
     question: "Is it secure and multi-tenant?",
     answer:
-      "Yes — every request is tenant-isolated via the TenantId claim and role-scoped: PlatformAdmin, AgencyAdmin, Broker, Owner and Tenant.",
+      "Yes - every request is tenant-isolated via the TenantId claim and role-scoped: PlatformAdmin, AgencyAdmin, Broker, Owner and Tenant.",
     keywords: ["secure", "tenant", "multi", "role", "permission", "privacy"],
     apiHint: "none",
   },
   {
     question: "How do I log in?",
     answer:
-      "Click 'Login' in the top right, or visit /login — that opens the application login where you enter your email and password.",
+      "Click 'Login' in the top right, or visit /login - that opens the application login where you enter your email and password.",
     keywords: ["login", "log", "in", "auth", "sign", "broker"],
     apiHint: "none",
   },
   {
     question: "How do I contact you?",
     answer:
-      "Reach us at " + (process.env.NEXT_PUBLIC_CONTACT_EMAIL || "esauselo@gmail.com") + ", or use the Contact page — we'll get back shortly.",
+      "Reach us at " + (process.env.NEXT_PUBLIC_CONTACT_EMAIL || "esauselo@gmail.com") + ", or use the Contact page - we will get back to you shortly.",
     keywords: ["contact", "email", "reach", "support", "hello"],
     apiHint: "none",
   },
