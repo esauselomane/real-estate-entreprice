@@ -3,9 +3,12 @@ WORKDIR /src
 
 COPY ["backend-services/ImageProcessor.Worker/ImageProcessor.Worker.csproj", "backend-services/ImageProcessor.Worker/"]
 COPY ["backend-services/ImageProcessor.Worker/appsettings.json", "backend-services/ImageProcessor.Worker/"]
+COPY ["backend-services/Shared.Kafka/Shared.Kafka.csproj", "backend-services/Shared.Kafka/"]
+
 COPY ["backend-services/ImageProcessor.Worker/", "backend-services/ImageProcessor.Worker/"]
 
 RUN dotnet restore "backend-services/ImageProcessor.Worker/ImageProcessor.Worker.csproj"
+COPY ["backend-services/Shared.Kafka/", "backend-services/Shared.Kafka/"]
 RUN dotnet build "backend-services/ImageProcessor.Worker/ImageProcessor.Worker.csproj" -c Release -o /app/build
 
 FROM build AS publish

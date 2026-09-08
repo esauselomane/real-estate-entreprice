@@ -3,9 +3,12 @@ WORKDIR /src
 
 COPY ["backend-services/CRM.Microservice/CRM.Microservice.csproj", "backend-services/CRM.Microservice/"]
 COPY ["backend-services/CRM.Microservice/appsettings.json", "backend-services/CRM.Microservice/"]
+COPY ["backend-services/Shared.Kafka/Shared.Kafka.csproj", "backend-services/Shared.Kafka/"]
+
 COPY ["backend-services/CRM.Microservice/", "backend-services/CRM.Microservice/"]
 
 RUN dotnet restore "backend-services/CRM.Microservice/CRM.Microservice.csproj"
+COPY ["backend-services/Shared.Kafka/", "backend-services/Shared.Kafka/"]
 RUN dotnet build "backend-services/CRM.Microservice/CRM.Microservice.csproj" -c Release -o /app/build
 
 FROM build AS publish

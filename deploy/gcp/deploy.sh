@@ -21,13 +21,14 @@ set -euo pipefail
 # ============================================================
 
 # --- Configuration ---
-PROJECT_ID="${PROJECT_ID:-real-estate-enterprise-prod}"
+PROJECT_ID="${PROJECT_ID:-your-gcp-project-id}"
 REGION="${REGION:-us-central1}"
 ZONE="${ZONE:-us-central1-a}"
-DOMAIN="${DOMAIN:-yourdomain.com}"
+DOMAIN="${DOMAIN:-your-production-domain.com}"
+KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-your-kafka-broker:9092}"
 REPO_NAME="realestate-images"
 SQL_INSTANCE="realestate-sql"
-SQL_TIER="db-custom-2-7680"
+SQL_TIER="db-custom-1-3840"
 SQL_PASSWORD="${SQL_PASSWORD:-$(openssl rand -base64 24 | tr -d /=+ | cut -c1-24)}"
 JWT_SECRET="${JWT_SECRET:-$(openssl rand -base64 48 | tr -d /=+)}"
 SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo manual)"
@@ -56,6 +57,7 @@ gcloud services enable \
   vpcaccess.googleapis.com \
   compute.googleapis.com \
   certificatemanager.googleapis.com \
+  servicenetworking.googleapis.com \
   dns.googleapis.com \
   --quiet
 
@@ -77,14 +79,29 @@ echo -n "${SQL_PASSWORD}" | gcloud secrets create mssql-password --data-file=- -
 echo -n "support@${DOMAIN}" | gcloud secrets create support-email --data-file=- --replication-policy=automatic --quiet 2>/dev/null || true
 
 # --- Cloud SQL ---
+log "Configuring Private Services Access for Cloud SQL..."
+gcloud compute addresses create google-managed-services-default \
+  --global \
+  --purpose=VPC_PEERING \
+  --prefix-length=16 \
+  --description="PEERING_ADDRESS_RANGE" \
+  --network=default \
+  --quiet 2>/dev/null || true
+
+gcloud services vpc-peerings connect \
+  --service=servicenetworking.googleapis.com \
+  --ranges=google-managed-services-default \
+  --network=default \
+  --quiet 2>/dev/null || true
+
 log "Creating Cloud SQL for SQL Server (this takes ~5 minutes)..."
 gcloud sql instances describe "${SQL_INSTANCE}" >/dev/null 2>&1 || \
   gcloud sql instances create "${SQL_INSTANCE}" \
-    --database-version=SQLSERVER_2022_STANDARD \
+    --database-version=SQLSERVER_2022_EXPRESS \
     --tier="${SQL_TIER}" \
     --region="${REGION}" \
     --root-password="${SQL_PASSWORD}" \
-    --availability-type=REGIONAL \
+    --availability-type=ZONAL \
     --network=projects/${PROJECT_ID}/global/networks/default \
     --no-assign-ip \
     --quiet
@@ -107,7 +124,7 @@ gcloud compute networks vpc-access connectors describe realestate-connector --re
 
 # --- Service Accounts ---
 log "Creating service accounts..."
-for svc in identity property crm developer-api gateway frontend-client client-facing brochure-worker image-worker syndication-worker monitoring; do
+for svc in identity property crm developer-api gateway frontend-client client-facing brochure-worker image-worker syndication-worker; do
   gcloud iam service-accounts describe "${svc}-sa@${PROJECT_ID}.iam.gserviceaccount.com" >/dev/null 2>&1 || \
     gcloud iam service-accounts create "${svc}-sa" \
       --display-name="Real Estate ${svc} service account" --quiet
@@ -118,17 +135,17 @@ log "Binding IAM roles..."
 for sa in identity property crm developer-api; do
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${sa}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --role="roles/cloudsql.client" --quiet >/dev/null
+    --role="roles/cloudsql.client" --condition=None --quiet >/dev/null
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${sa}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --role="roles/secretmanager.secretAccessor" --quiet >/dev/null
+    --role="roles/secretmanager.secretAccessor" --condition=None --quiet >/dev/null
 done
 
 # Allow public access for frontend services
 for sa in gateway frontend-client client-facing; do
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${sa}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --role="roles/run.invoker" --quiet >/dev/null
+    --role="roles/run.invoker" --condition=None --quiet >/dev/null
 done
 
 # --- Container builds ---
@@ -148,105 +165,74 @@ declare -A SERVICES=(
 
 for svc in "${!SERVICES[@]}"; do
   dockerfile="${SERVICES[$svc]}"
-  log "Building ${svc}..."
-  docker build \
-    --build-arg BUILDCONFIGURATION=Release \
-    -t "${ARTIFACT_REG}/${svc}:${SHORT_SHA}" \
-    -t "${ARTIFACT_REG}/${svc}:latest" \
-    -f "${dockerfile}" \
-    . >/tmp/build-${svc}.log 2>&1 || error "Build failed for ${svc} (see /tmp/build-${svc}.log)"
-  docker push "${ARTIFACT_REG}/${svc}:${SHORT_SHA}"
-  docker push "${ARTIFACT_REG}/${svc}:latest"
+
+  # Check if the specific tag already exists in registry to skip redundant build/push
+  if gcloud artifacts docker images list "${ARTIFACT_REG}/${svc}" --filter="TAGS:${SHORT_SHA}" --format="get(package)" 2>/dev/null | grep -q "${svc}"; then
+    log "Image ${svc}:${SHORT_SHA} already exists. Skipping build."
+  else
+    log "Building ${svc}..."
+    docker build \
+      --build-arg BUILDCONFIGURATION=Release \
+      -t "${ARTIFACT_REG}/${svc}:${SHORT_SHA}" \
+      -t "${ARTIFACT_REG}/${svc}:latest" \
+      -f "${dockerfile}" \
+      . >/tmp/build-${svc}.log 2>&1 || error "Build failed for ${svc} (see /tmp/build-${svc}.log)"
+
+    docker push "${ARTIFACT_REG}/${svc}:${SHORT_SHA}" &
+    docker push "${ARTIFACT_REG}/${svc}:latest" &
+  fi
 done
+wait
 
 # --- Cloud Run deployments ---
 log "Deploying Cloud Run services..."
 
-# Helper for connection string
-SQL_CONN="Server=10.x.x.x;Database=IdentityDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;"
-
 deploy_service() {
   local name=$1
-  local image=$2
+  local db_name=$2
   shift 2
   log "  → ${name}"
   gcloud run deploy "${name}" \
-    --image="${image}:${SHORT_SHA}" \
+    --image="${ARTIFACT_REG}/${name}:${SHORT_SHA}" \
     --region="${REGION}" \
     --platform=managed \
-    --no-allow-unauthenticated \
     --service-account="${name}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
     --vpc-connector=realestate-connector \
-    --vpc-egress=private-ranges-only \
     --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" \
     --execution-environment=gen2 \
-    --cpu=1 \
-    --memory=1Gi \
-    --min-instances=1 \
+    --cpu=2 \
+    --memory=2Gi \
+    --min-instances=0 \
     --max-instances=10 \
     --concurrency=80 \
     --timeout=300 \
     --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,ASPNETCORE_URLS=http://*:8080" \
+    --set-env-vars="ConnectionStrings__DefaultConnection=Server=127.0.0.1;Database=${db_name};User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;,Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
     --set-secrets="Jwt__Secret=jwt-secret:latest" \
-    --set-cloudsql-instances="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" \
     "$@" \
     --quiet
 }
 
 # Identity
-gcloud run deploy identity-service \
-  --image="${ARTIFACT_REG}/identity-service:${SHORT_SHA}" \
-  --region="${REGION}" \
-  --service-account="identity-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" \
-  --vpc-connector=realestate-connector \
-  --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,ConnectionStrings__DefaultConnection=Server=/cloudsql/${PROJECT_ID}:${REGION}:${SQL_INSTANCE};Database=IdentityDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;" \
-  --set-secrets="Jwt__Secret=jwt-secret:latest" \
-  --no-allow-unauthenticated --quiet
-
+deploy_service identity-service IdentityDB --no-allow-unauthenticated
 IDENTITY_URL=$(gcloud run services describe identity-service --region="${REGION}" --format='value(status.url)')
 
 # Property
-gcloud run deploy property-service \
-  --image="${ARTIFACT_REG}/property-service:${SHORT_SHA}" \
-  --region="${REGION}" \
-  --service-account="property-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" \
-  --vpc-connector=realestate-connector \
-  --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,ConnectionStrings__DefaultConnection=Server=/cloudsql/${PROJECT_ID}:${REGION}:${SQL_INSTANCE};Database=PropertyDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;,Identity__BaseUrl=${IDENTITY_URL}" \
-  --set-secrets="Jwt__Secret=jwt-secret:latest" \
-  --no-allow-unauthenticated --quiet
+deploy_service property-service PropertyDB --no-allow-unauthenticated --set-env-vars="Identity__BaseUrl=${IDENTITY_URL}"
 
 # CRM
-gcloud run deploy crm-service \
-  --image="${ARTIFACT_REG}/crm-service:${SHORT_SHA}" \
-  --region="${REGION}" \
-  --service-account="crm-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" \
-  --vpc-connector=realestate-connector \
-  --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,ConnectionStrings__DefaultConnection=Server=/cloudsql/${PROJECT_ID}:${REGION}:${SQL_INSTANCE};Database=CRMDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;,Identity__BaseUrl=${IDENTITY_URL}" \
-  --set-secrets="Jwt__Secret=jwt-secret:latest" \
-  --no-allow-unauthenticated --quiet
+deploy_service crm-service CRMDB --no-allow-unauthenticated --set-env-vars="Identity__BaseUrl=${IDENTITY_URL}"
 
 # Developer API
-gcloud run deploy developer-api \
-  --image="${ARTIFACT_REG}/developer-api:${SHORT_SHA}" \
-  --region="${REGION}" \
-  --service-account="developer-api-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" \
-  --vpc-connector=realestate-connector \
-  --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,ConnectionStrings__DeveloperConnection=Server=/cloudsql/${PROJECT_ID}:${REGION}:${SQL_INSTANCE};Database=DeveloperDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;,ConnectionStrings__PropertyConnection=Server=/cloudsql/${PROJECT_ID}:${REGION}:${SQL_INSTANCE};Database=PropertyDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;" \
-  --set-secrets="Jwt__Secret=jwt-secret:latest" \
-  --no-allow-unauthenticated --quiet
+deploy_service developer-api DeveloperDB --no-allow-unauthenticated \
+  --set-env-vars="ConnectionStrings__PropertyConnection=Server=127.0.0.1;Database=PropertyDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;"
 
 # Gateway (public)
-gcloud run deploy gateway \
-  --image="${ARTIFACT_REG}/gateway:${SHORT_SHA}" \
-  --region="${REGION}" \
-  --service-account="gateway-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --allow-unauthenticated \
-  --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,Cors__AllowedOrigins__0=https://app.${DOMAIN},Cors__AllowedOrigins__1=https://www.${DOMAIN}" \
-  --min-instances=1 --max-instances=20 --quiet
+log "  → gateway"
+gcloud run deploy gateway --image="${ARTIFACT_REG}/gateway:${SHORT_SHA}" \
+  --region="${REGION}" --service-account="gateway-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --allow-unauthenticated --min-instances=0 --max-instances=20 --cpu=2 --memory=2Gi \
+  --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,Cors__AllowedOrigins__0=https://app.${DOMAIN},Cors__AllowedOrigins__1=https://www.${DOMAIN}" --quiet
 
 GATEWAY_URL=$(gcloud run services describe gateway --region="${REGION}" --format='value(status.url)')
 
@@ -257,7 +243,7 @@ gcloud run deploy frontend-client \
   --service-account="frontend-client-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --allow-unauthenticated \
   --set-env-vars="VITE_API_BASE_URL=${GATEWAY_URL},NODE_ENV=production" \
-  --min-instances=1 --max-instances=10 --quiet
+  --min-instances=0 --max-instances=10 --cpu=2 --memory=2Gi --quiet
 
 # Client-facing marketing (public)
 gcloud run deploy client-facing \
@@ -266,7 +252,7 @@ gcloud run deploy client-facing \
   --service-account="client-facing-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --allow-unauthenticated \
   --set-env-vars="NODE_ENV=production,NEXT_PUBLIC_GATEWAY_URL=${GATEWAY_URL},NEXT_PUBLIC_APP_URL=https://app.${DOMAIN},NEXT_PUBLIC_SITE_URL=https://www.${DOMAIN},LEAD_API_URL=${IDENTITY_URL}" \
-  --min-instances=1 --max-instances=10 --quiet
+  --min-instances=0 --max-instances=10 --cpu=2 --memory=2Gi --quiet
 
 # Workers (private)
 gcloud run deploy brochure-worker \
@@ -275,9 +261,9 @@ gcloud run deploy brochure-worker \
   --service-account="brochure-worker-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --no-allow-unauthenticated \
   --vpc-connector=realestate-connector \
-  --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,Gateway__BaseUrl=${GATEWAY_URL}" \
-  --min-instances=1 --max-instances=5 \
-  --cpu=1 --memory=1Gi --timeout=3600 --quiet
+  --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,Gateway__BaseUrl=${GATEWAY_URL},Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
+  --min-instances=0 --max-instances=5 \
+  --cpu=2 --memory=2Gi --timeout=3600 --quiet
 
 gcloud run deploy image-worker \
   --image="${ARTIFACT_REG}/image-worker:${SHORT_SHA}" \
@@ -285,8 +271,9 @@ gcloud run deploy image-worker \
   --service-account="image-worker-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --no-allow-unauthenticated \
   --vpc-connector=realestate-connector \
+  --set-env-vars="Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
   --min-instances=0 --max-instances=5 \
-  --cpu=1 --memory=1Gi --timeout=3600 --quiet
+  --cpu=2 --memory=2Gi --timeout=3600 --quiet
 
 gcloud run deploy syndication-worker \
   --image="${ARTIFACT_REG}/syndication-worker:${SHORT_SHA}" \
@@ -294,8 +281,9 @@ gcloud run deploy syndication-worker \
   --service-account="syndication-worker-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
   --no-allow-unauthenticated \
   --vpc-connector=realestate-connector \
+  --set-env-vars="Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
   --min-instances=0 --max-instances=5 \
-  --cpu=1 --memory=1Gi --timeout=3600 --quiet
+  --cpu=2 --memory=2Gi --timeout=3600 --quiet
 
 # --- Custom domains ---
 log "Mapping custom domains..."
@@ -332,8 +320,8 @@ Service URLs:
   Marketing:    $(gcloud run services describe client-facing --region=${REGION} --format='value(status.url)' 2>/dev/null || echo pending)
 
 Custom domains (configure DNS at your registrar):
-  A  app.${DOMAIN}   → gateway
-  A  www.${DOMAIN}   → gateway
+  A  app.${DOMAIN}   → frontend-client
+  A  www.${DOMAIN}   → client-facing
   A  api.${DOMAIN}   → gateway
 
 ${YELLOW}Manual follow-ups:${NC}
