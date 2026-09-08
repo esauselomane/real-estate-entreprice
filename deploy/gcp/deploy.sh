@@ -124,7 +124,7 @@ gcloud compute networks vpc-access connectors describe realestate-connector --re
 
 # --- Service Accounts ---
 log "Creating service accounts..."
-for svc in identity property crm developer-api gateway frontend-client client-facing brochure-worker image-worker syndication-worker; do
+for svc in identity property crm gateway frontend-client client-facing brochure-worker image-worker syndication-worker; do
   gcloud iam service-accounts describe "${svc}-sa@${PROJECT_ID}.iam.gserviceaccount.com" >/dev/null 2>&1 || \
     gcloud iam service-accounts create "${svc}-sa" \
       --display-name="Real Estate ${svc} service account" --quiet
@@ -132,7 +132,7 @@ done
 
 # --- IAM ---
 log "Binding IAM roles..."
-for sa in identity property crm developer-api; do
+for sa in identity property crm; do
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${sa}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
     --role="roles/cloudsql.client" --condition=None --quiet >/dev/null
@@ -141,7 +141,7 @@ for sa in identity property crm developer-api; do
     --role="roles/secretmanager.secretAccessor" --condition=None --quiet >/dev/null
 done
 
-# Allow public access for frontend services
+# Allow frontend service accounts to invoke other Cloud Run services
 for sa in gateway frontend-client client-facing; do
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${sa}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
@@ -154,7 +154,6 @@ declare -A SERVICES=(
   ["identity-service"]="backend-services/Identity.Microservice/Dockerfile"
   ["property-service"]="backend-services/Property.Microservice/Dockerfile"
   ["crm-service"]="backend-services/CRM.Microservice/Dockerfile"
-  ["developer-api"]="Developer.API/Dockerfile"
   ["gateway"]="api-gateway/Dockerfile"
   ["brochure-worker"]="backend-services/BrochureGeneration.Worker/Dockerfile"
   ["image-worker"]="backend-services/ImageProcessor.Worker/Dockerfile"
@@ -223,15 +222,11 @@ deploy_service property-service PropertyDB --no-allow-unauthenticated --set-env-
 # CRM
 deploy_service crm-service CRMDB --no-allow-unauthenticated --set-env-vars="Identity__BaseUrl=${IDENTITY_URL}"
 
-# Developer API
-deploy_service developer-api DeveloperDB --no-allow-unauthenticated \
-  --set-env-vars="ConnectionStrings__PropertyConnection=Server=127.0.0.1;Database=PropertyDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;"
-
 # Gateway (public)
 log "  → gateway"
 gcloud run deploy gateway --image="${ARTIFACT_REG}/gateway:${SHORT_SHA}" \
   --region="${REGION}" --service-account="gateway-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --allow-unauthenticated --min-instances=0 --max-instances=20 --cpu=2 --memory=2Gi \
+  --no-allow-unauthenticated --min-instances=0 --max-instances=20 --cpu=2 --memory=2Gi \
   --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,Cors__AllowedOrigins__0=https://app.${DOMAIN},Cors__AllowedOrigins__1=https://www.${DOMAIN}" --quiet
 
 GATEWAY_URL=$(gcloud run services describe gateway --region="${REGION}" --format='value(status.url)')
@@ -241,7 +236,7 @@ gcloud run deploy frontend-client \
   --image="${ARTIFACT_REG}/frontend-client:${SHORT_SHA}" \
   --region="${REGION}" \
   --service-account="frontend-client-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --allow-unauthenticated \
+  --no-allow-unauthenticated \
   --set-env-vars="VITE_API_BASE_URL=${GATEWAY_URL},NODE_ENV=production" \
   --min-instances=0 --max-instances=10 --cpu=2 --memory=2Gi --quiet
 
@@ -250,7 +245,7 @@ gcloud run deploy client-facing \
   --image="${ARTIFACT_REG}/client-facing:${SHORT_SHA}" \
   --region="${REGION}" \
   --service-account="client-facing-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --allow-unauthenticated \
+  --no-allow-unauthenticated \
   --set-env-vars="NODE_ENV=production,NEXT_PUBLIC_GATEWAY_URL=${GATEWAY_URL},NEXT_PUBLIC_APP_URL=https://app.${DOMAIN},NEXT_PUBLIC_SITE_URL=https://www.${DOMAIN},LEAD_API_URL=${IDENTITY_URL}" \
   --min-instances=0 --max-instances=10 --cpu=2 --memory=2Gi --quiet
 
@@ -297,6 +292,7 @@ for svc in gateway frontend-client client-facing; do
     --region="${REGION}" \
     --member="allUsers" \
     --role="roles/run.invoker" \
+    --condition=None \
     --quiet 2>/dev/null || true
 done
 
