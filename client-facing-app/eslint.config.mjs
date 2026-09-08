@@ -11,8 +11,7 @@ export default tseslint.config(
       ...react.configs.recommended.rules,
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",
-      "react/no-unescaped-jsx-in-rtl": "off",
-       "react/no-unescaped-entities": "off"
+      "react/no-unescaped-entities": "off"
     },
   }
 );

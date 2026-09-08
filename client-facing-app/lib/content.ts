@@ -216,15 +216,13 @@ export const pricing: {
 
 export const testimonials: { quote: string; name: string; role: string; logo: string }[] = [
   {
-    quote:
-      "The brochure Worker turned a 2-hour manual task into a 42-second click. Deals move faster now.",
+    quote:"The brochure Worker turned a 2-hour manual task into a 42-second click. Deals move faster now.",
     name: "Thandi Mokoena",
     role: "Director, Mokoena Properties",
     logo: "M",
   },
   {
-    quote:
-      "One workspace for CRM, listings and syndication. Our conversion rate improved noticeably.",
+    quote: "One workspace for CRM, listings and syndication. Our conversion rate improved noticeably.",
     name: "Raj Patel",
     role: "Head of Brokerage, Nexus Group",
     logo: "N",
