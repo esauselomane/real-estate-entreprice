@@ -1,8 +1,14 @@
 using Property.Microservice.Data;
+using Property.Microservice.DTOs;
+using Property.Microservice.Models;
+using Property.Microservice.Services.Abstractions;
+using Property.Microservice.Services.Implementation;
 using Property.Microservice.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using System.Security.Claims;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,6 +26,28 @@ builder.Services.AddDbContext<PropertyDbContext>(options =>
 {
     options.UseSqlServer(connectionString);
 });
+
+builder.Services.AddScoped<IPropertyRepository, PropertyRepository>();
+builder.Services.AddScoped<IPropertyUnitRepository, PropertyUnitRepository>();
+builder.Services.AddScoped<IRepository<ExternalPlatform>, ExternalPlatformRepository>();
+builder.Services.AddScoped<IRepository<PropertyPlatformSyndication>, PropertyPlatformSyndicationRepository>();
+builder.Services.AddScoped<IRepository<UnitLease>, UnitLeaseRepository>();
+builder.Services.AddScoped<IRepository<MaintenanceCall>, MaintenanceCallRepository>();
+builder.Services.AddScoped<IRepository<SoleMandate>, SoleMandateRepository>();
+builder.Services.AddScoped<IRepository<AmenityType>, AmenityTypeRepository>();
+builder.Services.AddScoped<IRepository<PropertyUnitAmenity>, PropertyUnitAmenityRepository>();
+builder.Services.AddScoped<IRepository<PropertyType>, PropertyTypeRepository>();
+
+builder.Services.AddScoped<IPropertyRepository, PropertyRepository>();
+builder.Services.AddScoped<IPropertyUnitRepository, PropertyUnitRepository>();
+builder.Services.AddScoped<IRepository<ExternalPlatform>, ExternalPlatformRepository>();
+builder.Services.AddScoped<IRepository<PropertyPlatformSyndication>, PropertyPlatformSyndicationRepository>();
+builder.Services.AddScoped<IRepository<UnitLease>, UnitLeaseRepository>();
+builder.Services.AddScoped<IRepository<MaintenanceCall>, MaintenanceCallRepository>();
+builder.Services.AddScoped<IRepository<SoleMandate>, SoleMandateRepository>();
+builder.Services.AddScoped<IRepository<AmenityType>, AmenityTypeRepository>();
+builder.Services.AddScoped<IRepository<PropertyUnitAmenity>, PropertyUnitAmenityRepository>();
+builder.Services.AddScoped<IRepository<PropertyType>, PropertyTypeRepository>();
 
 // 3. 🛡️ REGISTER JWT BEARER AUTHENTICATION (mirrors Identity.Microservice signing keys)
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "SuperSecretRealEstateEnterpriseCryptographicSigningKey123!";
@@ -44,10 +72,21 @@ builder.Services.AddAuthentication(options =>
             Encoding.UTF8.GetBytes(jwtSecret))
     };
 });
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .RequireClaim("TenantId")
+        .Build();
+    options.AddPolicy("PlatformAdminOnly", policy =>
+        policy.RequireAuthenticatedUser()
+              .RequireClaim(ClaimTypes.Role, "PlatformAdmin", "SuperAdmin"));
+});
 
 // 4. INJECT EVENT-DRIVEN KAFKA STREAMING SERVICE AS A SINGLETON
 builder.Services.AddSingleton<KafkaPublisherService>();
+builder.Services.AddHostedService<Property.Microservice.Consumers.SyndicationCompletedConsumer>();
+builder.Services.AddHostedService<Property.Microservice.Consumers.PropertyImageProcessedConsumer>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<PermissionCheckService>();
@@ -248,7 +287,55 @@ using (var serviceScope = app.Services.CreateScope())
         ) AS c(n, La, Lo) ON c.n = [pa].[PropertyId] % 8;
     ");
 
-    PropertySeedData.EnsureSeeded(databaseContext);
+    var propertyTypeRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<PropertyType>>();
+    var amenityTypeRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<AmenityType>>();
+    var externalPlatformRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<ExternalPlatform>>();
+    var propertyRepository = serviceScope.ServiceProvider.GetRequiredService<IPropertyRepository>();
+    var propertyUnitRepository = serviceScope.ServiceProvider.GetRequiredService<IPropertyUnitRepository>();
+    var propertyPlatformSyndicationRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<PropertyPlatformSyndication>>();
+    var unitLeaseRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<UnitLease>>();
+    var maintenanceCallRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<MaintenanceCall>>();
+
+    PropertySeedData.EnsureSeeded(databaseContext, propertyTypeRepository, amenityTypeRepository, externalPlatformRepository, propertyRepository, propertyUnitRepository, propertyPlatformSyndicationRepository, unitLeaseRepository, maintenanceCallRepository);
+
+    // 📸 Add GalleryImageJson column for property image gallery (separate from verification docs)
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'[PropertyAssets]') AND name = N'GalleryImageJson')
+        BEGIN
+            ALTER TABLE [PropertyAssets] ADD [GalleryImageJson] nvarchar(MAX) NOT NULL CONSTRAINT DF_PropertyAssets_GalleryImageJson DEFAULT N'[]';
+        END
+    ");
+
+    // 🚫 Prevent duplicate syndication records at the database level.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'[PropertyPlatformSyndications]') AND name = N'UX_PropertyPlatformSyndication_Property_Platform')
+        BEGIN
+            CREATE UNIQUE INDEX [UX_PropertyPlatformSyndication_Property_Platform]
+            ON [PropertyPlatformSyndications] ([PropertyId], [PlatformId]);
+        END
+    ");
+
+    // 📥 Import job tracking table for async Excel data imports.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(N'[ImportJobs]') AND type = N'U')
+        BEGIN
+            CREATE TABLE [ImportJobs] (
+                [Id]            int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [JobId]         nvarchar(64)   NOT NULL,
+                [ImportType]    nvarchar(50)   NOT NULL,
+                [Status]        nvarchar(20)   NOT NULL,
+                [TotalRows]     int            NOT NULL CONSTRAINT DF_Import_TotalRows DEFAULT 0,
+                [ProcessedRows] int            NOT NULL CONSTRAINT DF_Import_ProcessedRows DEFAULT 0,
+                [SuccessCount]  int            NOT NULL CONSTRAINT DF_Import_SuccessCount DEFAULT 0,
+                [ErrorCount]    int            NOT NULL CONSTRAINT DF_Import_ErrorCount DEFAULT 0,
+                [ErrorsJson]    nvarchar(MAX)  NOT NULL CONSTRAINT DF_Import_Errors DEFAULT N'[]',
+                [CreatedAt]     datetime2      NOT NULL CONSTRAINT DF_Import_CreatedAt DEFAULT SYSUTCDATETIME(),
+                [CompletedAt]   datetime2      NULL
+            );
+            CREATE INDEX [IX_ImportJobs_JobId] ON [ImportJobs] ([JobId]);
+            CREATE INDEX [IX_ImportJobs_Status] ON [ImportJobs] ([Status]);
+        END
+    ");
 }
 
 // 6. INJECT REQUEST PIPELINE MIDDLEWARE HANDLERS

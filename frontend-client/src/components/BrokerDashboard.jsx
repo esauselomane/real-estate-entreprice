@@ -313,9 +313,9 @@ export default function BrokerDashboard() {
           {leaderboard.length === 0 ? (
             <EmptyState label="No agents on the roster yet." />
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-80 rounded-xl border border-slate-800">
               <table className="w-full text-xs">
-                <thead>
+                <thead className="sticky top-0 bg-slate-900 z-10">
                   <tr className="text-left text-slate-500 border-b border-slate-800">
                     <SortHeader label="Agent" field="name" active={sortKey === 'name'} dir={sortDir === 'asc'} onRequest={requestSort} right={false} />
                     <SortHeader label="Active Listings" field="activeListings" active={sortKey === 'activeListings'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />

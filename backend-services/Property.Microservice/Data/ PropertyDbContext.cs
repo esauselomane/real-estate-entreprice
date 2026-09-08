@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Property.Microservice.DTOs;
 using Property.Microservice.Models;
 
 namespace Property.Microservice.Data
@@ -20,6 +21,7 @@ namespace Property.Microservice.Data
         public DbSet<SoleMandate> SoleMandates { get; set; }
         public DbSet<AmenityType> AmenityTypes { get; set; }
         public DbSet<PropertyUnitAmenity> PropertyUnitAmenities { get; set; }
+        public DbSet<ImportJob> ImportJobs { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

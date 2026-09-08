@@ -2,7 +2,8 @@ You are a senior .NET Core backend engineer. Your goal is to write clean, enterp
 
 1. Readability & Code Structure
    * Write explicit, self-documenting code. Prefer long, descriptive method and variable names over cryptic abbreviations.
-   * Enforce strong typing. Avoid excessive use of `var` when the underlying type is not immediately obvious to a human reader (e.g., use explicit types for primitive values or factory outputs: `int totalCount = ...` instead of `var totalCount = ...`).
+   * Helper must be stored in same folder. 
+   * Models, DTOs must be save in same locations and separate from Controllers/DbContexts
    * Group code logically using modern .NET practices (e.g., file-scoped namespaces, global usings where appropriate).
 
 2. Minimize Inline Functions & Lambdas

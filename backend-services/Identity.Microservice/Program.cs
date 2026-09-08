@@ -1,5 +1,8 @@
 using Identity.Microservice.Data;
+using Identity.Microservice.DTOs;
 using Identity.Microservice.Models;
+using Identity.Microservice.Services.Abstractions;
+using Identity.Microservice.Services.Implementation;
 using Identity.Microservice.Services;
 using Identity.Microservice.Authorization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -25,6 +28,16 @@ builder.Services.AddDbContext<IdentityDbContext>(options =>
 {
     options.UseSqlServer(connectionString);
 });
+
+builder.Services.AddScoped<ITenantRepository, TenantRepository>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<ISystemRoleRepository, SystemRoleRepository>();
+builder.Services.AddScoped<IPermissionRepository, PermissionRepository>();
+builder.Services.AddScoped<IRolePermissionRepository, RolePermissionRepository>();
+builder.Services.AddScoped<IUserAccessClaimRepository, UserAccessClaimRepository>();
+builder.Services.AddScoped<IRepository<LeadCaptureRequest>, LeadCaptureRequestRepository>();
+builder.Services.AddScoped<ILeadWorkflowRepository, LeadWorkflowRepository>();
+builder.Services.AddScoped<IPricingPackageRepository, PricingPackageRepository>();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddAuthorization(options =>
@@ -68,7 +81,15 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
     var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
     db.Database.EnsureCreated();
-    IdentitySeedData.EnsureSeeded(db, config);
+    var tenantRepository = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
+    var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
+    var userAccessClaimRepository = scope.ServiceProvider.GetRequiredService<IUserAccessClaimRepository>();
+    var permissionRepository = scope.ServiceProvider.GetRequiredService<IPermissionRepository>();
+    var systemRoleRepository = scope.ServiceProvider.GetRequiredService<ISystemRoleRepository>();
+    var rolePermissionRepository = scope.ServiceProvider.GetRequiredService<IRolePermissionRepository>();
+    var pricingPackageRepository = scope.ServiceProvider.GetRequiredService<IPricingPackageRepository>();
+
+    IdentitySeedData.EnsureSeeded(db, config, tenantRepository, userRepository, userAccessClaimRepository, permissionRepository, systemRoleRepository, rolePermissionRepository, pricingPackageRepository);
 }
 app.UseCors("AllowViteFrontend");
 app.UseRouting();

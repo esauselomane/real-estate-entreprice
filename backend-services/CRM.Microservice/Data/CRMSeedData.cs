@@ -1,4 +1,8 @@
+using System.Linq.Expressions;
+using System.Linq;
+using CRM.Microservice.DTOs;
 using CRM.Microservice.Models;
+using CRM.Microservice.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
 namespace CRM.Microservice.Data
@@ -33,7 +37,7 @@ namespace CRM.Microservice.Data
             BackfillColumn(context, "AgencyRecords", "TrialEndDate", "datetime2 NULL");
         }
 
-        public static void EnsureSeeded(CRMDbContext context)
+        public static void EnsureSeeded(CRMDbContext context, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, ILeadRepository leadRepository, IDealRepository dealRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, IOwnerTenantRepository ownerTenantRepository, IGeographyRepository geographyRepository, IContactPersonRepository contactPersonRepository, IBrochureCardRepository brochureCardRepository, IDealBrokerSplitRepository dealBrokerSplitRepository, INotificationRepository notificationRepository)
         {
             if (context == null)
             {
@@ -46,14 +50,14 @@ namespace CRM.Microservice.Data
 
             EnsureAgencyParentColumn(context);
 
-            if (context.AgencyRecords.Count() < 1000)
+            if (agencyRepository.Query().Count() < 1000)
             {
                 var agencies = new List<AgencyRecord>();
                 // 🧬 Each agency gets its OWN tenant so the TenantSwitcher can
                 // actually filter the universe. The first 8 agencies are
                 // top-level (parent = null); the rest roll up under AG-0001
                 // to demonstrate the parent/child hierarchy.
-                for (var i = context.AgencyRecords.Count() + 1; i <= 1000; i++)
+                for (var i = agencyRepository.Query().Count() + 1; i <= 1000; i++)
                 {
                     string? parentAgencyId = i <= 8 ? null : (i % 50 == 0 ? $"AG-0001" : $"AG-{(i % 8) + 1:0000}");
                     agencies.Add(new AgencyRecord
@@ -72,10 +76,10 @@ namespace CRM.Microservice.Data
                     });
                 }
 
-                context.AgencyRecords.AddRange(agencies);
+                agencyRepository.AddRange(agencies);
             }
 
-            if (context.ContactPersons.Count() == 0)
+            if (contactPersonRepository.Query().Count() == 0)
             {
                 var contactPersons = new List<ContactPerson>
                 {
@@ -83,12 +87,12 @@ namespace CRM.Microservice.Data
                     new() { ContactPersonId = "CPT-00002", AgencyId = "AG-0001", FullName = "Sarah du Toit", Email = "sarah.d@agency1.local", Phone = "+27821000002", Position = "Leasing Broker", Role = "Broker", IsAgencyAdmin = false, CreatedAt = DateTime.UtcNow },
                     new() { ContactPersonId = "CPT-00003", AgencyId = "AG-0002", FullName = "Marco Botha", Email = "marco.b@agency2.local", Phone = "+27821000003", Position = "Property Manager", Role = "Owner", IsAgencyAdmin = false, CreatedAt = DateTime.UtcNow }
                 };
-                context.ContactPersons.AddRange(contactPersons);
+                contactPersonRepository.AddRange(contactPersons);
             }
 
-            if (context.AgencyRecords.Any(a => string.IsNullOrWhiteSpace(a.TradingName)))
+            if (agencyRepository.Query().Any(a => string.IsNullOrWhiteSpace(a.TradingName)))
             {
-                foreach (var a in context.AgencyRecords.Where(a => string.IsNullOrWhiteSpace(a.TradingName)))
+                foreach (var a in agencyRepository.Query().Where(a => string.IsNullOrWhiteSpace(a.TradingName)))
                 {
                     a.TradingName = a.Name;
                     a.RegistrationNumber = $"REG-{Guid.NewGuid().ToString().Substring(0, 5).ToUpper()}";
@@ -98,16 +102,16 @@ namespace CRM.Microservice.Data
 
             context.SaveChanges();
 
-            if (context.BrokerRecords.Count() < 1000)
+            if (brokerRepository.Query().Count() < 1000)
             {
                 var brokers = new List<BrokerRecord>();
                 // 🧬 Brokers inherit TenantId from their parent agency so the
                 // TenantSwitcher can scope the broker list to one agency.
-                var agencyTenantLookup = context.AgencyRecords
+                var agencyTenantLookup = agencyRepository.Query()
                     .Select(a => new { a.AgencyId, a.TenantId })
                     .ToDictionary(a => a.AgencyId, a => a.TenantId);
                 var agencyIds = agencyTenantLookup.Keys.ToList();
-                var brokerIndex = context.BrokerRecords.Count() + 1;
+                var brokerIndex = brokerRepository.Query().Count() + 1;
 
                 for (var i = brokerIndex; i <= 1000; i++)
                 {
@@ -127,15 +131,15 @@ namespace CRM.Microservice.Data
                     });
                 }
 
-                context.BrokerRecords.AddRange(brokers);
+                brokerRepository.AddRange(brokers);
             }
 
             context.SaveChanges();
 
-            if (context.OwnerTenantRecords.Count() < 1000)
+            if (ownerTenantRepository.Query().Count() < 1000)
             {
                 var ownersTenants = new List<OwnerTenantRecord>();
-                var ownerCount = context.OwnerTenantRecords.Count() + 1;
+                var ownerCount = ownerTenantRepository.Query().Count() + 1;
                 for (var i = ownerCount; i <= 1000; i++)
                 {
                     // 🧬 Each row is stamped with the tenant of an agency
@@ -157,15 +161,15 @@ namespace CRM.Microservice.Data
                     });
                 }
 
-                context.OwnerTenantRecords.AddRange(ownersTenants);
+                ownerTenantRepository.AddRange(ownersTenants);
             }
 
             context.SaveChanges();
 
-            if (context.CRMCompanies.Count() < 1000)
+            if (companyRepository.Query().Count() < 1000)
             {
                 var companies = new List<CRMCompany>();
-                for (var i = context.CRMCompanies.Count() + 1; i <= 1000; i++)
+                for (var i = companyRepository.Query().Count() + 1; i <= 1000; i++)
                 {
                     companies.Add(new CRMCompany
                     {
@@ -182,16 +186,16 @@ namespace CRM.Microservice.Data
                     });
                 }
 
-                context.CRMCompanies.AddRange(companies);
+                companyRepository.AddRange(companies);
             }
 
             context.SaveChanges();
 
-            if (context.CRMLegalEntities.Count() < 1000)
+            if (legalEntityRepository.Query().Count() < 1000)
             {
                 var legalEntities = new List<CRMLegalEntity>();
-                var companyIds = context.CRMCompanies.Select(c => c.CompanyId).ToList();
-                for (var i = context.CRMLegalEntities.Count() + 1; i <= 1000; i++)
+                var companyIds = companyRepository.Query().Select(c => c.CompanyId).ToList();
+                for (var i = legalEntityRepository.Query().Count() + 1; i <= 1000; i++)
                 {
                     legalEntities.Add(new CRMLegalEntity
                     {
@@ -206,17 +210,17 @@ namespace CRM.Microservice.Data
                     });
                 }
 
-                context.CRMLegalEntities.AddRange(legalEntities);
+                legalEntityRepository.AddRange(legalEntities);
             }
 
             context.SaveChanges();
 
-            if (context.CRMContacts.Count() < 1000)
+            if (contactRepository.Query().Count() < 1000)
             {
                 var contacts = new List<CRMContact>();
-                var companyIds = context.CRMCompanies.Select(c => c.CompanyId).ToList();
-                var legalIds = context.CRMLegalEntities.Select(l => l.LegalEntityId).ToList();
-                for (var i = context.CRMContacts.Count() + 1; i <= 1000; i++)
+                var companyIds = companyRepository.Query().Select(c => c.CompanyId).ToList();
+                var legalIds = legalEntityRepository.Query().Select(l => l.LegalEntityId).ToList();
+                for (var i = contactRepository.Query().Count() + 1; i <= 1000; i++)
                 {
                     contacts.Add(new CRMContact
                     {
@@ -233,25 +237,25 @@ namespace CRM.Microservice.Data
                     });
                 }
 
-                context.CRMContacts.AddRange(contacts);
+                contactRepository.AddRange(contacts);
             }
 
             context.SaveChanges();
 
-            if (context.LeadRecords.Count() < 1000)
+            if (leadRepository.Query().Count() < 1000)
             {
                 var leads = new List<LeadRecord>();
                 // 🧬 Leads inherit TenantId from their allocated broker so the
                 // TenantSwitcher scopes the lead list to a single agency.
                 // The seed now stores AllocatedBrokerIds (csv of broker user
                 // ids) instead of the legacy free-text AllocatedToAgent name.
-                var brokerTenantLookup = context.BrokerRecords
+                var brokerTenantLookup = brokerRepository.Query()
                     .Select(b => new { b.BrokerId, b.FullName, b.TenantId })
                     .GroupBy(x => x.BrokerId)
                     .Select(g => g.First())
                     .ToDictionary(x => x.BrokerId, x => new { x.FullName, x.TenantId });
                 var agents = brokerTenantLookup.Keys.ToList();
-                for (var i = context.LeadRecords.Count() + 1; i <= 1000; i++)
+                for (var i = leadRepository.Query().Count() + 1; i <= 1000; i++)
                 {
                     var agentId = agents[(i - 1) % agents.Count];
                     var agent = brokerTenantLookup[agentId];
@@ -279,27 +283,27 @@ namespace CRM.Microservice.Data
                     });
                 }
 
-                context.LeadRecords.AddRange(leads);
+                leadRepository.AddRange(leads);
             }
 
             context.SaveChanges();
 
-            if (context.DealRecords.Count() < 1000)
+            if (dealRepository.Query().Count() < 1000)
             {
                 var deals = new List<DealRecord>();
-                var buyerIds = context.CRMContacts.Select(c => c.ContactId).ToList();
-                var sellerIds = context.CRMContacts.Select(c => c.ContactId).ToList();
+                var buyerIds = contactRepository.Query().Select(c => c.ContactId).ToList();
+                var sellerIds = contactRepository.Query().Select(c => c.ContactId).ToList();
                 // 🧬 Deals inherit TenantId from the allocated broker's agency
                 // so the TenantSwitcher scopes the deal list to one agency.
                 // AllocatedBrokerIds stores the broker user id (matches the
                 // updated DealRecord schema).
-                var brokerTenantLookup = context.BrokerRecords
+                var brokerTenantLookup = brokerRepository.Query()
                     .Select(b => new { b.BrokerId, b.FullName, b.TenantId })
                     .GroupBy(x => x.BrokerId)
                     .Select(g => g.First())
                     .ToDictionary(x => x.BrokerId, x => new { x.FullName, x.TenantId });
                 var agents = brokerTenantLookup.Keys.ToList();
-                for (var i = context.DealRecords.Count() + 1; i <= 1000; i++)
+                for (var i = dealRepository.Query().Count() + 1; i <= 1000; i++)
                 {
                     var agentId = agents[(i - 1) % agents.Count];
                     var agent = brokerTenantLookup[agentId];
@@ -328,12 +332,12 @@ namespace CRM.Microservice.Data
                     });
                 }
 
-                context.DealRecords.AddRange(deals);
+                dealRepository.AddRange(deals);
             }
 
-            if (context.GeographyRecords.Count() < 1)
+            if (geographyRepository.Query().Count() < 1)
             {
-                context.GeographyRecords.AddRange(new List<GeographyRecord>
+                geographyRepository.AddRange(new List<GeographyRecord>
                 {
                     new() { Country = "South Africa", Province = "Western Cape", City = "Cape Town", Suburb = "City Bowl", Latitude = -33.9249m, Longitude = 18.4207m },
                     new() { Country = "South Africa", Province = "Western Cape", City = "Cape Town", Suburb = "Rondebosch", Latitude = -33.9322m, Longitude = 18.4672m },
@@ -345,9 +349,9 @@ namespace CRM.Microservice.Data
             }
 
             // Backfill a representative interest profile onto existing owner/tenant rows.
-            if (context.OwnerTenantRecords.Any())
+            if (ownerTenantRepository.Query().Any())
             {
-                var ots = context.OwnerTenantRecords.ToList();
+                var ots = ownerTenantRepository.Query().ToList();
                 var types = new[] { "Residential", "Commercial", "Retail", "Industrial" };
                 for (int i = 0; i < ots.Count; i++)
                 {
@@ -366,19 +370,19 @@ namespace CRM.Microservice.Data
             // row lands in a per-agency tenant (mirrors the seeder's
             // `i % 1000 + 1` distribution). Idempotent: once no rows carry
             // TEN-001, the UPDATE has nothing to do.
-            BackfillLegacySingleTenantDistribution(context);
+            BackfillLegacySingleTenantDistribution(context, agencyRepository, brokerRepository, ownerTenantRepository, companyRepository, legalEntityRepository, contactRepository, leadRepository, dealRepository);
 
             context.SaveChanges();
         }
 
-        private static void BackfillLegacySingleTenantDistribution(CRMDbContext context)
+        private static void BackfillLegacySingleTenantDistribution(CRMDbContext context, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, IOwnerTenantRepository ownerTenantRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, ILeadRepository leadRepository, IDealRepository dealRepository)
         {
             var legacyTenants = new[] { "TEN-001", "" };
             // Agencies: each agency gets a unique tenant + (if i > 8) a parent.
             // Only well-formed AG-#### ids are eligible; legacy rows that
             // somehow got stamped with a TEN-* or random AgencyId are left
             // for manual cleanup.
-            var staleAgencies = context.AgencyRecords
+            var staleAgencies = agencyRepository.Query()
                 .Where(a => legacyTenants.Contains(a.TenantId) && a.AgencyId.StartsWith("AG-"))
                 .OrderBy(a => a.AgencyId)
                 .ToList();
@@ -405,10 +409,10 @@ namespace CRM.Microservice.Data
             context.SaveChanges();
 
             // Brokers: re-stamp by joining to their parent agency.
-            var staleBrokers = context.BrokerRecords
+            var staleBrokers = brokerRepository.Query()
                 .Where(b => legacyTenants.Contains(b.TenantId))
                 .ToList();
-            var agencyTenantLookup = context.AgencyRecords
+            var agencyTenantLookup = agencyRepository.Query()
                 .Select(a => new { a.AgencyId, a.TenantId })
                 .ToDictionary(a => a.AgencyId, a => a.TenantId);
             foreach (var b in staleBrokers)
@@ -420,7 +424,7 @@ namespace CRM.Microservice.Data
 
             // OwnerTenantRecords.PrimaryKey is OwnerTenantId (int). Spread
             // legacy TEN-001 rows across the new tenant distribution.
-            var staleOwners = context.OwnerTenantRecords.Where(r => legacyTenants.Contains(r.TenantId)).ToList();
+            var staleOwners = ownerTenantRepository.Query().Where(r => legacyTenants.Contains(r.TenantId)).ToList();
             foreach (var rec in staleOwners)
             {
                 var slot = (Math.Abs(rec.OwnerTenantId) % 1000) + 1;
@@ -452,32 +456,32 @@ namespace CRM.Microservice.Data
                     setTenant(row, $"TEN-{slot:0000}");
                 }
             }
-            var staleCompanies = context.CRMCompanies.Where(c => legacyTenants.Contains(c.TenantId)).ToList();
+            var staleCompanies = companyRepository.Query().Where(c => legacyTenants.Contains(c.TenantId)).ToList();
             DistributeByStringPk(staleCompanies, c => c.CompanyId, (c, t) => c.TenantId = t);
             context.SaveChanges();
-            var staleLegal = context.CRMLegalEntities.Where(l => legacyTenants.Contains(l.TenantId)).ToList();
+            var staleLegal = legalEntityRepository.Query().Where(l => legacyTenants.Contains(l.TenantId)).ToList();
             DistributeByStringPk(staleLegal, l => l.LegalEntityId, (l, t) => l.TenantId = t);
             context.SaveChanges();
-            var staleContacts = context.CRMContacts.Where(c => legacyTenants.Contains(c.TenantId)).ToList();
+            var staleContacts = contactRepository.Query().Where(c => legacyTenants.Contains(c.TenantId)).ToList();
             DistributeByStringPk(staleContacts, c => c.ContactId, (c, t) => c.TenantId = t);
             context.SaveChanges();
 
             // Leads + Deals inherit the broker's tenant. (Legacy AllocatedToAgent
             // field was removed; the brokerTenantLookup is retained for any
             // pre-migration rows that still need tenant stamping.)
-            var brokerTenantLookup2 = context.BrokerRecords
+            var brokerTenantLookup2 = brokerRepository.Query()
                 .Where(b => !string.IsNullOrEmpty(b.FullName))
                 .Select(b => new { b.FullName, b.TenantId })
                 .GroupBy(x => x.FullName)
                 .Select(g => g.First())
                 .ToDictionary(x => x.FullName, x => x.TenantId);
-            var staleLeads = context.LeadRecords.Where(l => legacyTenants.Contains(l.TenantId)).ToList();
+            var staleLeads = leadRepository.Query().Where(l => legacyTenants.Contains(l.TenantId)).ToList();
             foreach (var l in staleLeads)
             {
                 l.TenantId = $"TEN-{(Math.Abs(l.LeadId) % 1000) + 1:0000}";
             }
             context.SaveChanges();
-            var staleDeals = context.DealRecords.Where(d => legacyTenants.Contains(d.TenantId)).ToList();
+            var staleDeals = dealRepository.Query().Where(d => legacyTenants.Contains(d.TenantId)).ToList();
             foreach (var d in staleDeals)
             {
                 d.TenantId = $"TEN-{(Math.Abs(d.DealId) % 1000) + 1:0000}";
@@ -489,7 +493,7 @@ namespace CRM.Microservice.Data
             // stamped now so reports actually surface numbers. Idempotent —
             // any row that already has a non-zero CommissionValue is left
             // untouched.
-            var bareDeals = context.DealRecords
+            var bareDeals = dealRepository.Query()
                 .Where(d => d.CommissionValue == 0m || d.CommissionType == string.Empty)
                 .ToList();
             foreach (var d in bareDeals)
@@ -502,7 +506,7 @@ namespace CRM.Microservice.Data
             }
             if (bareDeals.Count > 0) context.SaveChanges();
 
-            var bareLeads = context.LeadRecords
+            var bareLeads = leadRepository.Query()
                 .Where(l => l.CommissionValue == 0m || l.CommissionType == string.Empty)
                 .ToList();
             foreach (var l in bareLeads)

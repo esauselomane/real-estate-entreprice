@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Property.Microservice.Data;
+using Property.Microservice.DTOs;
 using Property.Microservice.Models;
 
 namespace Property.Microservice.Controllers
@@ -23,6 +24,7 @@ namespace Property.Microservice.Controllers
         }
 
         [HttpGet("amenity-types")]
+        [Authorize]
         public async Task<IActionResult> GetAmenityTypes()
         {
             var types = await _context.AmenityTypes
@@ -45,7 +47,7 @@ namespace Property.Microservice.Controllers
         // 📋 Admin form: list ALL (incl. inactive) so the catalogue editor can
         // toggle retired types back on.
         [HttpGet("amenity-types/all")]
-        [Authorize(Roles = "PlatformAdmin,AgencyAdmin")]
+        [Authorize(Policy = "PlatformAdminOnly")]
         public async Task<IActionResult> GetAllAmenityTypes()
         {
             var types = await _context.AmenityTypes.OrderBy(t => t.AmenityTypeId)
@@ -64,7 +66,7 @@ namespace Property.Microservice.Controllers
         }
 
         [HttpPost("amenity-types")]
-        [Authorize(Roles = "PlatformAdmin,AgencyAdmin")]
+        [Authorize(Policy = "PlatformAdminOnly")]
         public async Task<IActionResult> CreateAmenityType([FromBody] AmenityTypeDto dto)
         {
             if (dto == null || string.IsNullOrWhiteSpace(dto.Name))
@@ -89,7 +91,7 @@ namespace Property.Microservice.Controllers
         }
 
         [HttpPut("amenity-types/{id:int}")]
-        [Authorize(Roles = "PlatformAdmin,AgencyAdmin")]
+        [Authorize(Policy = "PlatformAdminOnly")]
         public async Task<IActionResult> UpdateAmenityType(int id, [FromBody] AmenityTypeDto dto)
         {
             var entity = await _context.AmenityTypes.FirstOrDefaultAsync(t => t.AmenityTypeId == id);
@@ -110,6 +112,18 @@ namespace Property.Microservice.Controllers
             entity.IsActive = dto.IsActive;
             await _context.SaveChangesAsync();
             return Ok(new { message = "Amenity type updated." });
+        }
+
+        [HttpDelete("amenity-types/{id:int}")]
+        [Authorize(Policy = "PlatformAdminOnly")]
+        public async Task<IActionResult> DeleteAmenityType(int id)
+        {
+            var entity = await _context.AmenityTypes.FirstOrDefaultAsync(t => t.AmenityTypeId == id);
+            if (entity == null) return NotFound(new { message = "Amenity type not found." });
+
+            _context.AmenityTypes.Remove(entity);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Amenity type deleted." });
         }
     }
 

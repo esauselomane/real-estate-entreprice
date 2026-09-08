@@ -765,12 +765,30 @@ export const crmService = {
     }
   },
 
-  createNotification: async ({ userId, category, title, body, linkType, linkId }) => {
-    try {
-      const response = await apiClient.post('/crm/notifications', { userId, category, title, body, linkType, linkId });
+   createNotification: async ({ userId, category, title, body, linkType, linkId }) => {
+     try {
+       const response = await apiClient.post('/crm/notifications', { userId, category, title, body, linkType, linkId });
+       return response.data;
+     } catch (error) {
+       throw normalizeError(error.response?.data?.message, 'Notification create failed.');
+     }
+   },
+
+    // 📥 Import data: download Excel template
+    downloadImportTemplate: async () => {
+      const response = await apiClient.get('/properties/import/template', { responseType: 'blob' });
       return response.data;
-    } catch (error) {
-      throw normalizeError(error.response?.data?.message, 'Notification create failed.');
+    },
+
+    // 📥 Import data: upload Excel file (returns jobId)
+    uploadImportFile: async (fileName, base64Content) => {
+      const response = await apiClient.post('/properties/import/upload', { fileName, base64Content });
+      return response.data;
+    },
+
+    // 📥 Get import job status
+    getImportJobStatus: async (jobId) => {
+      const response = await apiClient.get(`/properties/import/jobs/${jobId}`);
+      return response.data;
     }
-  }
-};
+  };

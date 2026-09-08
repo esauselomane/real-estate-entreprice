@@ -27,7 +27,7 @@ export default function ReportsWorkspace() {
   }, [year, activeTenantId]);
 
   const peakMonth = useMemo(() => {
-    return [...(report.monthlyBreakdown || [])].sort((a, b) => b.revenue - a.revenue)[0] || null;
+    return [...(report.monthlyBreakdown || [])].sort((a, b) => b.Revenue - a.Revenue)[0] || null;
   }, [report]);
 
   return (
@@ -55,7 +55,7 @@ export default function ReportsWorkspace() {
             <MetricCard icon={<BarChart3 size={16} />} label="Total Leads" value={report.totalLeads} tone="blue" />
             <MetricCard icon={<PieChart size={16} />} label="Total Deals" value={report.totalDeals} tone="amber" />
             <MetricCard icon={<TrendingUp size={16} />} label="Revenue" value={`R ${Number(report.totalRevenue || 0).toLocaleString()}`} tone="green" />
-            <MetricCard icon={<Banknote size={16} />} label="Peak Month" value={peakMonth ? peakMonth.period : 'N/A'} tone="purple" />
+            <MetricCard icon={<Banknote size={16} />} label="Peak Month" value={peakMonth ? peakMonth.Period : 'N/A'} tone="purple" />
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
@@ -65,13 +65,13 @@ export default function ReportsWorkspace() {
             </div>
             <div className="space-y-3">
               {(report.monthlyBreakdown || []).map((row) => (
-                <div key={row.period} className="grid grid-cols-1 md:grid-cols-[80px_1fr_100px_120px] gap-3 items-center bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2">
-                  <span className="text-sm font-semibold text-slate-300">{row.period}</span>
+                <div key={row.Period} className="grid grid-cols-1 md:grid-cols-[80px_1fr_100px_120px] gap-3 items-center bg-slate-950/60 border border-slate-800 rounded-xl px-3 py-2">
+                  <span className="text-sm font-semibold text-slate-300">{row.Period}</span>
                   <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-                    <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400" style={{ width: `${Math.min(100, (row.leads / Math.max(report.totalLeads || 1, 1)) * 100)}%` }} />
+                    <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400" style={{ width: `${Math.min(100, (row.Leads / Math.max(report.totalLeads || 1, 1)) * 100)}%` }} />
                   </div>
-                  <span className="text-xs text-slate-400">{row.leads} / {row.deals}</span>
-                  <span className="text-xs text-emerald-400 text-right">R {Number(row.revenue || 0).toLocaleString()}</span>
+                  <span className="text-xs text-slate-400">{row.Leads} / {row.Deals}</span>
+                  <span className="text-xs text-emerald-400 text-right">R {Number(row.Revenue || 0).toLocaleString()}</span>
                 </div>
               ))}
             </div>

@@ -120,7 +120,7 @@ export default function RoleDashboard() {
             setCharts([
               { title: 'Agency operational status', icon: ShieldCheck, kind: 'pie', data: Object.entries(statusBuckets).map(([name, value]) => ({ name, value })), colors: STATUS_COLORS },
             { title: 'Property type market share', icon: PieIcon, kind: 'pie', data: marketShare, colors: TYPE_COLORS, colorKey: true },
-            { title: 'Monthly platform revenue', icon: TrendingUp, kind: 'bar', data: (overview.monthlyBreakdown || []).map((m) => ({ name: m.period, value: Number(m.revenue || 0) })), colors: { default: '#3b82f6' } },
+             { title: 'Monthly platform revenue', icon: TrendingUp, kind: 'bar', data: (overview.monthlyBreakdown || []).map((m) => ({ name: m.Period, value: Number(m.Revenue || 0) })), colors: { default: '#3b82f6' } },
             { title: 'Commission realised by stage', icon: BarChart2, kind: 'bar', data: commissionStages, colors: DEAL_COLORS }
           ]);
          } else if (role === 'AgencyAdmin') {
@@ -159,9 +159,9 @@ export default function RoleDashboard() {
               { name: 'Conveyancing At Deeds', value: summary.conveyancingAtDeedsCount },
               { name: 'Finalised Closed', value: summary.finalizedClosedCount }
             ], colors: { default: '#10b981' } },
-            { title: 'Monthly trends', icon: TrendingUp, kind: 'line', data: (overview?.monthlyBreakdown || []).map((m) => ({ name: m.period, value: Number(m.leads || 0) })), lines: [{ dataKey: 'value', color: '#38bdf8', name: 'Leads' }] },
-            { title: 'Revenue by month', icon: TrendingUp, kind: 'line', data: (overview?.monthlyBreakdown || []).map((m) => ({ name: m.period, value: Number(m.revenue || 0) })), lines: [{ dataKey: 'value', color: '#4ade80', name: 'Revenue' }] },
-            { title: 'Commission by stage', icon: BarChart2, kind: 'bar', data: (commissionStages || []).map((c) => ({ name: formatTitle(c.period), value: Number(c.revenue || 0) })), colors: DEAL_COLORS }
+            { title: 'Monthly trends', icon: TrendingUp, kind: 'line', data: (overview?.monthlyBreakdown || []).map((m) => ({ name: m.Period, value: Number(m.Leads || 0) })), lines: [{ dataKey: 'value', color: '#38bdf8', name: 'Leads' }] },
+            { title: 'Revenue by month', icon: TrendingUp, kind: 'line', data: (overview?.monthlyBreakdown || []).map((m) => ({ name: m.Period, value: Number(m.Revenue || 0) })), lines: [{ dataKey: 'value', color: '#4ade80', name: 'Revenue' }] },
+            { title: 'Commission by stage', icon: BarChart2, kind: 'bar', data: (commissionStages || []).map((c) => ({ name: formatTitle(c.Period), value: Number(c.Revenue || 0) })), colors: DEAL_COLORS }
           ]);
         } else if (role === 'Broker') {
           const [boards, properties, commissionStages] = await Promise.all([
@@ -172,7 +172,7 @@ export default function RoleDashboard() {
           setMetrics([
             { label: 'My deals', value: boards.dealCount || boards.verifiedDeals?.length || 0, icon: Briefcase },
             { label: 'Available properties', value: properties.totalCount || properties.length, icon: Home },
-            { label: 'Closed-won commission', value: `R ${Number((commissionStages || []).find((c) => c.period === 'ClosedWon')?.revenue || 0).toLocaleString()}`, icon: Banknote }
+            { label: 'Closed-won commission', value: `R ${Number((commissionStages || []).find((c) => c.Period === 'ClosedWon')?.Revenue || 0).toLocaleString()}`, icon: Banknote }
           ]);
             // 📊 Deal-stage distribution uses server-side aggregates so the pie
             // reflects every deal the broker owns in the active tenant scope,
@@ -180,7 +180,7 @@ export default function RoleDashboard() {
             const dealStageBuckets = boards.aggregates?.dealStage || {};
             setCharts([
               { title: 'My deal pipeline stages', icon: Briefcase, kind: 'pie', data: Object.entries(dealStageBuckets).map(([name, value]) => ({ name: formatTitle(name), value })), colors: DEAL_COLORS },
-            { title: 'Commission by stage', icon: Banknote, kind: 'donut', data: (commissionStages || []).map((c) => ({ name: formatTitle(c.period), value: Number(c.revenue || 0) })) },
+            { title: 'Commission by stage', icon: Banknote, kind: 'donut', data: (commissionStages || []).map((c) => ({ name: formatTitle(c.Period), value: Number(c.Revenue || 0) })) },
             { title: 'My deal value pipeline', icon: Home, kind: 'bar', data: (boards.verifiedDeals || []).slice(0, 8).map((d) => ({ name: `DL-${d.dealId}`, value: Number(d.transactionValue || 0) })), colors: DEAL_COLORS }
           ]);
         } else if (role === 'Owner') {

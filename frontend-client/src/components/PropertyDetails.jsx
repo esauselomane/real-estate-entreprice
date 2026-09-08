@@ -1621,42 +1621,48 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
             </div>
           )}
 
-          {/* 🖼️ Media Vault & Image Uploader */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-            <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Image size={16} className="text-blue-500" /> Asset Image Vault Gallery
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="border-2 border-dashed border-slate-800 hover:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center bg-slate-950/40 text-center relative min-h-[128px]">
-                <input 
-                  type="file" 
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  disabled={isUploadingImage}
-                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
-                />
-                {isUploadingImage ? (
-                  <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
-                ) : (
-                  <>
-                    <span className="text-xs text-slate-400 font-medium">Click or Drag to Upload Picture</span>
-                    <span className="text-[10px] text-slate-600 mt-1">Dispatches to Kafka Image Worker stream</span>
-                  </>
-                )}
-              </div>
+           {/* 🖼️ Media Vault & Image Uploader */}
+           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+             <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
+               <Image size={16} className="text-blue-500" /> Asset Image Vault Gallery
+             </h4>
+             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+               <div className="border-2 border-dashed border-slate-800 hover:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center bg-slate-950/40 text-center relative min-h-[128px]">
+                 <input 
+                   type="file" 
+                   accept="image/*"
+                   onChange={handleImageUpload}
+                   disabled={isUploadingImage}
+                   className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
+                 />
+                 {isUploadingImage ? (
+                   <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+                 ) : (
+                   <>
+                     <span className="text-xs text-slate-400 font-medium">Click or Drag to Upload Picture</span>
+                     <span className="text-[10px] text-slate-600 mt-1">Dispatches to Kafka Image Worker stream</span>
+                   </>
+                 )}
+               </div>
 
-              {imagePreview ? (
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-2 flex items-center justify-center h-32 relative group">
-                  <img src={imagePreview} alt="Upload preview" className="h-full w-full object-cover rounded-lg" />
-                  <span className="absolute bottom-2 right-2 bg-slate-900/90 text-[9px] px-1.5 py-0.5 rounded text-blue-400 border border-slate-700">Uploaded</span>
-                </div>
-              ) : (
-                <div className="bg-slate-950/20 border border-slate-800/80 rounded-xl flex items-center justify-center text-xs text-slate-600 italic">
-                  No images uploaded yet
-                </div>
-              )}
-            </div>
-          </div>
+               {/* Show all gallery images */}
+               {(JSON.parse(property.galleryImageJson || '[]')).map((doc, idx) => {
+                 const isDataUrl = doc.startsWith('data:');
+                 const href = isDataUrl ? doc : `/api/properties/${property.propertyId}/documents/${idx}`;
+                 return (
+                   <div key={idx} className="bg-slate-950 border border-slate-800 rounded-xl p-2 flex items-center justify-center h-32 relative group">
+                     <img src={href} alt={`Property ${idx + 1}`} className="h-full w-full object-cover rounded-lg" />
+                     <span className="absolute bottom-2 right-2 bg-slate-900/90 text-[9px] px-1.5 py-0.5 rounded text-blue-400 border border-slate-700">Image {idx + 1}</span>
+                   </div>
+                 );
+               })}
+               {!JSON.parse(property.galleryImageJson || '[]').length && (
+                 <div className="bg-slate-950/20 border border-slate-800/80 rounded-xl flex items-center justify-center text-xs text-slate-600 italic">
+                   No images in gallery yet
+                 </div>
+               )}
+             </div>
+           </div>
 
         </div>
 
@@ -1695,12 +1701,24 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               <FileText size={16} className="text-blue-500" /> Deeds & Verification Vault
             </h4>
             <div className="space-y-2">
-              {(JSON.parse(property.verificationDocumentsJson || '[]')).map((doc, idx) => (
-                <div key={idx} className="flex items-center gap-3 p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 group hover:border-slate-700 transition-colors">
-                  <FileText size={14} className="text-slate-500 group-hover:text-blue-400" />
-                  <span className="truncate flex-1 font-medium">{doc}</span>
-                </div>
-              ))}
+              {(JSON.parse(property.verificationDocumentsJson || '[]')).map((doc, idx) => {
+                const isDataUrl = doc.startsWith('data:');
+                const href = isDataUrl ? doc : `/api/properties/${property.propertyId}/documents/${idx}`;
+                let displayName = doc;
+                if (isDataUrl) {
+                  var mimeMatch = doc.match(/data:([^;]+);/);
+                  var ext = mimeMatch ? mimeMatch[1].split('/').pop()?.toUpperCase() : 'FILE';
+                  displayName = `Verification document ${idx + 1}.${ext}`;
+                } else {
+                  displayName = doc.split('/').pop()?.split('\\').pop() || doc;
+                }
+                return (
+                  <div key={idx} className="flex items-center gap-3 p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 group hover:border-slate-700 transition-colors">
+                    <FileText size={14} className="text-slate-500 group-hover:text-blue-400" />
+                    <a href={href} target="_blank" rel="noopener noreferrer" className="truncate flex-1 font-medium text-blue-400 hover:text-blue-300 underline decoration-dotted underline-offset-2">{displayName}</a>
+                  </div>
+                );
+              })}
               {!JSON.parse(property.verificationDocumentsJson || '[]').length && <p className="text-xs text-slate-500">No verification documents are stored for this property.</p>}
             </div>
           </div>

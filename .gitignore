@@ -19,3 +19,4 @@ out/
 .env*
 agents.md
 developer-api*
+google*

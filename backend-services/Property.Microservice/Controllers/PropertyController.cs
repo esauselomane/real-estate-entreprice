@@ -2,8 +2,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Property.Microservice.Data;
+using Property.Microservice.DTOs;
 using Property.Microservice.Models;
+using Property.Microservice.Services.Abstractions;
 using Property.Microservice.Services;
+using Shared.Kafka.Events;
+using Shared.Kafka.Topics;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -13,8 +17,17 @@ namespace Property.Microservice.Controllers
     [Route("api/properties")]
     public class PropertyController : ControllerBase
     {
-        private readonly PropertyDbContext _context;
+        private readonly PropertyDbContext _dbContext;
         private readonly KafkaPublisherService _kafkaPublisher;
+        private readonly IPropertyRepository _propertyRepository;
+        private readonly IPropertyUnitRepository _propertyUnitRepository;
+        private readonly IRepository<ExternalPlatform> _externalPlatformRepository;
+        private readonly IRepository<PropertyPlatformSyndication> _propertyPlatformSyndicationRepository;
+        private readonly IRepository<UnitLease> _unitLeaseRepository;
+        private readonly IRepository<MaintenanceCall> _maintenanceCallRepository;
+        private readonly IRepository<SoleMandate> _soleMandateRepository;
+        private readonly IRepository<AmenityType> _amenityTypeRepository;
+        private readonly IRepository<PropertyUnitAmenity> _propertyUnitAmenityRepository;
         private readonly ILogger<PropertyController> _logger;
         private readonly string _storageRootPath;
 
@@ -28,9 +41,18 @@ namespace Property.Microservice.Controllers
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         };
 
-        public PropertyController(PropertyDbContext context, KafkaPublisherService kafkaPublisher, ILogger<PropertyController> logger, PermissionCheckService permissionCheck)
+        public PropertyController(PropertyDbContext dbContext, KafkaPublisherService kafkaPublisher, ILogger<PropertyController> logger, PermissionCheckService permissionCheck, IPropertyRepository propertyRepository, IPropertyUnitRepository propertyUnitRepository, IRepository<ExternalPlatform> externalPlatformRepository, IRepository<PropertyPlatformSyndication> propertyPlatformSyndicationRepository, IRepository<UnitLease> unitLeaseRepository, IRepository<MaintenanceCall> maintenanceCallRepository, IRepository<SoleMandate> soleMandateRepository, IRepository<AmenityType> amenityTypeRepository, IRepository<PropertyUnitAmenity> propertyUnitAmenityRepository)
         {
-            _context = context;
+            _dbContext = dbContext;
+            _propertyRepository = propertyRepository;
+            _propertyUnitRepository = propertyUnitRepository;
+            _externalPlatformRepository = externalPlatformRepository;
+            _propertyPlatformSyndicationRepository = propertyPlatformSyndicationRepository;
+            _unitLeaseRepository = unitLeaseRepository;
+            _maintenanceCallRepository = maintenanceCallRepository;
+            _soleMandateRepository = soleMandateRepository;
+            _amenityTypeRepository = amenityTypeRepository;
+            _propertyUnitAmenityRepository = propertyUnitAmenityRepository;
             _kafkaPublisher = kafkaPublisher;
             _logger = logger;
             PermissionCheck = permissionCheck;
@@ -141,7 +163,7 @@ namespace Property.Microservice.Controllers
         [HttpGet("platforms")]
         public async Task<IActionResult> GetPlatforms()
         {
-            var platforms = await _context.ExternalPlatforms.ToListAsync();
+            var platforms = await _externalPlatformRepository.Query().ToListAsync();
             return Ok(platforms);
         }
 
@@ -155,7 +177,7 @@ namespace Property.Microservice.Controllers
             var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
 
-            var query = _context.PropertyAssets
+            var query = _propertyRepository.Query()
                 .Include(p => p.PropertyTypeDetails)
                 .Include(p => p.SubUnits)
                 .Include(p => p.SyndicationLinks)
@@ -181,7 +203,7 @@ namespace Property.Microservice.Controllers
             // 📜 Attach the currently-active sole mandate (if any) so the
             // UI can render the obligation/expiry banners without a
             // second round-trip. Null when no mandate is open.
-            var activeMandate = await _context.SoleMandates
+            var activeMandate = await _soleMandateRepository.Query()
                 .Where(m => m.PropertyId == propertyId && m.IsActive
                     && m.StartDate <= DateTime.UtcNow && m.EndDate >= DateTime.UtcNow)
                 .OrderByDescending(m => m.CreatedAt)
@@ -214,7 +236,7 @@ namespace Property.Microservice.Controllers
             var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
 
-            var propertyQuery = _context.PropertyAssets.Where(p => p.PropertyId == propertyId);
+            var propertyQuery = _propertyRepository.Query().Where(p => p.PropertyId == propertyId);
             var overrideTenantId = HttpContext?.Request?.Query["tenantId"].ToString();
             var usingOverride = (role == "PlatformAdmin" || role == "AgencyAdmin")
                 && !string.IsNullOrWhiteSpace(overrideTenantId)
@@ -240,7 +262,7 @@ namespace Property.Microservice.Controllers
                 propertyQuery = propertyQuery.Where(p => p.LinkedOwnerId == userId);
             if (!await propertyQuery.AnyAsync()) return NotFound(new { message = "Target property record not found." });
 
-            var query = _context.PropertyUnits.Where(u => u.PropertyId == propertyId);
+            var query = _propertyUnitRepository.Query().Where(u => u.PropertyId == propertyId);
             if (role == "Tenant" && !string.IsNullOrWhiteSpace(userId))
             {
                 var leasedUnitIds = await GetLeasedUnitIdsAsync(userId, userTenantId!);
@@ -271,7 +293,7 @@ namespace Property.Microservice.Controllers
             var role = GetCurrentCanonicalRole();
             if (role != "PlatformAdmin")
             {
-                var property = await _context.PropertyAssets
+                var property = await _propertyRepository.Query()
                     .FirstOrDefaultAsync(p => p.PropertyId == propertyId && p.TenantId == userTenantId);
                 if (property == null) return NotFound(new { message = "Target property record not found." });
             }
@@ -297,8 +319,8 @@ namespace Property.Microservice.Controllers
                 CreatedAt = DateTime.UtcNow
             };
 
-            _context.PropertyUnits.Add(unit);
-            await _context.SaveChangesAsync();
+            _propertyUnitRepository.Add(unit);
+            await _dbContext.SaveChangesAsync();
 
             return Ok(unit);
         }
@@ -324,8 +346,8 @@ namespace Property.Microservice.Controllers
                 return NotFound(new { message = "Property unit not found." });
             }
 
-            _context.PropertyUnits.Remove(unit);
-            await _context.SaveChangesAsync();
+            _propertyUnitRepository.Remove(unit);
+            await _dbContext.SaveChangesAsync();
 
             return Ok(new { message = "Unit successfully unlinked and deleted from property." });
         }
@@ -361,7 +383,7 @@ namespace Property.Microservice.Controllers
             unit.LeaseTermMonths = payload.LeaseTermMonths;
             unit.IsCurrentlyVacant = payload.IsCurrentlyVacant;
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(unit);
         }
 
@@ -408,7 +430,7 @@ namespace Property.Microservice.Controllers
             };
             docs.Add(meta);
             unit.UnitDocumentsJson = JsonSerializer.Serialize(docs, JsonOptions);
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
             return Ok(meta);
         }
@@ -477,7 +499,7 @@ namespace Property.Microservice.Controllers
 
             docs.Remove(doc);
             unit.UnitDocumentsJson = JsonSerializer.Serialize(docs);
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
             return Ok(new { message = "Document successfully removed from unit vault." });
         }
@@ -502,7 +524,7 @@ namespace Property.Microservice.Controllers
             var effectiveTenantId = usingOverride ? overrideTenantId : userTenantId;
 
             var isPlatformAdmin = role == "PlatformAdmin";
-            var propertyQuery = _context.PropertyAssets.Where(p => p.PropertyId == propertyId);
+            var propertyQuery = _propertyRepository.Query().Where(p => p.PropertyId == propertyId);
             if (usingOverride)
             {
                 // 🌳 Subtree override = comma-separated list of allowed tenants.
@@ -526,13 +548,13 @@ namespace Property.Microservice.Controllers
             var propertyExists = await propertyQuery.AnyAsync();
             if (!propertyExists) return null;
 
-            var unit = await _context.PropertyUnits.FirstOrDefaultAsync(u => u.PropertyUnitId == unitId && u.PropertyId == propertyId);
+            var unit = await _propertyUnitRepository.Query().FirstOrDefaultAsync(u => u.PropertyUnitId == unitId && u.PropertyId == propertyId);
             if (unit == null) return null;
 
             // A Tenant may only address the specific unit they currently lease.
             if (role == "Tenant")
             {
-                var isLeased = await _context.UnitLeases.AnyAsync(l =>
+                var isLeased = await _unitLeaseRepository.Query().AnyAsync(l =>
                     l.UserId == userId && l.TenantId == userTenantId && l.PropertyUnitId == unitId &&
                     l.PropertyId == propertyId && l.IsActive && l.LeaseEnd >= DateTime.UtcNow);
                 if (!isLeased) return null;
@@ -613,7 +635,7 @@ namespace Property.Microservice.Controllers
             else if (role == "Tenant")
             {
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var leasedPropertyIds = _context.UnitLeases
+                var leasedPropertyIds = _unitLeaseRepository.Query()
                     .Where(l => l.UserId == userId && l.TenantId == tenantId && l.IsActive && l.LeaseEnd >= DateTime.UtcNow)
                     .Select(l => l.PropertyId).ToList();
                 query = query.Where(p => leasedPropertyIds.Contains(p.PropertyId));
@@ -623,7 +645,7 @@ namespace Property.Microservice.Controllers
 
         private async Task<HashSet<int>> GetLeasedUnitIdsAsync(string userId, string tenantId)
         {
-            return await _context.UnitLeases
+            return await _unitLeaseRepository.Query()
                 .Where(l => l.UserId == userId && l.TenantId == tenantId && l.IsActive && l.LeaseEnd >= DateTime.UtcNow)
                 .Select(l => l.PropertyUnitId)
                 .ToHashSetAsync();
@@ -723,8 +745,8 @@ namespace Property.Microservice.Controllers
                 }
             }
 
-            _context.PropertyAssets.Add(newProp);
-            await _context.SaveChangesAsync();
+            _propertyRepository.Add(newProp);
+            await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("Property created: PropertyId={PropertyId} Address={Address} Tenant={Tenant} By={Caller}",
                 newProp.PropertyId, newProp.CompleteAddress, newProp.TenantId, caller);
@@ -761,7 +783,7 @@ namespace Property.Microservice.Controllers
             // authenticated user from tenant A can never read or mutate a property
             // that belongs to tenant B. A non-owner request resolves to "not found"
             // rather than revealing cross-tenant record existence.
-            IQueryable<PropertyAsset> propertyQuery = _context.PropertyAssets
+            IQueryable<PropertyAsset> propertyQuery = _propertyRepository.Query()
                 .Include(p => p.PropertyTypeDetails)
                 .Include(p => p.SubUnits);
 
@@ -800,8 +822,8 @@ namespace Property.Microservice.Controllers
                 ? property.TenantId
                 : userTenantId;
 
-            await _context.SaveChangesAsync();
-            return Ok(await _context.PropertyAssets
+            await _dbContext.SaveChangesAsync();
+            return Ok(await _propertyRepository.Query()
                 .Include(p => p.PropertyTypeDetails)
                 .Include(p => p.SubUnits)
                 .FirstAsync(p => p.PropertyId == propertyId));
@@ -832,7 +854,7 @@ namespace Property.Microservice.Controllers
                 : DEFAULT_PAGE_SIZE;
 
             // Eagerly load relational structures (Property Type lookups and sub-units)
-            var query = _context.PropertyAssets
+            var query = _propertyRepository.Query()
                 .Include(p => p.PropertyTypeDetails)
                 .Include(p => p.SubUnits)
                 .AsQueryable();
@@ -959,7 +981,7 @@ namespace Property.Microservice.Controllers
 
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             _logger.LogInformation("UploadPropertyImage: PropertyId={PropertyId} Caller={Caller}", propertyId, caller);
-            var property = await _context.PropertyAssets.FindAsync(propertyId);
+            var property = await _propertyRepository.GetByIdAsync(propertyId);
             if (property == null)
             {
                 _logger.LogWarning("UploadPropertyImage: PropertyId={PropertyId} not found", propertyId);
@@ -971,12 +993,11 @@ namespace Property.Microservice.Controllers
                 return BadRequest(new { message = "Invalid picture data payload." });
             }
 
-            // 🖼️ Persist as a data-URL alongside the existing image refs the
-            // brochure builder already renders. Append (don't replace) so the
+            // 🖼️ Persist to the property IMAGE GALLERY. Append (don't replace) so the
             // gallery grows over time. A hard cap of 50 keeps the row sane.
-            var current = string.IsNullOrWhiteSpace(property.VerificationDocumentsJson)
+            var current = string.IsNullOrWhiteSpace(property.GalleryImageJson)
                 ? new List<string>()
-                : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.VerificationDocumentsJson) ?? new List<string>());
+                : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.GalleryImageJson) ?? new List<string>());
 
             var mime = payload.FileName?.ToLowerInvariant() switch
             {
@@ -988,27 +1009,26 @@ namespace Property.Microservice.Controllers
             var dataUrl = $"data:{mime};base64,{payload.Base64DataString}";
             current.Add(dataUrl);
             if (current.Count > 50) current = current.GetRange(current.Count - 50, 50);
-            property.VerificationDocumentsJson = System.Text.Json.JsonSerializer.Serialize(current);
+            property.GalleryImageJson = System.Text.Json.JsonSerializer.Serialize(current);
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
             // 🛰️ Notify downstream optimisers (OCR, image resizing, ML
             // tagging) via Kafka. The event payload is intentionally tiny —
             // just the id + filename — so it stays well under the broker's
             // 1 MB default message size limit.
-            var eventEnvelope = new
-            {
-                PropertyId = propertyId,
-                FileName = payload.FileName,
-                DataUrlLength = dataUrl.Length,
-                TenantId = property.TenantId
-            };
+            var imageEvent = new PropertyImageUploadedEvent(
+                propertyId,
+                payload.FileName,
+                payload.Base64DataString,
+                property.TenantId,
+                caller);
             try
             {
-                await _kafkaPublisher.PublishMessageAsync(
-                    "property-images",
+                await _kafkaPublisher.RaiseEventAsync(
+                    TopicNames.PropertyImages,
                     propertyId.ToString(),
-                    System.Text.Json.JsonSerializer.Serialize(eventEnvelope));
+                    imageEvent);
             }
             catch (Exception ex)
             {
@@ -1044,17 +1064,17 @@ namespace Property.Microservice.Controllers
                 return BadRequest(new { message = "Invalid syndication data envelope." });
             }
 
-            var property = await _context.PropertyAssets
+            var property = await _propertyRepository.Query()
                 .Include(p => p.PropertyTypeDetails)
                 .FirstOrDefaultAsync(p => p.PropertyId == payload.PropertyId);
 
             if (property == null) return NotFound(new { message = "Target property record not found." });
 
-            var platform = await _context.ExternalPlatforms.FindAsync(payload.PlatformId);
+            var platform = await _externalPlatformRepository.GetByIdAsync(payload.PlatformId);
             if (platform == null) return NotFound(new { message = "Target external marketing channel portal not found." });
 
             // Fetch or create the portal links ledger row matching current identifiers
-            var syndicationRecord = await _context.PropertyPlatformSyndications
+            var syndicationRecord = await _propertyPlatformSyndicationRepository.Query()
                 .FirstOrDefaultAsync(s => s.PropertyId == payload.PropertyId && s.PlatformId == payload.PlatformId);
 
             if (syndicationRecord == null)
@@ -1068,7 +1088,7 @@ namespace Property.Microservice.Controllers
                     LivePortalListingUrl = $"{platform.BaseUrlAddress}/listing/prop-{payload.PropertyId}",
                     LastSynchronizedAt = DateTime.UtcNow
                 };
-                _context.PropertyPlatformSyndications.Add(syndicationRecord);
+                _propertyPlatformSyndicationRepository.Add(syndicationRecord);
             }
             else
             {
@@ -1076,13 +1096,20 @@ namespace Property.Microservice.Controllers
                 syndicationRecord.LastSynchronizedAt = DateTime.UtcNow;
             }
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
-            // Dispatch message payload back onto your active Kafka data synchronization topic channels
-            string activeState = payload.SyndicateStatus ? "true" : "false";
-            string kafkaSyncValue = $"{{\"PropertyId\":{payload.PropertyId},\"PlatformId\":{payload.PlatformId},\"IsActive\":{activeState}}}";
-            
-            await _kafkaPublisher.PublishMessageAsync("platform-syndication", payload.PropertyId.ToString(), kafkaSyncValue);
+            var syndicationEvent = new PropertySyndicationRequestedEvent(
+                PropertyId: payload.PropertyId,
+                PlatformId: payload.PlatformId,
+                IsActive: payload.SyndicateStatus,
+                TenantId: property.TenantId,
+                RequestedBy: caller
+            );
+
+            await _kafkaPublisher.RaiseEventAsync(
+                TopicNames.PropertySyndication,
+                payload.PropertyId.ToString(),
+                syndicationEvent);
 
             _logger.LogInformation("ToggleSyndication: completed — PropertyId={PropertyId} PlatformId={PlatformId} Active={Active} ExternalRef={ExternalRef}",
                 payload.PropertyId, payload.PlatformId, payload.SyndicateStatus, syndicationRecord.ExternalReferenceIndex);
@@ -1115,7 +1142,7 @@ namespace Property.Microservice.Controllers
             }
 
             var propertyIds = payload.SubUnits.Select(u => u.PropertyId).Distinct().ToList();
-            var validPropertyCount = await _context.PropertyAssets.CountAsync(p => propertyIds.Contains(p.PropertyId));
+            var validPropertyCount = await _propertyRepository.Query().CountAsync(p => propertyIds.Contains(p.PropertyId));
             if (validPropertyCount != propertyIds.Count)
             {
                 _logger.LogWarning("GenerateBrochure: one or more properties not found — PropertyIds={PropertyIds}", propertyIds);
@@ -1137,10 +1164,46 @@ namespace Property.Microservice.Controllers
                 }.ToString());
             }
 
-            await _kafkaPublisher.PublishMessageAsync(
-                "brochure-generation-requests",
+            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            var tenantId = User.FindFirst("TenantId")?.Value ?? string.Empty;
+
+            var brochureEvent = new BrochureGenerationRequestedEvent(
+                DealId: payload.DealId,
+                BrochureCardId: payload.BrochureCardId,
+                PropertyId: payload.SubUnits.FirstOrDefault()?.PropertyId ?? 0,
+                TenantId: tenantId,
+                RequestedBy: caller,
+                BrokerName: payload.BrokerName,
+                BrokerEmail: payload.BrokerEmail,
+                BrokerPhone: payload.BrokerPhone,
+                CompanyName: payload.CompanyName,
+                CompanyLogoUrl: payload.CompanyLogoUrl,
+                ClientName: payload.ClientName,
+                ClientEmail: payload.ClientEmail,
+                ClientPhone: payload.ClientPhone,
+                MarketClass: payload.MarketClass,
+                TenantInstallationAllowance: payload.TenantInstallationAllowance,
+                SubUnits: payload.SubUnits.Select(u => new BrochureSubUnitEvent
+                {
+                    PropertyId = u.PropertyId,
+                    PropertyDescription = u.PropertyDescription,
+                    Latitude = u.Latitude,
+                    Longitude = u.Longitude,
+                    UnitNumber = u.UnitNumber,
+                    UnitDescription = u.UnitDescription,
+                    NetRentableAreaSqM = u.NetRentableAreaSqM,
+                    RentalRate = u.RentalRate,
+                    RentEscalationPercentage = u.RentEscalationPercentage,
+                    LeaseTermMonths = u.LeaseTermMonths,
+                    SalePrice = u.SalePrice,
+                    SelectedImageRefs = u.SelectedImageRefs
+                }).ToList()
+            );
+
+            await _kafkaPublisher.RaiseEventAsync(
+                TopicNames.BrochureGenerationRequests,
                 payload.DealId.ToString(),
-                System.Text.Json.JsonSerializer.Serialize(payload));
+                brochureEvent);
 
             _logger.LogInformation("GenerateBrochure: queued — DealId={DealId} Units={Units}", payload.DealId, payload.SubUnits.Count);
             return Accepted(new { message = "Brochure generation request queued." });
@@ -1176,7 +1239,7 @@ namespace Property.Microservice.Controllers
             return NotFound(new { message = "Target property or unit not found." });
         }
 
-        var calls = await _context.MaintenanceCalls
+        var calls = await _maintenanceCallRepository.Query()
             .Where(m => m.PropertyId == propertyId && m.PropertyUnitId == unitId)
             .OrderByDescending(m => m.UpdatedAt)
             .ToListAsync();
@@ -1220,8 +1283,8 @@ namespace Property.Microservice.Controllers
             UpdatedAt = DateTime.UtcNow
         };
 
-        _context.MaintenanceCalls.Add(call);
-        await _context.SaveChangesAsync();
+        _maintenanceCallRepository.Add(call);
+        await _dbContext.SaveChangesAsync();
         return Ok(call);
     }
 
@@ -1238,7 +1301,7 @@ namespace Property.Microservice.Controllers
         // Tenants and Owners may never delete anything.
         if (IsReadOnlyRole()) return Forbid();
 
-        var call = await _context.MaintenanceCalls.FindAsync(callId);
+        var call = await _maintenanceCallRepository.GetByIdAsync(callId);
         if (call == null) return NotFound(new { message = "Maintenance call not found." });
 
         // Tenant isolation: admins only act within their tenant.
@@ -1246,8 +1309,8 @@ namespace Property.Microservice.Controllers
         if (GetCurrentCanonicalRole() != "PlatformAdmin" && call.TenantId != tenantId)
             return Forbid();
 
-            _context.MaintenanceCalls.Remove(call);
-            await _context.SaveChangesAsync();
+            _maintenanceCallRepository.Remove(call);
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Maintenance call resolved and removed." });
         }
 
@@ -1280,7 +1343,7 @@ namespace Property.Microservice.Controllers
         }
 
         var now = DateTime.UtcNow;
-        var leases = await _context.UnitLeases
+        var leases = await _unitLeaseRepository.Query()
             .Where(l => l.PropertyId == propertyId && l.PropertyUnitId == unitId)
             .OrderByDescending(l => l.LeaseStart)
             .ToListAsync();
@@ -1329,7 +1392,7 @@ namespace Property.Microservice.Controllers
         }
 
         var now = DateTime.UtcNow;
-        var lease = await _context.UnitLeases
+        var lease = await _unitLeaseRepository.Query()
             .Where(l => l.PropertyId == propertyId && l.PropertyUnitId == unitId
                         && l.LeaseStart <= now && now <= l.LeaseEnd)
             .OrderByDescending(l => l.LeaseStart)
@@ -1406,8 +1469,8 @@ namespace Property.Microservice.Controllers
                 ? null
                 : payload.TenantNameSnapshot.Trim()
         };
-        _context.UnitLeases.Add(lease);
-        await _context.SaveChangesAsync();
+        _unitLeaseRepository.Add(lease);
+        await _dbContext.SaveChangesAsync();
         return Ok(lease);
     }
 
@@ -1430,7 +1493,7 @@ namespace Property.Microservice.Controllers
             return NotFound(new { message = "Target property or unit not found." });
         }
 
-        var lease = await _context.UnitLeases.FirstOrDefaultAsync(l =>
+        var lease = await _unitLeaseRepository.Query().FirstOrDefaultAsync(l =>
             l.UnitLeaseId == leaseId && l.PropertyId == propertyId && l.PropertyUnitId == unitId);
         if (lease == null) return NotFound(new { message = "Lease not found." });
 
@@ -1462,7 +1525,7 @@ namespace Property.Microservice.Controllers
         var now = DateTime.UtcNow;
         lease.IsActive = lease.LeaseStart <= now && now <= lease.LeaseEnd;
 
-        await _context.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync();
         return Ok(lease);
     }
 
@@ -1484,12 +1547,12 @@ namespace Property.Microservice.Controllers
             return NotFound(new { message = "Target property or unit not found." });
         }
 
-        var lease = await _context.UnitLeases.FirstOrDefaultAsync(l =>
+        var lease = await _unitLeaseRepository.Query().FirstOrDefaultAsync(l =>
             l.UnitLeaseId == leaseId && l.PropertyId == propertyId && l.PropertyUnitId == unitId);
         if (lease == null) return NotFound(new { message = "Lease not found." });
 
-        _context.UnitLeases.Remove(lease);
-        await _context.SaveChangesAsync();
+        _unitLeaseRepository.Remove(lease);
+        await _dbContext.SaveChangesAsync();
         return Ok(new { message = "Lease removed." });
     }
 
@@ -1506,12 +1569,12 @@ namespace Property.Microservice.Controllers
         var userTenantId = User.FindFirst("TenantId")?.Value;
         if (string.IsNullOrWhiteSpace(userTenantId)) return Forbid();
 
-        var property = await _context.PropertyAssets
+        var property = await _propertyRepository.Query()
             .Where(p => p.PropertyId == propertyId)
             .FirstOrDefaultAsync();
         if (property == null) return NotFound(new { message = "Property not found." });
 
-        var mandates = await _context.SoleMandates
+        var mandates = await _soleMandateRepository.Query()
             .Where(m => m.PropertyId == propertyId)
             .OrderByDescending(m => m.CreatedAt)
             .Select(m => new
@@ -1557,13 +1620,13 @@ namespace Property.Microservice.Controllers
 
         // 🛡️ Apply same visibility rules as property edit so an
         // AgencyAdmin can't add a mandate to a property they can't see.
-        var propertyQuery = _context.PropertyAssets.Where(p => p.PropertyId == propertyId);
+        var propertyQuery = _propertyRepository.Query().Where(p => p.PropertyId == propertyId);
         propertyQuery = ApplyPropertyVisibility(propertyQuery);
         var property = await propertyQuery.FirstOrDefaultAsync();
         if (property == null) return NotFound(new { message = "Property not found." });
 
         // 🧹 Auto-close the currently-active mandate (if any) in the same transaction.
-        var currentActive = await _context.SoleMandates
+        var currentActive = await _soleMandateRepository.Query()
             .Where(m => m.PropertyId == propertyId && m.IsActive)
             .ToListAsync();
         var now = DateTime.UtcNow;
@@ -1583,8 +1646,8 @@ namespace Property.Microservice.Controllers
             CreatedByUserId = userId ?? string.Empty,
             CreatedAt = now
         };
-        _context.SoleMandates.Add(newMandate);
-        await _context.SaveChangesAsync();
+        _soleMandateRepository.Add(newMandate);
+        await _dbContext.SaveChangesAsync();
 
         return CreatedAtAction(nameof(GetSoleMandates), new { propertyId }, new
         {
@@ -1608,14 +1671,14 @@ namespace Property.Microservice.Controllers
             _logger.LogWarning("CloseSoleMandate: forbidden — caller lacks properties:edit permission");
             return Forbid();
         }
-        var mandate = await _context.SoleMandates
+        var mandate = await _soleMandateRepository.Query()
             .FirstOrDefaultAsync(m => m.PropertyId == propertyId && m.SoleMandateId == mandateId);
         if (mandate == null) return NotFound(new { message = "Mandate not found." });
         if (!mandate.IsActive) return Ok(new { message = "Mandate is already closed." });
 
         mandate.IsActive = false;
         mandate.ClosedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync();
         return Ok(new { message = "Mandate closed." });
     }
 
@@ -1632,7 +1695,7 @@ namespace Property.Microservice.Controllers
             .ToList();
         if (tenantIds.Count == 0) return Ok(new { activeListings = 0, averageDom = 0 });
 
-        var q = _context.PropertyAssets
+        var q = _propertyRepository.Query()
             .Where(p => tenantIds.Contains(p.TenantId) && (p.IsForSale || p.IsForRent));
         var count = await q.CountAsync();
         if (count == 0) return Ok(new { activeListings = 0, averageDom = 0 });
@@ -1656,7 +1719,7 @@ namespace Property.Microservice.Controllers
         if (tenantIds.Count == 0) return Ok(Array.Empty<object>());
 
         var cutoff = DateTime.UtcNow.AddDays(days);
-        var query = _context.SoleMandates
+        var query = _soleMandateRepository.Query()
             .Where(m => tenantIds.Contains(m.TenantId) && m.IsActive && m.EndDate <= cutoff);
         var rows = await query
             .OrderBy(m => m.EndDate)
@@ -1702,14 +1765,14 @@ namespace Property.Microservice.Controllers
     [HttpGet("{propertyId:int}/amenities")]
     public async Task<IActionResult> GetPropertyAmenities(int propertyId)
     {
-        var property = await _context.PropertyAssets
+        var property = await _propertyRepository.Query()
             .Include(p => p.PropertyTypeDetails)
             .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
         if (property == null) return NotFound(new { message = "Property not found." });
 
         var isResidential = string.Equals(property.PropertyTypeDetails?.Name, "Residential", StringComparison.OrdinalIgnoreCase);
 
-        var rows = await _context.PropertyUnitAmenities
+        var rows = await _propertyUnitAmenityRepository.Query()
             .Where(a => a.PropertyId == propertyId && a.IsActive)
             .Include(a => a.AmenityType)
             .Select(a => new AmenityDto
@@ -1746,7 +1809,7 @@ namespace Property.Microservice.Controllers
     [HttpPost("{propertyId:int}/amenities")]
     public async Task<IActionResult> UpsertPropertyAmenity(int propertyId, [FromQuery] int? unitId, [FromBody] AmenityUpsertDto dto)
     {
-        var property = await _context.PropertyAssets
+        var property = await _propertyRepository.Query()
             .Include(p => p.PropertyTypeDetails)
             .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
         if (property == null) return NotFound(new { message = "Property not found." });
@@ -1757,7 +1820,7 @@ namespace Property.Microservice.Controllers
             return Conflict(new { message = "Residential properties cannot have unit-level amenities." });
         }
 
-        var amenityType = await _context.AmenityTypes
+        var amenityType = await _amenityTypeRepository.Query()
             .FirstOrDefaultAsync(t => t.AmenityTypeId == dto.AmenityTypeId && t.IsActive);
         if (amenityType == null) return BadRequest(new { message = "Invalid or inactive amenity type." });
 
@@ -1769,11 +1832,11 @@ namespace Property.Microservice.Controllers
 
         if (unitId.HasValue)
         {
-            var unit = await _context.PropertyUnits.FirstOrDefaultAsync(u => u.PropertyUnitId == unitId.Value && u.PropertyId == propertyId);
+            var unit = await _propertyUnitRepository.Query().FirstOrDefaultAsync(u => u.PropertyUnitId == unitId.Value && u.PropertyId == propertyId);
             if (unit == null) return BadRequest(new { message = "Unit not found on this property." });
         }
 
-        var existing = await _context.PropertyUnitAmenities
+        var existing = await _propertyUnitAmenityRepository.Query()
             .FirstOrDefaultAsync(a => a.PropertyId == propertyId
                 && a.AmenityTypeId == dto.AmenityTypeId
                 && a.PropertyUnitId == unitId);
@@ -1788,15 +1851,15 @@ namespace Property.Microservice.Controllers
                 AmenityTypeId = dto.AmenityTypeId,
                 IsActive = true
             };
-            _context.PropertyUnitAmenities.Add(existing);
+            _propertyUnitAmenityRepository.Add(existing);
         }
 
         if (amenityType.RequiresBoolean) existing.BooleanValue = dto.BooleanValue;
         if (amenityType.RequiresNumber)  existing.NumberValue = dto.NumberValue;
         existing.Notes = dto.Notes;
 
-            await _context.SaveChangesAsync();
-            await _context.Entry(existing).Reference(a => a.AmenityType).LoadAsync();
+            await _dbContext.SaveChangesAsync();
+            await _dbContext.Entry(existing).Reference(a => a.AmenityType).LoadAsync();
             return Ok(new
             {
                 existing.AmenityId,
@@ -1818,12 +1881,63 @@ namespace Property.Microservice.Controllers
     [HttpDelete("{propertyId:int}/amenities/{amenityId:int}")]
     public async Task<IActionResult> DeletePropertyAmenity(int propertyId, int amenityId)
     {
-        var amenity = await _context.PropertyUnitAmenities
+        var amenity = await _propertyUnitAmenityRepository.Query()
             .FirstOrDefaultAsync(a => a.AmenityId == amenityId && a.PropertyId == propertyId && a.IsActive);
         if (amenity == null) return NotFound(new { message = "Amenity not found." });
         amenity.IsActive = false;
-        await _context.SaveChangesAsync();
+        await _dbContext.SaveChangesAsync();
         return Ok(new { message = "Amenity removed." });
+    }
+
+    // 📄 Serve a single verification document by index. Supports both
+    // inline data URLs and on-disk file paths produced by the image worker.
+    [HttpGet("{propertyId:int}/documents/{index:int}")]
+    public async Task<IActionResult> GetPropertyDocument(int propertyId, int index)
+    {
+        var property = await _propertyRepository.Query()
+            .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
+        if (property == null) return NotFound(new { message = "Property not found." });
+
+        var docs = string.IsNullOrWhiteSpace(property.VerificationDocumentsJson)
+            ? new List<string>()
+            : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.VerificationDocumentsJson) ?? new List<string>());
+
+        if (index < 0 || index >= docs.Count) return NotFound(new { message = "Document not found." });
+
+        var doc = docs[index];
+
+        // Data URL — return inline
+        if (doc.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = doc.Split(',', 2);
+            if (parts.Length != 2) return BadRequest(new { message = "Invalid data URL." });
+
+            var meta = parts[0].Split(';');
+            var mime = meta[0].Replace("data:", "", StringComparison.OrdinalIgnoreCase);
+            var base64 = parts[1];
+
+            var dataBytes = Convert.FromBase64String(base64);
+            return File(dataBytes, mime);
+        }
+
+        // File path — resolve from worker storage root
+        var fileName = Path.GetFileName(doc);
+        var workerRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "PropertyMediaVault"));
+        var filePath = Path.GetFullPath(Path.Combine(workerRoot, doc.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar)));
+
+        if (!filePath.StartsWith(workerRoot, StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Invalid document path." });
+
+        if (!System.IO.File.Exists(filePath))
+            return NotFound(new { message = "Document file not found on disk." });
+
+        var bytes = await System.IO.File.ReadAllBytesAsync(filePath);
+        var contentType = fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ? "application/pdf"
+            : fileName.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "image/png"
+            : fileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ? "image/jpeg"
+            : "application/octet-stream";
+
+        return File(bytes, contentType, fileName);
     }
 }
 }

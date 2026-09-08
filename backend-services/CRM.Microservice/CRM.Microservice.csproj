@@ -16,6 +16,12 @@
     </PackageReference>
     <!-- 🔐 JWT bearer validation (issuer = Identity microservice) -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+    <!-- 📨 Apache Kafka Event Streaming Driver -->
+    <PackageReference Include="Confluent.Kafka" Version="2.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared.Kafka\Shared.Kafka.csproj" />
   </ItemGroup>
 
 </Project>

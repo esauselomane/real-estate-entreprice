@@ -1,10 +1,13 @@
 using System.Text.Json;
+using Property.Microservice.Services.Abstractions;
+using Property.Microservice.DTOs;
+using Property.Microservice.Models;
 
 namespace Property.Microservice.Data
 {
     public static class PropertySeedData
     {
-        public static void EnsureSeeded(PropertyDbContext context)
+        public static void EnsureSeeded(PropertyDbContext context, IRepository<PropertyType> propertyTypeRepository, IRepository<AmenityType> amenityTypeRepository, IRepository<ExternalPlatform> externalPlatformRepository, IPropertyRepository propertyRepository, IPropertyUnitRepository propertyUnitRepository, IRepository<PropertyPlatformSyndication> propertyPlatformSyndicationRepository, IRepository<UnitLease> unitLeaseRepository, IRepository<MaintenanceCall> maintenanceCallRepository)
         {
             if (context == null)
             {
@@ -13,47 +16,50 @@ namespace Property.Microservice.Data
 
             context.Database.EnsureCreated();
 
-            if (!context.PropertyTypes.Any())
+            if (!propertyTypeRepository.Query().Any())
             {
-                context.PropertyTypes.AddRange(
+                propertyTypeRepository.AddRange(new []
+                {
                     new Property.Microservice.Models.PropertyType { Name = "Industrial" },
                     new Property.Microservice.Models.PropertyType { Name = "Retail" },
                     new Property.Microservice.Models.PropertyType { Name = "Commercial" },
                     new Property.Microservice.Models.PropertyType { Name = "Residential" }
-                );
+                });
             }
 
             context.SaveChanges();
 
             // 📚 Seed the amenity catalogue the SuperAdmin workspace manages.
-            if (!context.AmenityTypes.Any())
+            if (!amenityTypeRepository.Query().Any())
             {
-                context.AmenityTypes.AddRange(
+                amenityTypeRepository.AddRange(new []
+                {
                     new Property.Microservice.Models.AmenityType { Name = "Parking",      Label = "Allocated parking bays", RequiresNumber = true, IsResidentialOnly = false },
                     new Property.Microservice.Models.AmenityType { Name = "PetsAllowed",  Label = "Pets allowed",          RequiresBoolean = true, IsResidentialOnly = true  },
                     new Property.Microservice.Models.AmenityType { Name = "Gym",          Label = "Gym",                   RequiresBoolean = true,  IsResidentialOnly = false },
                     new Property.Microservice.Models.AmenityType { Name = "SwimmingPool", Label = "Swimming pool",         RequiresBoolean = true,  IsResidentialOnly = false },
                     new Property.Microservice.Models.AmenityType { Name = "Security",     Label = "24/7 security",         RequiresBoolean = true,  IsResidentialOnly = false },
                     new Property.Microservice.Models.AmenityType { Name = "AirConditioning", Label = "Air conditioning", RequiresBoolean = true, IsResidentialOnly = false }
-                );
+                });
             }
 
             context.SaveChanges();
             {
-                context.ExternalPlatforms.AddRange(
+                externalPlatformRepository.AddRange(new []
+                {
                     new Property.Microservice.Models.ExternalPlatform { PlatformName = "Property24", BaseUrlAddress = "https://property24.com" },
                     new Property.Microservice.Models.ExternalPlatform { PlatformName = "PrivateProperty", BaseUrlAddress = "https://privateproperty.co.za" },
                     new Property.Microservice.Models.ExternalPlatform { PlatformName = "Gumtree", BaseUrlAddress = "https://gumtree.co.za" }
-                );
+                });
             }
 
             context.SaveChanges();
 
-            if (context.PropertyAssets.Count() < 1000)
+            if (propertyRepository.Query().Count() < 1000)
             {
-                var propertyTypes = context.PropertyTypes.ToList();
+                var propertyTypes = propertyTypeRepository.Query().ToList();
                 var assets = new List<Property.Microservice.Models.PropertyAsset>();
-                for (var i = context.PropertyAssets.Count() + 1; i <= 1000; i++)
+                for (var i = propertyRepository.Query().Count() + 1; i <= 1000; i++)
                 {
                     var propertyType = propertyTypes[(i - 1) % propertyTypes.Count];
                     var isRental = i % 2 == 0;
@@ -82,14 +88,14 @@ namespace Property.Microservice.Data
                     });
                 }
 
-                context.PropertyAssets.AddRange(assets);
+                propertyRepository.AddRange(assets);
             }
 
             context.SaveChanges();
 
             // Backfill sample image references for any property rows whose gallery is still
             // empty, so the brochure builder always has photos to select from.
-            var emptyProps = context.PropertyAssets
+            var emptyProps = propertyRepository.Query()
                 .Where(p => p.VerificationDocumentsJson == null || p.VerificationDocumentsJson == "[]")
                 .ToList();
             if (emptyProps.Any())
@@ -99,10 +105,10 @@ namespace Property.Microservice.Data
                 context.SaveChanges();
             }
 
-            if (context.PropertyUnits.Count() < 2000)
+            if (propertyUnitRepository.Query().Count() < 2000)
             {
                 var units = new List<Property.Microservice.Models.PropertyUnit>();
-                var propertyIds = context.PropertyAssets.Select(p => p.PropertyId).ToList();
+                var propertyIds = propertyRepository.Query().Select(p => p.PropertyId).ToList();
 
                 foreach (var propertyId in propertyIds)
                 {
@@ -127,13 +133,13 @@ namespace Property.Microservice.Data
                     }
                 }
 
-                context.PropertyUnits.AddRange(units);
+                propertyUnitRepository.AddRange(units);
             }
 
             context.SaveChanges();
 
             // Backfill sample unit image references for any unit rows whose gallery is empty.
-            var emptyUnits = context.PropertyUnits
+            var emptyUnits = propertyUnitRepository.Query()
                 .Where(u => u.UnitImagesJson == null || u.UnitImagesJson == "[]")
                 .ToList();
             if (emptyUnits.Any())
@@ -143,15 +149,29 @@ namespace Property.Microservice.Data
                 context.SaveChanges();
             }
 
-            if (context.PropertyPlatformSyndications.Count() < 1000)
+            if (propertyPlatformSyndicationRepository.Query().Count() < 1000)
             {
                 var syndications = new List<Property.Microservice.Models.PropertyPlatformSyndication>();
-                var propertyIds = context.PropertyAssets.Select(p => p.PropertyId).ToList();
-                var platforms = context.ExternalPlatforms.Select(p => p.PlatformId).ToList();
-                for (var i = context.PropertyPlatformSyndications.Count() + 1; i <= 1000; i++)
+                var propertyIds = propertyRepository.Query().Select(p => p.PropertyId).ToList();
+                var platforms = externalPlatformRepository.Query().Select(p => p.PlatformId).ToList();
+                
+                // Get existing combinations to avoid duplicates
+                var existingCombinations = new HashSet<string>(
+                    propertyPlatformSyndicationRepository.Query()
+                        .Select(s => s.PropertyId + "|" + s.PlatformId)
+                        .ToList()
+                );
+                
+                for (var i = 1; i <= 1000; i++)
                 {
                     var propertyId = propertyIds[(i - 1) % propertyIds.Count];
                     var platformId = platforms[(i - 1) % platforms.Count];
+                    var key = propertyId + "|" + platformId;
+                    
+                    // Skip if this combination already exists
+                    if (existingCombinations.Contains(key))
+                        continue;
+                        
                     syndications.Add(new Property.Microservice.Models.PropertyPlatformSyndication
                     {
                         PropertyId = propertyId,
@@ -161,9 +181,11 @@ namespace Property.Microservice.Data
                         LivePortalListingUrl = $"https://portal.example.com/listing/{i}",
                         LastSynchronizedAt = DateTime.UtcNow.AddDays(-i)
                     });
+                    
+                    existingCombinations.Add(key);
                 }
 
-                context.PropertyPlatformSyndications.AddRange(syndications);
+                propertyPlatformSyndicationRepository.AddRange(syndications);
             }
 
             context.SaveChanges();
@@ -171,13 +193,13 @@ namespace Property.Microservice.Data
             // 🌐 Ownership link: bind property #1 to the seeded Owner user so the
             // Owner role (UserId = USR-OWNER-01, TenantId = TEN-001) resolves "their
             // properties" via PropertyAsset.LinkedOwnerId == User.UserId. Idempotent.
-            var ownerUnitFirstId = context.PropertyUnits
+            var ownerUnitFirstId = propertyUnitRepository.Query()
                 .Where(u => u.PropertyId == 1)
                 .OrderBy(u => u.PropertyUnitId)
                 .Select(u => u.PropertyUnitId)
                 .FirstOrDefault();
 
-            var firstProperty = context.PropertyAssets.FirstOrDefault(p => p.PropertyId == 1);
+            var firstProperty = propertyRepository.Query().FirstOrDefault(p => p.PropertyId == 1);
             if (firstProperty != null && firstProperty.LinkedOwnerId != "USR-OWNER-01")
             {
                 firstProperty.LinkedOwnerId = "USR-OWNER-01";
@@ -188,11 +210,11 @@ namespace Property.Microservice.Data
             // the Tenant sees; flipping IsActive -> false revokes their access.
             if (ownerUnitFirstId > 0)
             {
-                var existingLease = context.UnitLeases
+                var existingLease = unitLeaseRepository.Query()
                     .FirstOrDefault(l => l.UserId == "USR-TENANT-01" && l.PropertyUnitId == ownerUnitFirstId);
                 if (existingLease == null)
                 {
-                    context.UnitLeases.Add(new Property.Microservice.Models.UnitLease
+                    unitLeaseRepository.Add(new Property.Microservice.Models.UnitLease
                     {
                         UserId = "USR-TENANT-01",
                         TenantId = "TEN-001",
@@ -211,11 +233,11 @@ namespace Property.Microservice.Data
                 }
 
                 // An active maintenance call so the Tenant has something to view.
-                var existingCall = context.MaintenanceCalls
+                var existingCall = maintenanceCallRepository.Query()
                     .FirstOrDefault(m => m.RequestedByUserId == "USR-TENANT-01" && m.PropertyUnitId == ownerUnitFirstId);
                 if (existingCall == null)
                 {
-                    context.MaintenanceCalls.Add(new Property.Microservice.Models.MaintenanceCall
+                    maintenanceCallRepository.Add(new Property.Microservice.Models.MaintenanceCall
                     {
                         TenantId = "TEN-001",
                         RequestedByUserId = "USR-TENANT-01",
@@ -236,7 +258,7 @@ namespace Property.Microservice.Data
             // into the per-agency tenant distribution so the TenantSwitcher
             // actually narrows the property list. Idempotent: once no rows
             // carry TEN-001 the loop is a no-op.
-            var legacyStale = context.PropertyAssets
+            var legacyStale = propertyRepository.Query()
                 .Where(p => p.TenantId == "TEN-001" || p.TenantId == "")
                 .ToList();
             foreach (var p in legacyStale)
