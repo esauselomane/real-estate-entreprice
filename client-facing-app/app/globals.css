@@ -23,4 +23,10 @@
   a {
     @apply text-inherit;
   }
+
+  /* 5px bottom border on full-width section wrappers (py-16).
+     Used as a visual section divider between marketing blocks. */
+  section[class*="py-16"] {
+    border-bottom: 5px solid #334155;
+  }
 }

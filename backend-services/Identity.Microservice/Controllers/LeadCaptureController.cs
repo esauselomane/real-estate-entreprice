@@ -2,7 +2,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Identity.Microservice.Data;
+using Identity.Microservice.DTOs;
 using Identity.Microservice.Models;
+using Identity.Microservice.Services.Abstractions;
 using System.Security.Claims;
 
 namespace Identity.Microservice.Controllers
@@ -11,12 +13,18 @@ namespace Identity.Microservice.Controllers
     [Route("api/system/lead-requests")]
     public class LeadCaptureController : ControllerBase
     {
-        private readonly IdentityDbContext _context;
+        private readonly IdentityDbContext _dbContext;
+        private readonly IRepository<LeadCaptureRequest> _leadCaptureRepository;
+        private readonly ILeadWorkflowRepository _leadWorkflowRepository;
+        private readonly IPricingPackageRepository _pricingPackageRepository;
         private readonly ILogger<LeadCaptureController> _logger;
 
-        public LeadCaptureController(IdentityDbContext context, ILogger<LeadCaptureController> logger)
+        public LeadCaptureController(IdentityDbContext dbContext, ILogger<LeadCaptureController> logger, IRepository<LeadCaptureRequest> leadCaptureRepository, ILeadWorkflowRepository leadWorkflowRepository, IPricingPackageRepository pricingPackageRepository)
         {
-            _context = context;
+            _dbContext = dbContext;
+            _leadCaptureRepository = leadCaptureRepository;
+            _leadWorkflowRepository = leadWorkflowRepository;
+            _pricingPackageRepository = pricingPackageRepository;
             _logger = logger;
         }
 
@@ -61,8 +69,8 @@ namespace Identity.Microservice.Controllers
                 Status = LeadStatus.New
             };
 
-            _context.LeadCaptureRequests.Add(lead);
-            await _context.SaveChangesAsync();
+            _leadCaptureRepository.Add(lead);
+            await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("Lead created: LeadId={LeadId} Email={Email} Name={FullName}",
                 lead.Id, lead.Email, lead.FullName);
@@ -92,7 +100,7 @@ namespace Identity.Microservice.Controllers
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             _logger.LogInformation("GetLeads: Page={Page} Status={Status} RequestedBy={Caller}", page, status ?? "all", caller);
 
-            IQueryable<LeadCaptureRequest> query = _context.LeadCaptureRequests.AsNoTracking().OrderByDescending(l => l.CreatedAt);
+            IQueryable<LeadCaptureRequest> query = _leadCaptureRepository.Query().AsNoTracking().OrderByDescending(l => l.CreatedAt);
             if (!string.IsNullOrWhiteSpace(status) && status != "all")
                 query = query.Where(l => l.Status == Enum.Parse<LeadStatus>(status, true));
 
@@ -127,7 +135,7 @@ namespace Identity.Microservice.Controllers
         public async Task<IActionResult> UpdateStatus(int id, [FromBody] LeadStatusUpdateDto dto)
         {
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
-            var lead = await _context.LeadCaptureRequests.FirstOrDefaultAsync(l => l.Id == id);
+            var lead = await _leadCaptureRepository.Query().FirstOrDefaultAsync(l => l.Id == id);
             if (lead == null)
             {
                 _logger.LogWarning("UpdateStatus: LeadId={LeadId} not found, caller={Caller}", id, caller);
@@ -141,7 +149,7 @@ namespace Identity.Microservice.Controllers
             lead.Status = newStatus;
             lead.HandledBy = User?.FindFirst(ClaimTypes.Name)?.Value ?? "SuperAdmin";
             lead.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("Lead status updated: LeadId={LeadId} NewStatus={NewStatus} By={Caller}",
                 lead.Id, lead.Status, caller);
@@ -160,7 +168,7 @@ namespace Identity.Microservice.Controllers
          public async Task<IActionResult> UpdateLead(int id, [FromBody] LeadCaptureRequestDto dto)
          {
              var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
-             var lead = await _context.LeadCaptureRequests.FirstOrDefaultAsync(l => l.Id == id);
+             var lead = await _leadCaptureRepository.Query().FirstOrDefaultAsync(l => l.Id == id);
              if (lead == null)
              {
                  _logger.LogWarning("UpdateLead: LeadId={LeadId} not found, caller={Caller}", id, caller);
@@ -191,7 +199,7 @@ namespace Identity.Microservice.Controllers
             lead.Source = dto.Source ?? lead.Source;
             lead.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("Lead updated: LeadId={LeadId} By={Caller}", lead.Id, caller);
 
@@ -205,7 +213,7 @@ namespace Identity.Microservice.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> GetPricingPackages()
         {
-            var packages = await _context.PricingPackages
+            var packages = await _pricingPackageRepository.Query()
                 .AsNoTracking()
                 .Where(p => p.IsActive)
                 .OrderBy(p => p.SortOrder)
@@ -241,7 +249,7 @@ namespace Identity.Microservice.Controllers
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             _logger.LogInformation("GetWorkflow: LeadId={LeadId} RequestedBy={Caller}", id, caller);
 
-            var history = await _context.LeadWorkflows
+            var history = await _leadWorkflowRepository.Query()
                 .AsNoTracking()
                 .Where(w => w.LeadId == id)
                 .OrderByDescending(w => w.CreatedAt)
@@ -271,7 +279,7 @@ namespace Identity.Microservice.Controllers
         public async Task<IActionResult> AddWorkflowAction(int id, [FromBody] LeadWorkflowActionDto dto)
         {
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
-            var lead = await _context.LeadCaptureRequests.FirstOrDefaultAsync(l => l.Id == id);
+            var lead = await _leadCaptureRepository.Query().FirstOrDefaultAsync(l => l.Id == id);
             if (lead == null)
             {
                 _logger.LogWarning("AddWorkflowAction: LeadId={LeadId} not found, caller={Caller}", id, caller);
@@ -294,7 +302,7 @@ namespace Identity.Microservice.Controllers
                 AgencyId = dto.AgencyId
             };
 
-            _context.LeadWorkflows.Add(workflow);
+            _leadWorkflowRepository.Add(workflow);
 
             if (actionType == LeadWorkflowActionType.CallbackScheduled)
             {
@@ -318,7 +326,7 @@ namespace Identity.Microservice.Controllers
             }
 
             lead.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("Workflow action recorded: LeadId={LeadId} Action={Action} NewStatus={Status} By={Caller}",
                 lead.Id, actionType, lead.Status, caller);

@@ -1,15 +1,12 @@
 using Confluent.Kafka;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using PuppeteerSharp;
-using System;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
+using Shared.Kafka.Events;
+using Shared.Kafka.Topics;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace BrochureGeneration.Worker
 {
@@ -33,32 +30,44 @@ namespace BrochureGeneration.Worker
     {
         private readonly ILogger<BrochureKafkaConsumerWorker> _logger;
         private readonly ConsumerConfig _consumerConfig;
-        private readonly string _gatewayUrl;
-        private const string TopicName = "brochure-generation-requests";
-
-        private static readonly HttpClient _http = new HttpClient();
+        private readonly IProducer<string, string> _producer;
+        private readonly string _bootstrapServers;
+        private const string TopicName = TopicNames.BrochureGenerationRequests;
+        private const string CompletedTopic = TopicNames.BrochureGenerationCompleted;
+        private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
 
         public BrochureKafkaConsumerWorker(ILogger<BrochureKafkaConsumerWorker> logger, IConfiguration configuration)
         {
             _logger = logger;
-            _gatewayUrl = configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
+            _bootstrapServers = configuration["Kafka:BootstrapServers"] ?? "localhost:9092";
+
             _consumerConfig = new ConsumerConfig
             {
-                BootstrapServers = configuration["Kafka:BootstrapServers"] ?? "localhost:9092",
+                BootstrapServers = _bootstrapServers,
                 GroupId = "brochure-generator-group",
                 AutoOffsetReset = AutoOffsetReset.Earliest,
                 EnableAutoCommit = false
             };
+
+            var producerConfig = new ProducerConfig
+            {
+                BootstrapServers = _bootstrapServers,
+                AllowAutoCreateTopics = true,
+                Acks = Acks.All
+            };
+
+            _producer = new ProducerBuilder<string, string>(producerConfig).Build();
         }
 
         private static async Task<byte[]?> DownloadImageBytesAsync(string url, int maxRetries = 3)
         {
             if (string.IsNullOrWhiteSpace(url)) return null;
+            using var http = new HttpClient();
             for (var attempt = 1; attempt <= maxRetries; attempt++)
             {
                 try
                 {
-                    using var response = await _http.GetAsync(url);
+                    using var response = await http.GetAsync(url);
                     if (!response.IsSuccessStatusCode) return null;
                     return await response.Content.ReadAsByteArrayAsync();
                 }
@@ -225,6 +234,16 @@ namespace BrochureGeneration.Worker
         {
             try
             {
+                var evt = JsonSerializer.Deserialize<BrochureGenerationRequestedEvent>(messageJson, _jsonOptions);
+                if (evt == null)
+                {
+                    _logger.LogWarning("[BROCHURE]: Failed to deserialize event payload");
+                    return false;
+                }
+
+                _logger.LogInformation("[BROCHURE]: Processing DealId={DealId} Broker={Broker} Client={Client} Units={Units}",
+                    evt.DealId, evt.BrokerName, evt.ClientName, evt.SubUnits.Count);
+
                 await new BrowserFetcher().DownloadAsync();
                 using var browser = await Puppeteer.LaunchAsync(new LaunchOptions
                 {
@@ -232,48 +251,31 @@ namespace BrochureGeneration.Worker
                     Args = new[] { "--no-sandbox", "--disable-setuid-sandbox" }
                 });
 
-                using var jsonDoc = JsonDocument.Parse(messageJson);
-                var root = jsonDoc.RootElement;
+                var subUnits = evt.SubUnits.Select(u => new BrochureSubUnit
+                {
+                    PropertyId = u.PropertyId,
+                    PropertyDescription = u.PropertyDescription,
+                    Latitude = u.Latitude,
+                    Longitude = u.Longitude,
+                    UnitNumber = u.UnitNumber,
+                    UnitDescription = u.UnitDescription,
+                    NetRentableAreaSqM = u.NetRentableAreaSqM,
+                    RentalRate = u.RentalRate,
+                    RentEscalationPercentage = u.RentEscalationPercentage,
+                    LeaseTermMonths = u.LeaseTermMonths,
+                    SalePrice = u.SalePrice,
+                    SelectedImageRefs = u.SelectedImageRefs
+                }).ToList();
 
-                int dealId = root.GetProperty("DealId").GetInt32();
-                string brokerName = root.GetProperty("BrokerName").GetString() ?? "Unassigned broker";
-                string brokerEmail = root.GetProperty("BrokerEmail").GetString() ?? "s.jenkins@apexluxury.co.za";
-                string brokerPhone = root.GetProperty("BrokerPhone").GetString() ?? "+27118845000";
-                string companyName = root.GetProperty("CompanyName").GetString() ?? "Agency";
-                string companyLogoUrl = root.GetProperty("CompanyLogoUrl").GetString() ?? string.Empty;
-                string clientName = root.GetProperty("ClientName").GetString() ?? "Valued Client";
-                string clientEmail = root.GetProperty("ClientEmail").GetString() ?? string.Empty;
-                string clientPhone = root.GetProperty("ClientPhone").GetString() ?? string.Empty;
-                string marketClass = root.GetProperty("MarketClass").GetString() ?? "Rental";
-                decimal tenantAllowance = root.GetProperty("TenantInstallationAllowance").GetDecimal();
-                int brochureCardId = root.TryGetProperty("BrochureCardId", out var bcProp) ? bcProp.GetInt32() : 0;
-
-                var subUnits = root.GetProperty("SubUnits").EnumerateArray()
-                    .Select(u => new BrochureSubUnit
-                    {
-                        PropertyId = u.GetProperty("PropertyId").GetInt32(),
-                        PropertyDescription = u.GetProperty("PropertyDescription").GetString() ?? string.Empty,
-                        Latitude = u.TryGetProperty("Latitude", out var latEl) && latEl.ValueKind != JsonValueKind.Null ? latEl.GetDecimal() : 0,
-                        Longitude = u.TryGetProperty("Longitude", out var lonEl) && lonEl.ValueKind != JsonValueKind.Null ? lonEl.GetDecimal() : 0,
-                        UnitNumber = u.GetProperty("UnitNumber").GetString() ?? "Suite",
-                        UnitDescription = u.GetProperty("UnitDescription").GetString() ?? string.Empty,
-                        NetRentableAreaSqM = u.GetProperty("NetRentableAreaSqM").GetDecimal(),
-                        RentalRate = u.TryGetProperty("RentalRate", out var rEl) && rEl.ValueKind != JsonValueKind.Null ? rEl.GetDecimal() : (decimal?)null,
-                        RentEscalationPercentage = u.TryGetProperty("RentEscalationPercentage", out var eEl) && eEl.ValueKind != JsonValueKind.Null ? eEl.GetDecimal() : (decimal?)null,
-                        LeaseTermMonths = u.TryGetProperty("LeaseTermMonths", out var tEl) && tEl.ValueKind != JsonValueKind.Null ? tEl.GetInt32() : (int?)null,
-                        SalePrice = u.TryGetProperty("SalePrice", out var sEl) && sEl.ValueKind != JsonValueKind.Null ? sEl.GetDecimal() : (decimal?)null,
-                        SelectedImageRefs = u.TryGetProperty("SelectedImageRefs", out var iEl) && iEl.ValueKind == JsonValueKind.Array
-                            ? iEl.EnumerateArray().Select(img => img.GetString() ?? string.Empty).Where(str => !string.IsNullOrEmpty(str)).Take(5).ToList()
-                            : new List<string>()
-                    })
-                    .ToList();
-
-                _logger.LogInformation($"[BROCHURE PAYLOAD] DealId={dealId} BrokerName={brokerName} ClientName={clientName} Units={subUnits.Count}");
-
-                var logoBytes = !string.IsNullOrEmpty(companyLogoUrl) ? await DownloadImageBytesAsync(companyLogoUrl) : null;
+                var logoBytes = !string.IsNullOrEmpty(evt.CompanyLogoUrl) ? await DownloadImageBytesAsync(evt.CompanyLogoUrl) : null;
                 var logoDataUrl = logoBytes != null ? $"data:image/png;base64,{ToBase64(logoBytes)}" : string.Empty;
 
-                var html = BuildBrochureHtml(brokerName, brokerEmail, brokerPhone, companyName, logoDataUrl, clientName, clientEmail, clientPhone, marketClass, tenantAllowance, subUnits);
+                var html = BuildBrochureHtml(
+                    evt.BrokerName, evt.BrokerEmail, evt.BrokerPhone,
+                    evt.CompanyName, logoDataUrl,
+                    evt.ClientName, evt.ClientEmail, evt.ClientPhone,
+                    evt.MarketClass, evt.TenantInstallationAllowance,
+                    subUnits);
 
                 byte[] compiledDocumentBytes;
                 using (var page = await browser.NewPageAsync())
@@ -293,32 +295,38 @@ namespace BrochureGeneration.Worker
                 string destinationDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "GeneratedBrochures"));
                 if (!Directory.Exists(destinationDirectory)) Directory.CreateDirectory(destinationDirectory);
 
-                string finalFilePath = Path.Combine(destinationDirectory, $"Brochure_Deal_{dealId}.pdf");
+                string finalFilePath = Path.Combine(destinationDirectory, $"Brochure_Deal_{evt.DealId}.pdf");
                 await File.WriteAllBytesAsync(finalFilePath, compiledDocumentBytes);
 
                 _logger.LogInformation($"[COMPILATION SUCCESSFUL]: PDF Brochure payload saved to target node disk: '{finalFilePath}'");
 
-                if (brochureCardId > 0)
-                {
-                    var callbackPayload = new
-                    {
-                        DealId = dealId,
-                        CardId = brochureCardId,
-                        FilePath = finalFilePath,
-                        GeneratedAt = DateTime.UtcNow
-                    };
-                    try
-                    {
-                        var httpContent = new StringContent(JsonSerializer.Serialize(callbackPayload), Encoding.UTF8, "application/json");
-                        var callbackUri = $"{_gatewayUrl}/crm/brochure-cards/{brochureCardId}/generated";
-                        var callbackResponse = await _http.PostAsync(callbackUri, httpContent);
-                        _logger.LogInformation($"[CALLBACK OK]: CRM notified of brochure completion for card {brochureCardId}. HTTP {(int)callbackResponse.StatusCode}");
-                    }
-                    catch (Exception cbEx)
-                    {
-                        _logger.LogWarning($"[CALLBACK SKIPPED]: Brochure PDF saved but CRM callback failed for card {brochureCardId}. Reason: {cbEx.Message}");
-                    }
-                }
+                // Publish completion event via Kafka instead of HTTP callback
+                var completedEvent = new BrochureGenerationCompletedEvent(
+                    DealId: evt.DealId,
+                    BrochureCardId: evt.BrochureCardId,
+                    PropertyId: evt.PropertyId,
+                    TenantId: evt.TenantId,
+                    RequestedBy: evt.RequestedBy,
+                    Success: true,
+                    PdfUrl: finalFilePath,
+                    ErrorMessage: null
+                );
+
+                await PublishCompletionEventAsync(completedEvent);
+
+                // Also publish a notification event
+                var notificationEvent = new NotificationCreatedEvent(
+                    TenantId: evt.TenantId,
+                    UserId: evt.RequestedBy,
+                    Category: "brochure",
+                    Title: "Brochure generation completed",
+                    Body: $"Brochure for deal {evt.DealId} has been generated successfully.",
+                    LinkType: "brochure",
+                    LinkId: evt.BrochureCardId.ToString()
+                );
+
+                await PublishNotificationEventAsync(notificationEvent);
+
                 return true;
             }
             catch (Exception ex)
@@ -326,6 +334,55 @@ namespace BrochureGeneration.Worker
                 _logger.LogError($"[PDF RENDER ERROR]: Task compilation crashed inside generator core: {ex.Message}");
                 return false;
             }
+        }
+
+        private async Task PublishCompletionEventAsync(BrochureGenerationCompletedEvent evt)
+        {
+            try
+            {
+                var json = JsonSerializer.Serialize(evt, _jsonOptions);
+                var message = new Message<string, string>
+                {
+                    Key = evt.BrochureCardId.ToString(),
+                    Value = json
+                };
+
+                var result = await _producer.ProduceAsync(CompletedTopic, message);
+                _logger.LogInformation("[KAFKA]: Published BrochureGenerationCompletedEvent to {Topic} [Partition: {Partition}] Offset: {Offset}",
+                    result.Topic, result.Partition, result.Offset);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[KAFKA ERROR]: Failed to publish BrochureGenerationCompletedEvent");
+            }
+        }
+
+        private async Task PublishNotificationEventAsync(NotificationCreatedEvent evt)
+        {
+            try
+            {
+                var json = JsonSerializer.Serialize(evt, _jsonOptions);
+                var message = new Message<string, string>
+                {
+                    Key = evt.LinkId,
+                    Value = json
+                };
+
+                var result = await _producer.ProduceAsync(TopicNames.Notifications, message);
+                _logger.LogInformation("[KAFKA]: Published NotificationCreatedEvent to {Topic} [Partition: {Partition}] Offset: {Offset}",
+                    result.Topic, result.Partition, result.Offset);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[KAFKA ERROR]: Failed to publish NotificationCreatedEvent");
+            }
+        }
+
+        public override void Dispose()
+        {
+            _producer?.Flush(TimeSpan.FromSeconds(5));
+            _producer?.Dispose();
+            base.Dispose();
         }
     }
 }

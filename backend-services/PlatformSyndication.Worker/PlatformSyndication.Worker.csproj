@@ -15,4 +15,8 @@
     <PackageReference Include="Confluent.Kafka" Version="2.8.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Shared.Kafka\Shared.Kafka.csproj" />
+  </ItemGroup>
+
 </Project>

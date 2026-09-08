@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Identity.Microservice.DTOs;
 using Identity.Microservice.Models;
 
 namespace Identity.Microservice.Data

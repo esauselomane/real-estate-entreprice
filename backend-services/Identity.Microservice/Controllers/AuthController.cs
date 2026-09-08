@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Identity.Microservice.Data;
+using Identity.Microservice.DTOs;
 using Identity.Microservice.Models;
+using Identity.Microservice.Services.Abstractions;
 using Identity.Microservice.Services;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
@@ -12,15 +14,27 @@ namespace Identity.Microservice.Controllers
     [Route("api/auth")]
     public class AuthController : ControllerBase
     {
-        private readonly IdentityDbContext _context;
+        private readonly IdentityDbContext _dbContext;
+        private readonly IUserRepository _userRepository;
+        private readonly ITenantRepository _tenantRepository;
+        private readonly ISystemRoleRepository _systemRoleRepository;
+        private readonly IUserAccessClaimRepository _userAccessClaimRepository;
+        private readonly IRolePermissionRepository _rolePermissionRepository;
+        private readonly IPermissionRepository _permissionRepository;
         private readonly TokenService _tokenService;
         private readonly ILogger<AuthController> _logger;
         private readonly IEmailService _emailService;
         private readonly IConfiguration _configuration;
 
-        public AuthController(IdentityDbContext context, TokenService tokenService, ILogger<AuthController> logger, IEmailService emailService, IConfiguration configuration)
+        public AuthController(IdentityDbContext dbContext, TokenService tokenService, ILogger<AuthController> logger, IEmailService emailService, IConfiguration configuration, IUserRepository userRepository, ITenantRepository tenantRepository, ISystemRoleRepository systemRoleRepository, IUserAccessClaimRepository userAccessClaimRepository, IRolePermissionRepository rolePermissionRepository, IPermissionRepository permissionRepository)
         {
-            _context = context;
+            _dbContext = dbContext;
+            _userRepository = userRepository;
+            _tenantRepository = tenantRepository;
+            _systemRoleRepository = systemRoleRepository;
+            _userAccessClaimRepository = userAccessClaimRepository;
+            _rolePermissionRepository = rolePermissionRepository;
+            _permissionRepository = permissionRepository;
             _tokenService = tokenService;
             _logger = logger;
             _emailService = emailService;
@@ -44,7 +58,7 @@ namespace Identity.Microservice.Controllers
         {
             _logger.LogInformation("Login attempt for email: {Email}", request.Email);
 
-            var user = await _context.UserAccounts
+            var user = await _userRepository.Query()
                 .FirstOrDefaultAsync(u => u.Email == request.Email && u.AccountStatus == "Active");
 
             if (user == null)
@@ -70,7 +84,7 @@ namespace Identity.Microservice.Controllers
             _logger.LogInformation("Login successful for user: {UserId} ({Email}) Role: {Role} Tenant: {TenantId}",
                 user.UserId, user.Email, user.SystemRole, user.TenantId);
 
-            var permissions = await _context.UserAccessClaims
+            var permissions = await _userAccessClaimRepository.Query()
                 .FirstOrDefaultAsync(p => p.UserId == user.UserId);
 
             if (permissions == null)
@@ -106,7 +120,7 @@ namespace Identity.Microservice.Controllers
             _logger.LogInformation("User registration requested: Email={Email} Role={Role} Tenant={TenantId} By={CallerUserId}",
                 newUser.Email, newUser.SystemRole, newUser.TenantId, User?.FindFirst(ClaimTypes.NameIdentifier)?.Value);
 
-            var roleDef = await _context.SystemRoles
+            var roleDef = await _systemRoleRepository.Query()
                 .FirstOrDefaultAsync(r => r.Name == newUser.SystemRole && r.IsActive);
             if (roleDef == null)
             {
@@ -146,7 +160,7 @@ namespace Identity.Microservice.Controllers
             }
 
             // 1. Verify that email structures do not collide inside the relational database engine
-            var exists = await _context.UserAccounts.AnyAsync(u => u.Email == newUser.Email);
+            var exists = await _userRepository.Query().AnyAsync(u => u.Email == newUser.Email);
             if (exists)
             {
                 return BadRequest(new { message = "Email signature already registered inside system clusters." });
@@ -161,7 +175,7 @@ namespace Identity.Microservice.Controllers
             newUser.AccountStatus = "Active";
 
             // 3. Commit profile record block directly to the transactional pool
-            _context.UserAccounts.Add(newUser);
+            _userRepository.Add(newUser);
 
             // 4. Instantiate default granular access claims matching their target primary role
             var defaultClaims = new UserAccessClaim
@@ -171,9 +185,9 @@ namespace Identity.Microservice.Controllers
                 CanExportFinancialReports = true,
                 CanBypassValuationStages = newUser.SystemRole == "PlatformAdmin"
             };
-            _context.UserAccessClaims.Add(defaultClaims);
+            _userAccessClaimRepository.Add(defaultClaims);
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("User registered: UserId={UserId} Email={Email} Role={Role} Tenant={TenantId}",
                 newUser.UserId, newUser.Email, newUser.SystemRole, newUser.TenantId);
@@ -191,7 +205,7 @@ namespace Identity.Microservice.Controllers
         {
             _logger.LogInformation("Password reset requested for email: {Email}", request.Email);
 
-            var userExists = await _context.UserAccounts.AnyAsync(u => u.Email == request.Email);
+            var userExists = await _userRepository.Query().AnyAsync(u => u.Email == request.Email);
             
             if (!userExists)
             {
@@ -223,7 +237,7 @@ namespace Identity.Microservice.Controllers
             var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (string.IsNullOrWhiteSpace(userId)) return Unauthorized(new { message = "Caller identity unavailable." });
 
-            var user = await _context.UserAccounts.FirstOrDefaultAsync(u => u.UserId == userId);
+            var user = await _userRepository.Query().FirstOrDefaultAsync(u => u.UserId == userId);
             if (user == null) return NotFound(new { message = "Caller account not found." });
 
             // Plain-text verify (matches the local-testing login comparison strategy).
@@ -234,7 +248,7 @@ namespace Identity.Microservice.Controllers
                 return BadRequest(new { message = "New password must be at least 6 characters." });
 
             user.PasswordHash = request.NewPassword;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Password updated successfully." });
         }
 
@@ -260,7 +274,7 @@ namespace Identity.Microservice.Controllers
 
             var callerTenantId = User.FindFirst("TenantId")?.Value;
             
-            var target = await _context.UserAccounts.FirstOrDefaultAsync(u => u.UserId == userId);
+            var target = await _userRepository.Query().FirstOrDefaultAsync(u => u.UserId == userId);
             if (target == null) return NotFound(new { message = "Target account not found." });
 
             // An agency admin can only disable users inside their own tenant.
@@ -280,7 +294,7 @@ namespace Identity.Microservice.Controllers
                 return Forbid();
 
             target.AccountStatus = "Disabled";
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             _logger.LogInformation("User disabled: TargetUserId={TargetUserId} TargetEmail={TargetEmail} By={CallerUserId}",
                 target.UserId, target.Email, callerUserId);
             return Ok(new { message = $"Account {target.Email} disabled successfully." });
@@ -310,8 +324,8 @@ namespace Identity.Microservice.Controllers
                 _logger.LogInformation("GetUsers: listing tenant {TenantId} users by {CallerUserId}", callerTenantId, callerUserId);
 
             var users = callerRole == "PlatformAdmin"
-                ? await _context.UserAccounts.ToListAsync()
-                : await _context.UserAccounts.Where(u => u.TenantId == callerTenantId).ToListAsync();
+                ? await _userRepository.Query().ToListAsync()
+                : await _userRepository.Query().Where(u => u.TenantId == callerTenantId).ToListAsync();
 
             return Ok(users.Select(u => new
             {
@@ -341,12 +355,12 @@ namespace Identity.Microservice.Controllers
 
             var callerTenantId = User.FindFirst("TenantId")?.Value;
             var callerUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var target = await _context.UserAccounts.FirstOrDefaultAsync(u => u.UserId == userId);
+            var target = await _userRepository.Query().FirstOrDefaultAsync(u => u.UserId == userId);
             if (target == null) return NotFound(new { message = "Target account not found." });
 
             if (callerRole == "AgencyAdmin" && target.TenantId != callerTenantId) return Forbid();
 
-            var roleDef = await _context.SystemRoles.FirstOrDefaultAsync(r => r.Name == request.SystemRole && r.IsActive);
+            var roleDef = await _systemRoleRepository.Query().FirstOrDefaultAsync(r => r.Name == request.SystemRole && r.IsActive);
             if (roleDef == null) return BadRequest(new { message = "Unsupported account role." });
 
             bool permitted = callerRole == "PlatformAdmin" || (callerRole == "AgencyAdmin" && roleDef.IsAgencyScoped);
@@ -357,7 +371,7 @@ namespace Identity.Microservice.Controllers
             _logger.LogInformation("User role updated: TargetUserId={TargetUserId} NewRole={NewRole} By={CallerUserId}",
                 target.UserId, request.SystemRole, callerUserId);
             target.SystemRole = request.SystemRole;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "User role updated.", userId = target.UserId, systemRole = target.SystemRole });
         }
 
@@ -376,7 +390,7 @@ namespace Identity.Microservice.Controllers
             }
 
             // Check for duplicate email
-            var existingUser = await _context.UserAccounts.AnyAsync(u => u.Email == request.AdminEmail);
+            var existingUser = await _userRepository.Query().AnyAsync(u => u.Email == request.AdminEmail);
             if (existingUser)
             {
                 _logger.LogWarning("Trial onboarding: email already registered: {Email}", request.AdminEmail);
@@ -402,7 +416,7 @@ namespace Identity.Microservice.Controllers
                 TrialEndDate = trialEndDate,
                 CreatedAt = DateTime.UtcNow
             };
-            _context.TenantAgencies.Add(tenant);
+            _tenantRepository.Add(tenant);
 
             // Create the pending admin user account
             var adminUser = new UserAccount
@@ -421,8 +435,8 @@ namespace Identity.Microservice.Controllers
                 ActivationTokenExpiry = trialStartDate.AddHours(48),
                 CreatedAt = DateTime.UtcNow
             };
-            _context.UserAccounts.Add(adminUser);
-            _context.UserAccessClaims.Add(new UserAccessClaim
+            _userRepository.Add(adminUser);
+            _userAccessClaimRepository.Add(new UserAccessClaim
             {
                 UserId = adminUser.UserId,
                 CanDeleteProperties = false,
@@ -430,7 +444,7 @@ namespace Identity.Microservice.Controllers
                 CanBypassValuationStages = false
             });
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("Trial onboarding complete: TenantId={TenantId} UserId={UserId} Email={Email} TrialEnds={TrialEndDate}",
                 tenantId, adminUser.UserId, request.AdminEmail, trialEndDate);
@@ -473,7 +487,7 @@ namespace Identity.Microservice.Controllers
                 return BadRequest(new { message = "Passwords do not match." });
             }
 
-            var user = await _context.UserAccounts
+            var user = await _userRepository.Query()
                 .FirstOrDefaultAsync(u => u.ActivationToken == request.ActivationToken);
 
             if (user == null)
@@ -492,14 +506,14 @@ namespace Identity.Microservice.Controllers
             user.PasswordHash = request.NewPassword;
             user.AccountStatus = "Active";
             user.ActivationToken = string.Empty;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
             // Activate the tenant agency
-            var tenant = await _context.TenantAgencies.FirstOrDefaultAsync(t => t.TenantId == user.TenantId);
+            var tenant = await _tenantRepository.Query().FirstOrDefaultAsync(t => t.TenantId == user.TenantId);
             if (tenant != null)
             {
                 tenant.OperationalStatus = "Active";
-                await _context.SaveChangesAsync();
+                await _dbContext.SaveChangesAsync();
             }
 
             _logger.LogInformation("Password set and account activated: UserId={UserId} Email={Email} Tenant={TenantId}",
@@ -539,7 +553,7 @@ namespace Identity.Microservice.Controllers
         {
             var result = new List<string>();
             if (string.IsNullOrWhiteSpace(rootTenantId)) return result;
-            var allAgencies = await _context.TenantAgencies
+            var allAgencies = await _tenantRepository.Query()
                 .Select(t => new { t.TenantId, t.ParentTenantId })
                 .ToListAsync();
             var byParent = allAgencies

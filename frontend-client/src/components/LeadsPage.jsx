@@ -158,6 +158,22 @@ export default function LeadsPage() {
     setEditForm((prev) => ({ ...prev, linkedContactId: null }));
   };
 
+  // 🧑‍💼 Hydrate the existing linked contact (stored as just an id on the lead)
+  // into the ContactPicker when the edit form opens, so the picker shows the
+  // pre-selected contact instead of an empty field.
+  const hydrateEditContact = async (contactId) => {
+    if (!contactId) {
+      setEditSelectedContact(null);
+      return;
+    }
+    try {
+      const c = await crmService.getContact(contactId);
+      setEditSelectedContact(c);
+    } catch {
+      setEditSelectedContact(null);
+    }
+  };
+
   const handleCreateLead = async (e) => {
     e.preventDefault();
     try {
@@ -403,7 +419,7 @@ export default function LeadsPage() {
                 });
                 setEditContactSearch('');
                 setEditContactMatches([]);
-                setEditSelectedContact(null);
+                hydrateEditContact(lead.linkedContactId);
                 setShowEditContactDropdown(false);
               }} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row justify-between lg:items-center gap-4 hover:border-blue-700 transition-colors cursor-pointer">
                 <div className="space-y-2 flex-1">

@@ -1,11 +1,13 @@
+using Identity.Microservice.DTOs;
 using Identity.Microservice.Models;
+using Identity.Microservice.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
 namespace Identity.Microservice.Data
 {
     public static class IdentitySeedData
     {
-        public static void EnsureSeeded(IdentityDbContext context, IConfiguration configuration)
+        public static void EnsureSeeded(IdentityDbContext context, IConfiguration configuration, ITenantRepository tenantRepository, IUserRepository userRepository, IUserAccessClaimRepository userAccessClaimRepository, IPermissionRepository permissionRepository, ISystemRoleRepository systemRoleRepository, IRolePermissionRepository rolePermissionRepository, IPricingPackageRepository pricingPackageRepository)
         {
             if (context == null)
             {
@@ -139,7 +141,7 @@ namespace Identity.Microservice.Data
                   ");
               }
 
-              var existingTenants = context.TenantAgencies.Count();
+              var existingTenants = tenantRepository.Query().Count();
             if (existingTenants < 1000)
             {
                 var tenantItems = new List<TenantAgency>();
@@ -157,10 +159,19 @@ namespace Identity.Microservice.Data
                     });
                 }
 
-                 context.TenantAgencies.AddRange(tenantItems);
+                 tenantRepository.AddRange(tenantItems);
              }
 
-             var trialTenant = context.TenantAgencies.FirstOrDefault(t => t.TenantId == "TEN-001");
+              // Look up TEN-001 against BOTH the in-memory tracker and the DB.
+              // AddRange above may have already staged a TEN-001 entity in this
+              // same context (when the DB was empty); a DB-only FirstOrDefault
+              // would return null (EF never surfaces Added entities in query
+              // results), causing Add(TEN-001) below to throw:
+              // "entity type 'TenantAgency' cannot be tracked because another
+              //  instance with the same key value for {'TenantId'} is already
+              //  being tracked." Checking .Local first avoids the double-add.
+              var trialTenant = context.TenantAgencies.Local.FirstOrDefault(t => t.TenantId == "TEN-001")
+                  ?? tenantRepository.Query().FirstOrDefault(t => t.TenantId == "TEN-001");
              if (trialTenant == null)
              {
                  trialTenant = new TenantAgency
@@ -173,17 +184,17 @@ namespace Identity.Microservice.Data
                      OperationalStatus = "TrialPending",
                      CreatedAt = DateTime.UtcNow.AddDays(-1)
                  };
-                 context.TenantAgencies.Add(trialTenant);
+                 tenantRepository.Add(trialTenant);
              }
              trialTenant.IsTrial = true;
              trialTenant.TrialStartDate = DateTime.UtcNow;
              trialTenant.TrialEndDate = DateTime.UtcNow.AddDays(14);
              trialTenant.OperationalStatus = "TrialPending";
 
-              var adminUser = context.UserAccounts.FirstOrDefault(u => u.Email == adminEmail);
+              var adminUser = userRepository.Query().FirstOrDefault(u => u.Email == adminEmail);
              if (adminUser == null)
              {
-                 context.UserAccounts.Add(new UserAccount
+                 userRepository.Add(new UserAccount
                  {
                      UserId = "USR-ADMIN",
                      TenantId = "TEN-001",
@@ -220,10 +231,10 @@ namespace Identity.Microservice.Data
             };
              foreach (var seedUser in roleSeedUsers)
              {
-                 var existing = context.UserAccounts.FirstOrDefault(u => u.Email == seedUser.Email);
+                 var existing = userRepository.Query().FirstOrDefault(u => u.Email == seedUser.Email);
                  if (existing == null)
                  {
-                     context.UserAccounts.Add(new UserAccount
+                     userRepository.Add(new UserAccount
                      {
                          UserId = seedUser.UserId,
                          TenantId = seedUser.TenantId,
@@ -249,10 +260,10 @@ namespace Identity.Microservice.Data
                  }
              }
 
-            if (context.UserAccounts.Count() < 1000)
+            if (userRepository.Query().Count() < 1000)
             {
                 var usersToAdd = new List<UserAccount>();
-                var userIndex = context.UserAccounts.Count() + 1;
+                var userIndex = userRepository.Query().Count() + 1;
                 for (var i = userIndex; i <= 1000; i++)
                 {
                     var tenantId = $"TEN-{((i - 1) % 100) + 1:000}";
@@ -270,15 +281,15 @@ namespace Identity.Microservice.Data
                     });
                 }
 
-                context.UserAccounts.AddRange(usersToAdd);
+                userRepository.AddRange(usersToAdd);
             }
 
             context.SaveChanges();
 
-            var existingClaimUserIds = context.UserAccessClaims.Select(c => c.UserId).ToHashSet();
+            var existingClaimUserIds = userAccessClaimRepository.Query().Select(c => c.UserId).ToHashSet();
             var claimsToAdd = new List<UserAccessClaim>();
 
-            foreach (var user in context.UserAccounts.ToList())
+            foreach (var user in userRepository.Query().ToList())
             {
                 if (!existingClaimUserIds.Contains(user.UserId))
                 {
@@ -294,7 +305,7 @@ namespace Identity.Microservice.Data
 
              if (claimsToAdd.Any())
              {
-                 context.UserAccessClaims.AddRange(claimsToAdd);
+                 userAccessClaimRepository.AddRange(claimsToAdd);
                  context.SaveChanges();
              }
 
@@ -365,6 +376,11 @@ namespace Identity.Microservice.Data
                 new Permission { Key = "users:view", Description = "Can view users", IsActive = true, Module = "Users" },
                 new Permission { Key = "users:edit", Description = "Can edit user", IsActive = true, Module = "Users" },
                 new Permission { Key = "users:delete", Description = "Can delete user", IsActive = true, Module = "Users" },
+                // Property Amenities
+                new Permission { Key = "amenities:view", Description = "Can view amenity types", IsActive = true, Module = "Amenities" },
+                new Permission { Key = "amenities:create", Description = "Can create amenity types", IsActive = true, Module = "Amenities" },
+                new Permission { Key = "amenities:edit", Description = "Can edit amenity types", IsActive = true, Module = "Amenities" },
+                new Permission { Key = "amenities:delete", Description = "Can delete amenity types", IsActive = true, Module = "Amenities" },
                 // System Administration
                 new Permission { Key = "system:roles:manage", Description = "Can manage system roles", IsActive = true, Module = "System" },
                 new Permission { Key = "system:permissions:manage", Description = "Can manage permissions", IsActive = true, Module = "System" },
@@ -375,10 +391,10 @@ namespace Identity.Microservice.Data
             };
             foreach (var perm in permissions)
             {
-                var existing = context.Permissions.FirstOrDefault(p => p.Key == perm.Key);
+                var existing = permissionRepository.Query().FirstOrDefault(p => p.Key == perm.Key);
                 if (existing == null)
                 {
-                    context.Permissions.Add(perm);
+                    permissionRepository.Add(perm);
                 }
             }
             context.SaveChanges();
@@ -393,10 +409,10 @@ namespace Identity.Microservice.Data
             };
             foreach (var rd in roleDefs)
             {
-                var existing = context.SystemRoles.FirstOrDefault(r => r.Name == rd.Name);
+                var existing = systemRoleRepository.Query().FirstOrDefault(r => r.Name == rd.Name);
                 if (existing == null)
                 {
-                    context.SystemRoles.Add(new SystemRoleDefinition
+                    systemRoleRepository.Add(new SystemRoleDefinition
                     {
                         Name = rd.Name,
                         Description = rd.Description,
@@ -416,19 +432,19 @@ namespace Identity.Microservice.Data
             }
             context.SaveChanges();
 
-            var platformAdminRole = context.SystemRoles.First(r => r.Name == "PlatformAdmin");
-            var agencyAdminRole = context.SystemRoles.First(r => r.Name == "AgencyAdmin");
-            var brokerRole = context.SystemRoles.First(r => r.Name == "Broker");
+            var platformAdminRole = systemRoleRepository.Query().First(r => r.Name == "PlatformAdmin");
+            var agencyAdminRole = systemRoleRepository.Query().First(r => r.Name == "AgencyAdmin");
+            var brokerRole = systemRoleRepository.Query().First(r => r.Name == "Broker");
 
-            var allPermissions = context.Permissions.ToDictionary(p => p.Key, p => p.PermissionId);
+            var allPermissions = permissionRepository.Query().ToDictionary(p => p.Key, p => p.PermissionId);
 
             void AssignIfExists(int roleDefId, string key)
             {
                 if (allPermissions.TryGetValue(key, out var permId))
                 {
-                    if (!context.RolePermissions.Any(rp => rp.RoleDefId == roleDefId && rp.PermissionId == permId))
+                    if (!rolePermissionRepository.Query().Any(rp => rp.RoleDefId == roleDefId && rp.PermissionId == permId))
                     {
-                        context.RolePermissions.Add(new RolePermission { RoleDefId = roleDefId, PermissionId = permId });
+                        rolePermissionRepository.Add(new RolePermission { RoleDefId = roleDefId, PermissionId = permId });
                     }
                 }
             }
@@ -495,10 +511,10 @@ namespace Identity.Microservice.Data
             };
             foreach (var pkg in pricingPackages)
             {
-                var existing = context.PricingPackages.FirstOrDefault(p => p.Code == pkg.Code);
+                var existing = pricingPackageRepository.Query().FirstOrDefault(p => p.Code == pkg.Code);
                 if (existing == null)
                 {
-                    context.PricingPackages.Add(pkg);
+                    pricingPackageRepository.Add(pkg);
                 }
                 else
                 {

@@ -4,7 +4,9 @@ using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using CRM.Microservice.Data;
+using CRM.Microservice.DTOs;
 using CRM.Microservice.Models;
+using CRM.Microservice.Services.Abstractions;
 using CRM.Microservice.Services;
 
 namespace CRM.Microservice.Controllers
@@ -14,15 +16,45 @@ namespace CRM.Microservice.Controllers
     [Authorize]
     public class CRMController : ControllerBase
     {
-        private readonly CRMDbContext _context;
+        private readonly CRMDbContext _dbContext;
         private readonly IHttpClientFactory _http;
+        private readonly IAgencyRepository _agencyRepository;
+        private readonly IBrokerRepository _brokerRepository;
+        private readonly ILeadRepository _leadRepository;
+        private readonly IDealRepository _dealRepository;
+        private readonly ICompanyRepository _companyRepository;
+        private readonly ILegalEntityRepository _legalEntityRepository;
+        private readonly IContactRepository _contactRepository;
+        private readonly IOwnerTenantRepository _ownerTenantRepository;
+        private readonly IGeographyRepository _geographyRepository;
+        private readonly IOperationalRecordRepository _operationalRepository;
+        private readonly IContactPersonRepository _contactPersonRepository;
+        private readonly IBrochureCardRepository _brochureCardRepository;
+        private readonly IRepository<BrochureCardLine> _brochureCardLineRepository;
+        private readonly IDealBrokerSplitRepository _dealBrokerSplitRepository;
+        private readonly INotificationRepository _notificationRepository;
         private readonly string _gatewayUrl;
         private readonly ILogger<CRMController> _logger;
         private readonly PermissionCheckService _permissionCheck;
 
-        public CRMController(CRMDbContext context, IHttpClientFactory http, IConfiguration configuration, ILogger<CRMController> logger, PermissionCheckService permissionCheck)
+        public CRMController(CRMDbContext dbContext, IHttpClientFactory http, IConfiguration configuration, ILogger<CRMController> logger, PermissionCheckService permissionCheck, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, ILeadRepository leadRepository, IDealRepository dealRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, IOwnerTenantRepository ownerTenantRepository, IGeographyRepository geographyRepository, IOperationalRecordRepository operationalRepository, IContactPersonRepository contactPersonRepository, IBrochureCardRepository brochureCardRepository, IRepository<BrochureCardLine> brochureCardLineRepository, IDealBrokerSplitRepository dealBrokerSplitRepository, INotificationRepository notificationRepository)
         {
-            _context = context;
+            _dbContext = dbContext;
+        _agencyRepository = agencyRepository;
+        _brokerRepository = brokerRepository;
+        _leadRepository = leadRepository;
+        _dealRepository = dealRepository;
+        _companyRepository = companyRepository;
+        _legalEntityRepository = legalEntityRepository;
+        _contactRepository = contactRepository;
+        _ownerTenantRepository = ownerTenantRepository;
+        _geographyRepository = geographyRepository;
+        _operationalRepository = operationalRepository;
+        _contactPersonRepository = contactPersonRepository;
+        _brochureCardRepository = brochureCardRepository;
+        _brochureCardLineRepository = brochureCardLineRepository;
+        _dealBrokerSplitRepository = dealBrokerSplitRepository;
+        _notificationRepository = notificationRepository;
             _http = http;
             _gatewayUrl = configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
             _logger = logger;
@@ -93,7 +125,7 @@ namespace CRM.Microservice.Controllers
                     // Every tenant on the platform — pulled from the agency table
                     // so PlatformAdmin "all" mode actually surfaces data instead
                     // of returning an empty set and zeroing every metric.
-                    baseVisible = await _context.AgencyRecords
+                    baseVisible = await _agencyRepository.Query()
                         .Select(a => a.TenantId)
                         .Where(t => t != null && t != "")
                         .Distinct()
@@ -110,7 +142,7 @@ namespace CRM.Microservice.Controllers
 
                 if (role == "AgencyAdmin")
                 {
-                    var callerAgencyIds = await _context.AgencyRecords
+                    var callerAgencyIds = await _agencyRepository.Query()
                         .Where(a => a.TenantId == tenant)
                         .Select(a => a.AgencyId)
                         .ToListAsync();
@@ -126,7 +158,7 @@ namespace CRM.Microservice.Controllers
                     while (frontier.Count > 0)
                     {
                         var batch = frontier.Dequeue();
-                        var childAgencyIds = await _context.AgencyRecords
+                        var childAgencyIds = await _agencyRepository.Query()
                             .Where(a => a.ParentAgencyId == batch)
                             .Select(a => new { a.AgencyId, a.TenantId })
                             .ToListAsync();
@@ -191,7 +223,7 @@ namespace CRM.Microservice.Controllers
         private async Task<List<string>?> ResolveOverrideSubtreeAsync(string overrideAgencyId, string role)
         {
             // First try to match an AgencyId exactly.
-            var agency = await _context.AgencyRecords
+            var agency = await _agencyRepository.Query()
                 .AsNoTracking()
                 .FirstOrDefaultAsync(a => a.AgencyId == overrideAgencyId);
 
@@ -200,7 +232,7 @@ namespace CRM.Microservice.Controllers
             {
                 // Fall back to literal TenantId match (legacy callers + report
                 // endpoints that hand the helper a raw TenantId).
-                target = await _context.AgencyRecords
+                target = await _agencyRepository.Query()
                     .AsNoTracking()
                     .FirstOrDefaultAsync(a => a.TenantId == overrideAgencyId);
             }
@@ -221,7 +253,7 @@ namespace CRM.Microservice.Controllers
                 while (frontier.Count > 0)
                 {
                     var batch = frontier.Dequeue();
-                    var childAgencyIds = await _context.AgencyRecords
+                    var childAgencyIds = await _agencyRepository.Query()
                         .AsNoTracking()
                         .Where(a => a.ParentAgencyId == batch)
                         .Select(a => a.AgencyId)
@@ -229,7 +261,7 @@ namespace CRM.Microservice.Controllers
                     foreach (var childId in childAgencyIds)
                     {
                         if (string.IsNullOrEmpty(childId)) continue;
-                        var childAgency = await _context.AgencyRecords
+                        var childAgency = await _agencyRepository.Query()
                             .AsNoTracking()
                             .FirstOrDefaultAsync(a => a.AgencyId == childId);
                         if (childAgency == null) continue;
@@ -270,14 +302,6 @@ namespace CRM.Microservice.Controllers
         // embedded in the response body so consumers (donut/pie/bar charts) can
         // build a true chart of the *entire* filtered universe, not just the
         // 20-row page that was returned.
-        private static async Task<Dictionary<string, Dictionary<string, int>>> ComputeAggregatesAsync(
-            params (string Field, Func<IQueryable<object>, IQueryable<IGrouping<object, object>>> Group)[] aggregators)
-        {
-            var result = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
-            // The aggregator lambdas already executed the group-by inside their
-            // caller; this overload is a no-op placeholder kept for symmetry.
-            return await Task.FromResult(result);
-        }
 
         // 📊 String-typed selector aggregate: groups rows by a string field and
         // returns { bucket → count }.
@@ -352,7 +376,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<OperationalRecord> query = _context.OperationalRecords;
+            IQueryable<OperationalRecord> query = _operationalRepository.Query();
             if (visibleTenants.Count > 0)
                 query = query.Where(r => visibleTenants.Contains(r.TenantId));
             if (!string.IsNullOrWhiteSpace(module)) query = query.Where(r => r.Module == module);
@@ -393,15 +417,15 @@ namespace CRM.Microservice.Controllers
 
             record.CreatedAt = DateTime.UtcNow;
             record.UpdatedAt = DateTime.UtcNow;
-            _context.OperationalRecords.Add(record);
-            await _context.SaveChangesAsync();
+            _operationalRepository.Add(record);
+            await _dbContext.SaveChangesAsync();
             return Ok(record);
         }
 
         [HttpPut("operations/{recordId:int}")]
         public async Task<IActionResult> UpdateOperationalRecord(int recordId, [FromBody] OperationalRecord updatedRecord)
         {
-            var record = await _context.OperationalRecords.FindAsync(recordId);
+            var record = await _operationalRepository.GetByIdAsync(recordId);
             if (record == null) return NotFound(new { message = "Operational record not found." });
 
             var permission = (record.Module ?? string.Empty).ToLowerInvariant() switch
@@ -426,7 +450,7 @@ namespace CRM.Microservice.Controllers
             record.PropertyId = updatedRecord.PropertyId;
             record.PropertyUnitId = updatedRecord.PropertyUnitId;
             record.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(record);
         }
 
@@ -440,7 +464,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<CRMCompany> query = _context.CRMCompanies;
+            IQueryable<CRMCompany> query = _companyRepository.Query();
             if (visibleTenants.Count > 0)
                 query = query.Where(c => visibleTenants.Contains(c.TenantId));
             var ordered = query.OrderBy(c => c.BusinessName);
@@ -464,7 +488,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<OwnerTenantRecord> query = _context.OwnerTenantRecords;
+            IQueryable<OwnerTenantRecord> query = _ownerTenantRepository.Query();
             if (visibleTenants.Count > 0)
                 query = query.Where(r => visibleTenants.Contains(r.TenantId));
             var ordered = query.OrderByDescending(r => r.CreatedAt);
@@ -488,7 +512,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var record = await _context.OwnerTenantRecords.FindAsync(ownerTenantId);
+            var record = await _ownerTenantRepository.GetByIdAsync(ownerTenantId);
             return record == null
                 ? NotFound(new { message = "Owner or tenant record not found." })
                 : Ok(record);
@@ -504,7 +528,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var query = _context.GeographyRecords.AsQueryable();
+            var query = _geographyRepository.Query();
             var term = (search ?? string.Empty).Trim().ToLower();
             if (!string.IsNullOrEmpty(term))
             {
@@ -528,7 +552,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var geo = await _context.GeographyRecords.FindAsync(geographyId);
+            var geo = await _geographyRepository.GetByIdAsync(geographyId);
             return geo == null ? NotFound(new { message = "Geography record not found." }) : Ok(geo);
         }
 
@@ -545,8 +569,8 @@ namespace CRM.Microservice.Controllers
                 return BadRequest(new { message = "Owner / Tenant details are required." });
 
             record.CreatedAt = DateTime.UtcNow;
-            _context.OwnerTenantRecords.Add(record);
-            await _context.SaveChangesAsync();
+            _ownerTenantRepository.Add(record);
+            await _dbContext.SaveChangesAsync();
             return Ok(record);
         }
 
@@ -559,7 +583,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var existing = await _context.OwnerTenantRecords.FindAsync(updatedRecord.OwnerTenantId);
+            var existing = await _ownerTenantRepository.GetByIdAsync(updatedRecord.OwnerTenantId);
             if (existing == null) return NotFound(new { message = "Owner or tenant record not found." });
 
             existing.RecordType = updatedRecord.RecordType;
@@ -574,7 +598,7 @@ namespace CRM.Microservice.Controllers
              existing.Notes = updatedRecord.Notes;
 
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(existing);
         }
 
@@ -592,7 +616,7 @@ namespace CRM.Microservice.Controllers
             _logger.LogInformation("GetAgencies: Page={Page} Role={Role} Override={Override} VisibleTenants={TenantCount}",
                 page, callerRole, tenantId ?? "(default)", visibleTenants.Count);
 
-            IQueryable<AgencyRecord> query = _context.AgencyRecords;
+            IQueryable<AgencyRecord> query = _agencyRepository.Query();
             if (visibleTenants.Count > 0)
             {
                 query = query.Where(a => visibleTenants.Contains(a.TenantId));
@@ -635,7 +659,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<AgencyRecord> query = _context.AgencyRecords;
+            IQueryable<AgencyRecord> query = _agencyRepository.Query();
             if (visibleTenants.Count > 0)
             {
                 query = query.Where(a => visibleTenants.Contains(a.TenantId));
@@ -691,7 +715,7 @@ namespace CRM.Microservice.Controllers
 
             if (!string.IsNullOrWhiteSpace(agency.ParentAgencyId))
             {
-                var parentExists = await _context.AgencyRecords.AnyAsync(a => a.AgencyId == agency.ParentAgencyId);
+                var parentExists = await _agencyRepository.Query().AnyAsync(a => a.AgencyId == agency.ParentAgencyId);
                 if (!parentExists)
                 {
                     _logger.LogWarning("CreateAgency: rejected — ParentAgencyId={ParentId} not found, caller={Caller}", agency.ParentAgencyId, caller);
@@ -699,8 +723,8 @@ namespace CRM.Microservice.Controllers
                 }
             }
 
-            _context.AgencyRecords.Add(agency);
-            await _context.SaveChangesAsync();
+            _agencyRepository.Add(agency);
+            await _dbContext.SaveChangesAsync();
 
             _logger.LogInformation("CreateAgency: created AgencyId={AgencyId} Name={Name} Tenant={Tenant} Parent={Parent} By={Caller}",
                 agency.AgencyId, agency.Name, agency.TenantId, agency.ParentAgencyId ?? "(root)", caller);
@@ -716,7 +740,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var agency = await _context.AgencyRecords
+            var agency = await _agencyRepository.Query()
                 .Include(a => a.ContactPersons)
                 .FirstOrDefaultAsync(a => a.AgencyId == agencyId);
             if (agency == null) return NotFound(new { message = "Agency record not found." });
@@ -734,12 +758,12 @@ namespace CRM.Microservice.Controllers
             {
                 if (updatedAgency.ParentAgencyId == agencyId)
                     return BadRequest(new { message = "An agency cannot be its own parent." });
-                var parentExists = await _context.AgencyRecords.AnyAsync(a => a.AgencyId == updatedAgency.ParentAgencyId);
+                var parentExists = await _agencyRepository.Query().AnyAsync(a => a.AgencyId == updatedAgency.ParentAgencyId);
                 if (!parentExists)
                     return BadRequest(new { message = $"ParentAgencyId '{updatedAgency.ParentAgencyId}' not found." });
                 agency.ParentAgencyId = updatedAgency.ParentAgencyId;
             }
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(agency);
         }
 
@@ -753,9 +777,9 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var exists = await _context.AgencyRecords.AnyAsync(a => a.AgencyId == agencyId);
+            var exists = await _agencyRepository.Query().AnyAsync(a => a.AgencyId == agencyId);
             if (!exists) return NotFound(new { message = "Agency not found." });
-            var contacts = await _context.ContactPersons
+            var contacts = await _contactPersonRepository.Query()
                 .Where(c => c.AgencyId == agencyId)
                 .OrderBy(c => c.FullName).ToListAsync();
             return Ok(contacts);
@@ -770,7 +794,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var agency = await _context.AgencyRecords.FirstOrDefaultAsync(a => a.AgencyId == agencyId);
+            var agency = await _agencyRepository.Query().FirstOrDefaultAsync(a => a.AgencyId == agencyId);
             if (agency == null) return NotFound(new { message = "Agency not found." });
             if (string.IsNullOrWhiteSpace(contact.FullName))
                 return BadRequest(new { message = "Contact full name is required." });
@@ -778,8 +802,8 @@ namespace CRM.Microservice.Controllers
             contact.ContactPersonId = "CPT-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
             contact.AgencyId = agencyId;
             contact.CreatedAt = DateTime.UtcNow;
-            _context.ContactPersons.Add(contact);
-            await _context.SaveChangesAsync();
+            _contactPersonRepository.Add(contact);
+            await _dbContext.SaveChangesAsync();
             return Ok(contact);
         }
 
@@ -792,7 +816,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var existing = await _context.ContactPersons.FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
+            var existing = await _contactPersonRepository.Query().FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
             if (existing == null) return NotFound(new { message = "Contact person not found." });
             existing.FullName = updated.FullName;
             existing.Email = updated.Email;
@@ -800,7 +824,7 @@ namespace CRM.Microservice.Controllers
             existing.Position = updated.Position;
             existing.Role = updated.Role;
             existing.IsAgencyAdmin = updated.IsAgencyAdmin;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(existing);
         }
 
@@ -813,10 +837,10 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var existing = await _context.ContactPersons.FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
+            var existing = await _contactPersonRepository.Query().FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
             if (existing == null) return NotFound(new { message = "Contact person not found." });
-            _context.ContactPersons.Remove(existing);
-            await _context.SaveChangesAsync();
+            _contactPersonRepository.Remove(existing);
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Contact person removed." });
         }
 
@@ -830,7 +854,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var contact = await _context.ContactPersons.FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
+            var contact = await _contactPersonRepository.Query().FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
             if (contact == null) return NotFound(new { message = "Contact person not found." });
 
             var broker = new BrokerRecord
@@ -845,9 +869,9 @@ namespace CRM.Microservice.Controllers
                 Status = "Active",
                 CreatedAt = DateTime.UtcNow
             };
-            _context.BrokerRecords.Add(broker);
+            _brokerRepository.Add(broker);
             contact.IsAgencyAdmin = true;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { broker, contact = contact });
         }
 
@@ -861,7 +885,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<BrokerRecord> query = _context.BrokerRecords;
+            IQueryable<BrokerRecord> query = _brokerRepository.Query();
             if (visibleTenants.Count > 0)
                 query = query.Where(b => visibleTenants.Contains(b.TenantId));
             var ordered = query.OrderBy(b => b.AgencyId).ThenBy(b => b.FullName);
@@ -893,8 +917,8 @@ namespace CRM.Microservice.Controllers
             // 🔐 Tenant taken from the caller's JWT, never from the request body.
             broker.TenantId = GetCurrentTenant();
             broker.CreatedAt = DateTime.UtcNow;
-            _context.BrokerRecords.Add(broker);
-            await _context.SaveChangesAsync();
+            _brokerRepository.Add(broker);
+            await _dbContext.SaveChangesAsync();
             return Ok(broker);
         }
 
@@ -907,7 +931,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var broker = await _context.BrokerRecords.FindAsync(brokerId);
+            var broker = await _brokerRepository.GetByIdAsync(brokerId);
             if (broker == null) return NotFound(new { message = "Broker record not found." });
             broker.AgencyId = updatedBroker.AgencyId;
             broker.FullName = updatedBroker.FullName;
@@ -915,7 +939,7 @@ namespace CRM.Microservice.Controllers
             broker.Phone = updatedBroker.Phone;
             broker.Role = updatedBroker.Role;
             broker.Status = updatedBroker.Status;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(broker);
         }
 
@@ -932,8 +956,20 @@ namespace CRM.Microservice.Controllers
             // 🔐 Tenant taken from the caller's JWT, never from the request body.
             company.TenantId = GetCurrentTenant();
             company.CreatedAt = DateTime.UtcNow;
-            _context.CRMCompanies.Add(company);
-            await _context.SaveChangesAsync();
+
+            // 🔒 If a legal entity is assigned, it must exist and sit in the
+            // caller's visible tenant subtree.
+            if (!string.IsNullOrEmpty(company.AssociatedLegalEntityId))
+            {
+                var visibleTenants = await GetVisibleTenantIdsAsync();
+                var entity = await _legalEntityRepository.Query()
+                    .FirstOrDefaultAsync(e => e.LegalEntityId == company.AssociatedLegalEntityId);
+                if (entity == null) return BadRequest(new { message = "Referenced legal entity not found." });
+                if (visibleTenants.Count > 0 && !visibleTenants.Contains(entity.TenantId)) return Forbid();
+            }
+
+            _companyRepository.Add(company);
+            await _dbContext.SaveChangesAsync();
             return Ok(company);
         }
 
@@ -946,7 +982,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var existing = await _context.CRMCompanies.FindAsync(updatedCompany.CompanyId);
+            var existing = await _companyRepository.GetByIdAsync(updatedCompany.CompanyId);
             if (existing == null) return NotFound(new { message = "Company record not found." });
 
             existing.BusinessName = updatedCompany.BusinessName;
@@ -956,8 +992,22 @@ namespace CRM.Microservice.Controllers
             existing.HeadOfficeAddress = updatedCompany.HeadOfficeAddress;
             existing.CorporateCreditLimit = updatedCompany.CorporateCreditLimit;
             existing.IndustryVertical = updatedCompany.IndustryVertical;
+            existing.AssociatedLegalEntityId = updatedCompany.AssociatedLegalEntityId;
 
-            await _context.SaveChangesAsync();
+            // 🔒 If a legal entity is assigned, it must exist and sit inside the
+            // caller's visible tenant subtree (defence-in-depth — the permission
+            // gate above is the primary control).
+            if (!string.IsNullOrEmpty(existing.AssociatedLegalEntityId))
+            {
+                var visibleTenants = await GetVisibleTenantIdsAsync();
+                var entity = await _legalEntityRepository.Query()
+                    .FirstOrDefaultAsync(e => e.LegalEntityId == existing.AssociatedLegalEntityId);
+                if (entity == null) return BadRequest(new { message = "Referenced legal entity not found." });
+                if (visibleTenants.Count > 0 && !visibleTenants.Contains(entity.TenantId))
+                    return Forbid();
+            }
+
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Company parameters updated successfully.", data = existing });
         }
 
@@ -971,7 +1021,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<CRMLegalEntity> query = _context.CRMLegalEntities.Include(e => e.CompanyDetails);
+            IQueryable<CRMLegalEntity> query = _legalEntityRepository.Query().AsNoTracking().Include(e => e.CompanyDetails);
             if (visibleTenants.Count > 0)
                 query = query.Where(e => visibleTenants.Contains(e.TenantId));
             var ordered = query.OrderBy(e => e.RegisteredLegalName);
@@ -999,8 +1049,8 @@ namespace CRM.Microservice.Controllers
             // 🔐 Tenant taken from the caller's JWT, never from the request body.
             legalEntity.TenantId = GetCurrentTenant();
             legalEntity.CreatedAt = DateTime.UtcNow;
-            _context.CRMLegalEntities.Add(legalEntity);
-            await _context.SaveChangesAsync();
+            _legalEntityRepository.Add(legalEntity);
+            await _dbContext.SaveChangesAsync();
             return Ok(legalEntity);
         }
 
@@ -1013,7 +1063,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var existing = await _context.CRMLegalEntities.FindAsync(updatedEntity.LegalEntityId);
+            var existing = await _legalEntityRepository.GetByIdAsync(updatedEntity.LegalEntityId);
             if (existing == null) return NotFound(new { message = "Legal Entity record not found." });
 
             existing.RegisteredLegalName = updatedEntity.RegisteredLegalName;
@@ -1022,7 +1072,7 @@ namespace CRM.Microservice.Controllers
             existing.TaxRegistrationIndex = updatedEntity.TaxRegistrationIndex;
             existing.DeedsOfficeIdentifier = updatedEntity.DeedsOfficeIdentifier;
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Legal Entity parameters updated successfully.", data = existing });
         }
 
@@ -1036,7 +1086,8 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<CRMContact> query = _context.CRMContacts
+            IQueryable<CRMContact> query = _contactRepository.Query()
+                .AsNoTracking()
                 .Include(c => c.CompanyDetails)
                 .Include(c => c.LegalEntityDetails);
             if (visibleTenants.Count > 0)
@@ -1054,6 +1105,120 @@ namespace CRM.Microservice.Controllers
             return Ok(items);
         }
 
+        // 🔍 Auto-complete search over companies (by name / registration / VAT).
+        [HttpGet("companies/search")]
+        public async Task<IActionResult> SearchCompanies([FromQuery] string q, [FromQuery] int page = 1, [FromQuery] string? tenantId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("SearchCompanies: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            IQueryable<CRMCompany> query = _companyRepository.Query();
+            if (visibleTenants.Count > 0)
+                query = query.Where(c => visibleTenants.Contains(c.TenantId));
+
+            var term = (q ?? string.Empty).Trim().ToLower();
+            if (!string.IsNullOrEmpty(term))
+            {
+                query = query.Where(c =>
+                    c.BusinessName.ToLower().Contains(term) ||
+                    c.RegistrationNumber.ToLower().Contains(term) ||
+                    c.VatNumber.ToLower().Contains(term));
+            }
+
+            var (items, total) = await PageAsync(query.OrderBy(c => c.BusinessName), page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
+        }
+
+        // 🔍 Auto-complete search over legal entities (by registered name / tax ref / type).
+        [HttpGet("legal-entities/search")]
+        public async Task<IActionResult> SearchLegalEntities([FromQuery] string q, [FromQuery] int page = 1, [FromQuery] string? tenantId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("SearchLegalEntities: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            IQueryable<CRMLegalEntity> query = _legalEntityRepository.Query().AsNoTracking().Include(e => e.CompanyDetails);
+            if (visibleTenants.Count > 0)
+                query = query.Where(e => visibleTenants.Contains(e.TenantId));
+
+            var term = (q ?? string.Empty).Trim().ToLower();
+            if (!string.IsNullOrEmpty(term))
+            {
+                query = query.Where(e =>
+                    e.RegisteredLegalName.ToLower().Contains(term) ||
+                    e.EntityTypeClassifier.ToLower().Contains(term) ||
+                    e.TaxRegistrationIndex.ToLower().Contains(term));
+            }
+
+            var (items, total) = await PageAsync(query.OrderBy(e => e.RegisteredLegalName), page);
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            return Ok(items);
+        }
+
+        // --- 📋 ENDPOINT: FETCH A SINGLE LEGAL ENTITY BY ID (edit hydration) ---
+        [HttpGet("legal-entities/{legalEntityId}")]
+        public async Task<IActionResult> GetLegalEntityById([FromRoute] string legalEntityId, [FromQuery] string? tenantId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("GetLegalEntityById: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(legalEntityId))
+            {
+                return BadRequest(new { message = "Legal entity id is required." });
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            var entity = await _legalEntityRepository.Query()
+                .AsNoTracking()
+                .Include(e => e.CompanyDetails)
+                .FirstOrDefaultAsync(e => e.LegalEntityId == legalEntityId);
+            if (entity == null) return NotFound(new { message = "Legal entity record not found." });
+
+            if (visibleTenants.Count > 0 && !visibleTenants.Contains(entity.TenantId))
+                return Forbid();
+
+            return Ok(entity);
+        }
+
+        // --- 📋 ENDPOINT: FETCH A SINGLE COMPANY BY ID (edit hydration) ---
+        [HttpGet("companies/{companyId}")]
+        public async Task<IActionResult> GetCompanyById([FromRoute] string companyId, [FromQuery] string? tenantId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("agencies:view"))
+            {
+                _logger.LogWarning("GetCompanyById: forbidden — caller lacks agencies:view permission");
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(companyId))
+            {
+                return BadRequest(new { message = "Company id is required." });
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            var company = await _companyRepository.Query()
+                .AsNoTracking()
+                .Include(c => c.LegalEntityDetails)
+                .FirstOrDefaultAsync(c => c.CompanyId == companyId);
+            if (company == null) return NotFound(new { message = "Company record not found." });
+
+            if (visibleTenants.Count > 0 && !visibleTenants.Contains(company.TenantId))
+                return Forbid();
+
+            return Ok(company);
+        }
+
         [HttpGet("contacts/search")]
         public async Task<IActionResult> SearchContacts([FromQuery] string q, [FromQuery] int page = 1, [FromQuery] string? tenantId = null)
         {
@@ -1064,7 +1229,8 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<CRMContact> query = _context.CRMContacts
+            IQueryable<CRMContact> query = _contactRepository.Query()
+                .AsNoTracking()
                 .Include(c => c.CompanyDetails)
                 .Include(c => c.LegalEntityDetails);
             if (visibleTenants.Count > 0)
@@ -1084,6 +1250,45 @@ namespace CRM.Microservice.Controllers
             return Ok(items);
         }
 
+        // --- 📋 ENDPOINT: FETCH A SINGLE CONTACT BY ID (edit hydration) ---
+        [HttpGet("contacts/{contactId}")]
+        public async Task<IActionResult> GetContactById([FromRoute] string contactId, [FromQuery] string? tenantId = null)
+        {
+            if (!await _permissionCheck.HasPermissionAsync("users:view"))
+            {
+                _logger.LogWarning("GetContactById: forbidden — caller lacks users:view permission");
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(contactId))
+            {
+                return BadRequest(new { message = "Contact id is required." });
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+
+            var contact = await _contactRepository.Query()
+                .Include(c => c.CompanyDetails)
+                .Include(c => c.LegalEntityDetails)
+                .FirstOrDefaultAsync(c => c.ContactId == contactId);
+
+            if (contact == null)
+            {
+                _logger.LogInformation("GetContactById: ContactId={ContactId} not found", contactId);
+                return NotFound(new { message = "Contact record not found." });
+            }
+
+            // Tenant-subtree guard: a contact is only surfaced if its tenant sits
+            // inside the caller's visible subtree (AgencyAdmin/child/PlatformAdmin).
+            if (visibleTenants.Count > 0 && !visibleTenants.Contains(contact.TenantId))
+            {
+                _logger.LogWarning("GetContactById: ContactId={ContactId} outside visible tenants", contactId);
+                return Forbid();
+            }
+
+            return Ok(contact);
+        }
+
         [HttpPost("contact/create")]
         public async Task<IActionResult> CreateContact([FromBody] CRMContact contact)
         {
@@ -1098,8 +1303,18 @@ namespace CRM.Microservice.Controllers
             // 🔐 Tenant taken from the caller's JWT, never from the request body.
             contact.TenantId = GetCurrentTenant();
             contact.CreatedAt = DateTime.UtcNow;
-            _context.CRMContacts.Add(contact);
-            await _context.SaveChangesAsync();
+
+            // 🧠 Infer the contact's legal entity from its company when the
+            // caller didn't supply one — "legal entity can be inferred from company".
+            if (string.IsNullOrEmpty(contact.AssociatedLegalEntityId) && !string.IsNullOrEmpty(contact.AssociatedCompanyId))
+            {
+                var co = await _companyRepository.Query().FirstOrDefaultAsync(c => c.CompanyId == contact.AssociatedCompanyId);
+                if (co?.AssociatedLegalEntityId != null)
+                    contact.AssociatedLegalEntityId = co.AssociatedLegalEntityId;
+            }
+
+            _contactRepository.Add(contact);
+            await _dbContext.SaveChangesAsync();
             return Ok(contact);
         }
 
@@ -1112,7 +1327,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var existing = await _context.CRMContacts.FindAsync(updatedContact.ContactId);
+            var existing = await _contactRepository.GetByIdAsync(updatedContact.ContactId);
             if (existing == null) return NotFound(new { message = "Contact tracking profile record not found." });
 
             existing.FullName = updatedContact.FullName;
@@ -1124,7 +1339,16 @@ namespace CRM.Microservice.Controllers
             existing.AssociatedLegalEntityId = updatedContact.AssociatedLegalEntityId;
             existing.LinkedDealIds = updatedContact.LinkedDealIds;
 
-            await _context.SaveChangesAsync();
+            // 🧠 Re-infer the legal entity from the company if the caller left it blank
+            // but supplied a company (legal entity is inferred from company).
+            if (string.IsNullOrEmpty(existing.AssociatedLegalEntityId) && !string.IsNullOrEmpty(existing.AssociatedCompanyId))
+            {
+                var co = await _companyRepository.Query().FirstOrDefaultAsync(c => c.CompanyId == existing.AssociatedCompanyId);
+                if (co?.AssociatedLegalEntityId != null)
+                    existing.AssociatedLegalEntityId = co.AssociatedLegalEntityId;
+            }
+
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Contact directory record updated successfully.", data = existing });
         }
 
@@ -1142,8 +1366,8 @@ namespace CRM.Microservice.Controllers
             var callerRole = GetCurrentCanonicalRole();
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? agentName ?? string.Empty;
 
-            IQueryable<LeadRecord> leadsQuery = _context.LeadRecords.Where(l => !l.IsConvertedToDeal);
-            IQueryable<DealRecord> dealsQuery = _context.DealRecords;
+            IQueryable<LeadRecord> leadsQuery = _leadRepository.Query().Where(l => !l.IsConvertedToDeal);
+            IQueryable<DealRecord> dealsQuery = _dealRepository.Query();
             if (visibleTenants.Count > 0)
             {
                 leadsQuery = leadsQuery.Where(l => visibleTenants.Contains(l.TenantId));
@@ -1217,21 +1441,21 @@ namespace CRM.Microservice.Controllers
              // If none is found, the lead's own ClientName/ContactEmail/ContactPhone are retained
              // as the "new contact" details (no contact record created until promotion).
              var match = !string.IsNullOrWhiteSpace(newLead.ContactEmail)
-                 ? await _context.CRMContacts.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.EmailAddress == newLead.ContactEmail)
+                 ? await _contactRepository.Query().FirstOrDefaultAsync(c => c.TenantId == tenantId && c.EmailAddress == newLead.ContactEmail)
                  : null;
              if (match == null && !string.IsNullOrWhiteSpace(newLead.ClientName))
              {
                  var term = newLead.ClientName.ToLower();
                  var surname = (newLead.ClientName.Split(' ').LastOrDefault() ?? "");
-                 match = await _context.CRMContacts
+                 match = await _contactRepository.Query()
                      .Where(c => c.TenantId == tenantId && c.FullName != null)
                      .FirstOrDefaultAsync(c => c.FullName.ToLower().Contains(term) ||
                                                (surname.Length > 2 && c.FullName.ToLower().Contains(surname)));
              }
              if (match != null) newLead.LinkedContactId = match.ContactId;
 
-             _context.LeadRecords.Add(newLead);
-             await _context.SaveChangesAsync();
+             _leadRepository.Add(newLead);
+             await _dbContext.SaveChangesAsync();
 
               return Ok(new { message = "Unverified lead record successfully catalogued.", leadId = newLead.LeadId, linkedContactId = newLead.LinkedContactId });
           }
@@ -1246,7 +1470,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var tenantId = GetCurrentTenant();
-            var lead = await _context.LeadRecords.FirstOrDefaultAsync(l => l.LeadId == leadId && l.TenantId == tenantId);
+            var lead = await _leadRepository.Query().FirstOrDefaultAsync(l => l.LeadId == leadId && l.TenantId == tenantId);
             if (lead == null) return NotFound(new { message = "Lead record not found." });
 
             if (GetCurrentCanonicalRole() == "Broker")
@@ -1270,7 +1494,7 @@ namespace CRM.Microservice.Controllers
             lead.CommissionType = updatedLead.CommissionType;
             lead.CommissionValue = updatedLead.CommissionValue;
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(lead);
         }
 
@@ -1284,7 +1508,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var lead = await _context.LeadRecords
+            var lead = await _leadRepository.Query()
                 .FirstOrDefaultAsync(l => l.LeadId == leadId && l.TenantId == GetCurrentTenant());
             if (lead == null) return NotFound(new { message = "Target lead record not found." });
             if (lead.IsConvertedToDeal) return Conflict(new { message = "Lead already promoted to a deal." });
@@ -1292,7 +1516,7 @@ namespace CRM.Microservice.Controllers
             // Resolve / create the buyer contact (reuse the contact-linking pattern).
             var tenantId = lead.TenantId;
             var buyerContact = !string.IsNullOrEmpty(lead.ContactEmail)
-                ? await _context.CRMContacts.FirstOrDefaultAsync(c => c.TenantId == tenantId && c.EmailAddress == lead.ContactEmail)
+                ? await _contactRepository.Query().FirstOrDefaultAsync(c => c.TenantId == tenantId && c.EmailAddress == lead.ContactEmail)
                 : null;
             if (buyerContact == null)
             {
@@ -1307,7 +1531,7 @@ namespace CRM.Microservice.Controllers
                     PositionJobTitle = "Private Individual",
                     CreatedAt = DateTime.UtcNow
                 };
-                _context.CRMContacts.Add(buyerContact);
+                _contactRepository.Add(buyerContact);
             }
 
             int? matchedPropertyId = request.LinkToPropertyId;
@@ -1352,7 +1576,7 @@ namespace CRM.Microservice.Controllers
             // If a manual seller name was supplied, resolve/create a seller contact.
             if (!string.IsNullOrEmpty(request.SellerNameIfNewDeal))
             {
-                var sellerContact = await _context.CRMContacts
+                var sellerContact = await _contactRepository.Query()
                     .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.FullName.Contains(request.SellerNameIfNewDeal));
                 if (sellerContact == null)
                 {
@@ -1365,7 +1589,7 @@ namespace CRM.Microservice.Controllers
                         PositionJobTitle = "Property Owner / Developer",
                         CreatedAt = DateTime.UtcNow
                     };
-                    _context.CRMContacts.Add(sellerContact);
+                    _contactRepository.Add(sellerContact);
                 }
                 sellerClientId = sellerContact.ContactId;
             }
@@ -1386,9 +1610,9 @@ namespace CRM.Microservice.Controllers
                 CreatedAt = DateTime.UtcNow
             };
 
-            _context.DealRecords.Add(deal);
+            _dealRepository.Add(deal);
             lead.IsConvertedToDeal = true;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
 
             return Ok(new
             {
@@ -1414,12 +1638,12 @@ namespace CRM.Microservice.Controllers
             if (callerRole != "AgencyAdmin" && callerRole != "PlatformAdmin")
                 return Forbid();
 
-            var deal = await _context.DealRecords
+            var deal = await _dealRepository.Query()
                 .FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == GetCurrentTenant());
             if (deal == null) return NotFound(new { message = "Target deal record not found." });
 
-            _context.DealRecords.Remove(deal);
-            await _context.SaveChangesAsync();
+            _dealRepository.Remove(deal);
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Deal record deleted." });
         }
 
@@ -1438,8 +1662,8 @@ namespace CRM.Microservice.Controllers
             var isPlatformAdmin = callerRole == "PlatformAdmin";
             var tenantId = GetCurrentTenant();
             var deal = isPlatformAdmin
-                ? await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId)
-                : await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+                ? await _dealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId)
+                : await _dealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Deal record not found." });
 
             // 🔒 Closed deals (ClosedWon / ClosedLost) are read-only. The
@@ -1501,7 +1725,7 @@ namespace CRM.Microservice.Controllers
 
             deal.LastStageUpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(deal);
         }
 
@@ -1523,8 +1747,8 @@ namespace CRM.Microservice.Controllers
             var isPlatformAdmin = callerRole == "PlatformAdmin";
             var tenantId = GetCurrentTenant();
             var deal = isPlatformAdmin
-                ? await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId)
-                : await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+                ? await _dealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId)
+                : await _dealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Deal record not found." });
 
             if (deal.DealStage == DealWorkflowStage.ClosedWon || deal.DealStage == DealWorkflowStage.ClosedLost)
@@ -1534,7 +1758,7 @@ namespace CRM.Microservice.Controllers
             deal.DealNotes = string.IsNullOrWhiteSpace(deal.DealNotes) ? entry : deal.DealNotes + "\n" + entry;
             deal.LastStageUpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(deal);
         }
 
@@ -1550,7 +1774,7 @@ namespace CRM.Microservice.Controllers
 
             if (payload.IsDeal)
             {
-                var deal = await _context.DealRecords.FindAsync(payload.TargetId);
+                var deal = await _dealRepository.GetByIdAsync(payload.TargetId);
                 if (deal == null) return NotFound(new { message = "Target deal record not found." });
                 // payload.TargetAgentName is actually a broker id now (legacy field name kept
                 // for frontend compat — same payload shape, just an id instead of a display name).
@@ -1558,12 +1782,12 @@ namespace CRM.Microservice.Controllers
             }
             else
             {
-                var lead = await _context.LeadRecords.FindAsync(payload.TargetId);
+                var lead = await _leadRepository.GetByIdAsync(payload.TargetId);
                 if (lead == null) return NotFound(new { message = "Target lead record not found." });
                 lead.AllocatedBrokerIds = payload.TargetAgentName;
             }
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = $"Assignment safely reallocated to {payload.TargetAgentName}." });
         }
 
@@ -1577,7 +1801,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var tenantId = GetCurrentTenant();
-            var lead = await _context.LeadRecords.FirstOrDefaultAsync(l => l.LeadId == payload.LeadId && l.TenantId == tenantId);
+            var lead = await _leadRepository.Query().FirstOrDefaultAsync(l => l.LeadId == payload.LeadId && l.TenantId == tenantId);
             if (lead == null) return NotFound(new { message = "Target lead tracking record not found." });
 
             // 🔐 A Broker may only advance leads allocated to themselves.
@@ -1597,7 +1821,7 @@ namespace CRM.Microservice.Controllers
 
             if (nextStageEnum == LeadWorkflowStage.Qualified && !lead.IsConvertedToDeal)
             {
-                var buyerContact = await _context.CRMContacts
+                var buyerContact = await _contactRepository.Query()
                     .FirstOrDefaultAsync(c => c.TenantId == lead.TenantId && c.EmailAddress == lead.ContactEmail);
 
                 if (buyerContact == null)
@@ -1613,11 +1837,11 @@ namespace CRM.Microservice.Controllers
                         PositionJobTitle = "Private Individual",
                         CreatedAt = DateTime.UtcNow
                     };
-                    _context.CRMContacts.Add(buyerContact);
+                    _contactRepository.Add(buyerContact);
                 }
 
                 var sellerName = !string.IsNullOrEmpty(payload.SellerNameIfNewDeal) ? payload.SellerNameIfNewDeal : "Unknown Seller Pool";
-                var sellerContact = await _context.CRMContacts
+                var sellerContact = await _contactRepository.Query()
                     .FirstOrDefaultAsync(c => c.TenantId == lead.TenantId && c.FullName.Contains(sellerName));
 
                 if (sellerContact == null)
@@ -1631,7 +1855,7 @@ namespace CRM.Microservice.Controllers
                         PositionJobTitle = "Property Owner / Developer",
                         CreatedAt = DateTime.UtcNow
                     };
-                    _context.CRMContacts.Add(sellerContact);
+                    _contactRepository.Add(sellerContact);
                 }
 
                 var dynamicDeal = new DealRecord
@@ -1650,11 +1874,11 @@ namespace CRM.Microservice.Controllers
                     CommissionValue = lead.CommissionValue
                 };
 
-                _context.DealRecords.Add(dynamicDeal);
+                _dealRepository.Add(dynamicDeal);
                 lead.IsConvertedToDeal = true;
             }
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = lead.IsConvertedToDeal ? "Lead successfully qualified! Profiles synced and deal initiated." : "Lead stage updated." });
         }
 
@@ -1668,7 +1892,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var tenantId = GetCurrentTenant();
-            var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == payload.DealId && d.TenantId == tenantId);
+            var deal = await _dealRepository.Query().FirstOrDefaultAsync(d => d.DealId == payload.DealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Target deal record not found." });
 
             // 🔒 Closed deals (ClosedWon / ClosedLost) are read-only — the
@@ -1718,7 +1942,7 @@ namespace CRM.Microservice.Controllers
                 deal.RealisedCommissionIsAuto = false;
             }
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = $"Deal successfully progressed to {payload.NextStage}." });
         }
 
@@ -1736,10 +1960,10 @@ namespace CRM.Microservice.Controllers
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var callerId = GetCurrentUserId();
 
-            IQueryable<LeadRecord> baseLeadQuery = _context.LeadRecords
+            IQueryable<LeadRecord> baseLeadQuery = _leadRepository.Query()
                 .Where(l => !l.IsConvertedToDeal)
                 .Where(l => !isBroker || l.AllocatedBrokerIds == callerId || l.AllocatedBrokerIds.StartsWith(callerId + ",") || l.AllocatedBrokerIds.Contains("," + callerId));
-            IQueryable<DealRecord> baseDealQuery = _context.DealRecords
+            IQueryable<DealRecord> baseDealQuery = _dealRepository.Query()
                 .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
             if (visibleTenants.Count > 0)
             {
@@ -1786,10 +2010,10 @@ namespace CRM.Microservice.Controllers
             var yearStart = new DateTime(activeYear, 1, 1);
             var yearEnd = new DateTime(activeYear + 1, 1, 1);
 
-            IQueryable<LeadRecord> tenantLeadsQuery = _context.LeadRecords
+            IQueryable<LeadRecord> tenantLeadsQuery = _leadRepository.Query()
                 .Where(l => l.CreatedAt >= yearStart && l.CreatedAt < yearEnd)
                 .Where(l => !isBroker || l.AllocatedBrokerIds == callerId || l.AllocatedBrokerIds.StartsWith(callerId + ",") || l.AllocatedBrokerIds.Contains("," + callerId));
-            IQueryable<DealRecord> tenantDealsQuery = _context.DealRecords
+            IQueryable<DealRecord> tenantDealsQuery = _dealRepository.Query()
                 .Where(d => d.CreatedAt >= yearStart && d.CreatedAt < yearEnd)
                 .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
             if (visibleTenants.Count > 0)
@@ -1862,7 +2086,7 @@ namespace CRM.Microservice.Controllers
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var callerId = GetCurrentUserId();
 
-            IQueryable<DealRecord> query = _context.DealRecords
+            IQueryable<DealRecord> query = _dealRepository.Query()
                 .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
             if (visibleTenants.Count > 0)
                 query = query.Where(d => visibleTenants.Contains(d.TenantId));
@@ -1915,7 +2139,7 @@ namespace CRM.Microservice.Controllers
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var callerId = GetCurrentUserId();
-            IQueryable<DealRecord> query = _context.DealRecords
+            IQueryable<DealRecord> query = _dealRepository.Query()
                 .Where(d => d.AllocatedBrokerIds != null && d.AllocatedBrokerIds != "")
                 .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
             if (visibleTenants.Count > 0)
@@ -1940,7 +2164,7 @@ namespace CRM.Microservice.Controllers
             // broker user ids; load the full visible broker roster once and build
             // a map so we can resolve each id in a deal's allocation to a
             // human-readable name for the leaderboard display.
-            var brokerRoster = await _context.BrokerRecords
+            var brokerRoster = await _brokerRepository.Query()
                 .Where(b => visibleTenants.Count == 0 || visibleTenants.Contains(b.TenantId))
                 .Select(b => new { b.BrokerId, b.FullName })
                 .ToListAsync();
@@ -1993,7 +2217,7 @@ namespace CRM.Microservice.Controllers
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var callerId = GetCurrentUserId();
 
-            IQueryable<BrochureCard> cardQuery = _context.BrochureCards
+            IQueryable<BrochureCard> cardQuery = _brochureCardRepository.Query()
                 .Include(c => c.Lines)
                 .Where(c => c.DealId == dealId && !c.IsDeleted);
             if (visibleTenants.Count > 0)
@@ -2048,7 +2272,7 @@ namespace CRM.Microservice.Controllers
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var callerId = GetCurrentUserId();
 
-            IQueryable<BrochureCard> query = _context.BrochureCards
+            IQueryable<BrochureCard> query = _brochureCardRepository.Query()
                 .Where(c => !c.IsDeleted &&
                             (c.Status == BrochureCardStatus.Active || c.Status == BrochureCardStatus.Generating));
             if (visibleTenants.Count > 0)
@@ -2089,21 +2313,21 @@ namespace CRM.Microservice.Controllers
                 // Check whether the broker is one of the ids in the deal's
                 // AllocatedBrokerIds CSV. Single-broker legacy deals still
                 // match the equality case.
-                var deal = await _context.DealRecords
+                var deal = await _dealRepository.Query()
                     .FirstOrDefaultAsync(d => d.DealId == request.DealId && d.TenantId == tenantId);
                 if (deal == null) return NotFound(new { message = "Target deal record not found." });
                 if (!CallerIsAssignedTo(deal.AllocatedBrokerIds, brokerId)) return Forbid();
             }
             else
             {
-                var dealExists = await _context.DealRecords.AnyAsync(d => d.DealId == request.DealId && d.TenantId == tenantId);
+                var dealExists = await _dealRepository.Query().AnyAsync(d => d.DealId == request.DealId && d.TenantId == tenantId);
                 if (!dealExists) return NotFound(new { message = "Target deal record not found." });
             }
 
             BrochureCard card;
             if (request.CardId.HasValue && request.CardId > 0)
             {
-                card = await _context.BrochureCards
+                card = await _brochureCardRepository.Query()
                     .Include(c => c.Lines)
                     .FirstOrDefaultAsync(c => c.CardId == request.CardId.Value && c.TenantId == tenantId);
                 if (card == null) return NotFound(new { message = "Brochure card not found." });
@@ -2112,8 +2336,8 @@ namespace CRM.Microservice.Controllers
             else
             {
                 card = new BrochureCard { TenantId = tenantId, DealId = request.DealId, BrokerAgentId = brokerName, Status = BrochureCardStatus.Active };
-                _context.BrochureCards.Add(card);
-                await _context.SaveChangesAsync();
+                _brochureCardRepository.Add(card);
+                await _dbContext.SaveChangesAsync();
             }
 
             card.ClientName = request.ClientName;
@@ -2125,7 +2349,7 @@ namespace CRM.Microservice.Controllers
 
             foreach (var unit in request.Units.Take(5))
             {
-                _context.BrochureCardLines.Add(new BrochureCardLine
+                _brochureCardLineRepository.Add(new BrochureCardLine
                 {
                     CardId = card.CardId,
                     PropertyId = unit.PropertyId,
@@ -2140,7 +2364,7 @@ namespace CRM.Microservice.Controllers
                 });
             }
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { cardId = card.CardId });
         }
 
@@ -2155,12 +2379,12 @@ namespace CRM.Microservice.Controllers
             }
 
             var tenantId = GetCurrentTenant();
-            var line = await _context.BrochureCardLines.FirstOrDefaultAsync(l => l.LineId == lineId && l.CardId == cardId);
+            var line = await _brochureCardLineRepository.Query().FirstOrDefaultAsync(l => l.LineId == lineId && l.CardId == cardId);
             if (line == null) return NotFound(new { message = "Brochure card line not found." });
-            var owned = await _context.BrochureCards.AnyAsync(c => c.CardId == cardId && c.TenantId == tenantId);
+            var owned = await _brochureCardRepository.Query().AnyAsync(c => c.CardId == cardId && c.TenantId == tenantId);
             if (!owned) return Forbid();
             line.IsDeleted = true;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Brochure card line removed." });
         }
 
@@ -2172,7 +2396,7 @@ namespace CRM.Microservice.Controllers
         {
             if (payload == null) return BadRequest(new { message = "Callback payload is required." });
 
-            var card = await _context.BrochureCards
+            var card = await _brochureCardRepository.Query()
                 .Include(c => c.Lines)
                 .FirstOrDefaultAsync(c => c.CardId == cardId);
             if (card == null) return NotFound(new { message = "Brochure card not found." });
@@ -2182,7 +2406,7 @@ namespace CRM.Microservice.Controllers
             card.GeneratedFilePath = string.IsNullOrWhiteSpace(payload.FilePath) ? card.GeneratedFilePath : payload.FilePath;
             card.UpdatedAt = DateTime.UtcNow;
 
-            var deal = await _context.DealRecords
+            var deal = await _dealRepository.Query()
                 .FirstOrDefaultAsync(d => d.DealId == card.DealId && d.TenantId == card.TenantId);
             if (deal != null)
             {
@@ -2190,7 +2414,7 @@ namespace CRM.Microservice.Controllers
                 deal.LastStageUpdatedAt = DateTime.UtcNow;
             }
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new
             {
                 message = "Brochure card closed and deal advanced to Proposal / Quote Sent.",
@@ -2210,10 +2434,10 @@ namespace CRM.Microservice.Controllers
             }
 
             var tenantId = GetCurrentTenant();
-            var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            var deal = await _dealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Deal record not found." });
 
-            var splits = await _context.DealBrokerSplits
+            var splits = await _dealBrokerSplitRepository.Query()
                 .Where(s => s.DealId == dealId)
                 .OrderByDescending(s => s.SplitPercentage)
                 .ToListAsync();
@@ -2234,7 +2458,7 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
 
             var tenantId = GetCurrentTenant();
-            var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            var deal = await _dealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Deal record not found." });
 
             // 🔒 Closed deals: splits are locked because the realised
@@ -2246,13 +2470,13 @@ namespace CRM.Microservice.Controllers
 
             if (request.Splits == null || !request.Splits.Any())
             {
-                _context.DealBrokerSplits.RemoveRange(_context.DealBrokerSplits.Where(s => s.DealId == dealId));
-                await _context.SaveChangesAsync();
+                _dealBrokerSplitRepository.RemoveRange(_dealBrokerSplitRepository.Query().Where(s => s.DealId == dealId));
+                await _dbContext.SaveChangesAsync();
                 return Ok(new { message = "All broker splits cleared." });
             }
 
-            var existing = _context.DealBrokerSplits.Where(s => s.DealId == dealId);
-            _context.DealBrokerSplits.RemoveRange(existing);
+            var existing = _dealBrokerSplitRepository.Query().Where(s => s.DealId == dealId);
+            _dealBrokerSplitRepository.RemoveRange(existing);
 
             decimal totalPercentage = request.Splits.Sum(s => s.SplitPercentage);
             // 🧮 Split the realised commission, not the raw CommissionValue
@@ -2264,7 +2488,7 @@ namespace CRM.Microservice.Controllers
 
             foreach (var split in request.Splits)
             {
-                _context.DealBrokerSplits.Add(new DealBrokerSplit
+                _dealBrokerSplitRepository.Add(new DealBrokerSplit
                 {
                     DealId = dealId,
                     BrokerId = split.BrokerId,
@@ -2274,7 +2498,7 @@ namespace CRM.Microservice.Controllers
                 });
             }
 
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Broker splits updated.", totalPercentage });
         }
 
@@ -2289,10 +2513,10 @@ namespace CRM.Microservice.Controllers
             }
 
             var tenantId = GetCurrentTenant();
-            var contact = await _context.CRMContacts.FirstOrDefaultAsync(c => c.ContactId == contactId && c.TenantId == tenantId);
+            var contact = await _contactRepository.Query().FirstOrDefaultAsync(c => c.ContactId == contactId && c.TenantId == tenantId);
             if (contact == null) return NotFound(new { message = "Contact not found." });
 
-            var deal = await _context.DealRecords.FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            var deal = await _dealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
             if (deal == null) return NotFound(new { message = "Deal not found." });
 
             var linked = string.IsNullOrWhiteSpace(contact.LinkedDealIds)
@@ -2303,7 +2527,7 @@ namespace CRM.Microservice.Controllers
                 linked.Add(dealId.ToString());
 
             contact.LinkedDealIds = string.Join(',', linked);
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Contact linked to deal.", linkedDealIds = contact.LinkedDealIds });
         }
 
@@ -2342,7 +2566,7 @@ namespace CRM.Microservice.Controllers
             }
 
             // Base query: deals in scope, optionally filtered to one broker.
-            var deals = _context.DealRecords
+            var deals = _dealRepository.Query()
                 .Where(d => tenantIds.Contains(d.TenantId)
                     && (effectiveBrokerId == null || d.AllocatedBrokerIds == effectiveBrokerId || d.AllocatedBrokerIds.Contains(effectiveBrokerId + ",")
                         || d.AllocatedBrokerIds.Contains("," + effectiveBrokerId)
@@ -2447,13 +2671,13 @@ namespace CRM.Microservice.Controllers
             if (tenantIds.Count == 0) return Ok(Array.Empty<object>());
 
             // Brokers in the visible tenant scope (Email is a soft proxy for "active").
-            var brokers = await _context.BrokerRecords
+            var brokers = await _brokerRepository.Query()
                 .Where(b => tenantIds.Contains(b.TenantId) && b.Email != "")
                 .Select(b => new { b.BrokerId, b.FullName, b.TenantId })
                 .ToListAsync();
 
             // Aggregate per-broker deal metrics.
-            var deals = await _context.DealRecords
+            var deals = await _dealRepository.Query()
                 .Where(d => tenantIds.Contains(d.TenantId))
                 .Select(d => new { d.AllocatedBrokerIds, d.DealStage, d.CommissionType, d.CommissionValue, d.TransactionValue })
                 .ToListAsync();
@@ -2520,7 +2744,7 @@ namespace CRM.Microservice.Controllers
             var items = new List<object>();
 
             // (2) Awaiting-broker-signature: deals in Negotiation stage.
-            var awaiting = await _context.DealRecords
+            var awaiting = await _dealRepository.Query()
                 .Where(d => tenantIds.Contains(d.TenantId)
                     && d.DealStage == DealWorkflowStage.Negotiation
                     && (effectiveBrokerId == null || BrokerMatches(d.AllocatedBrokerIds, effectiveBrokerId)))
@@ -2597,7 +2821,7 @@ namespace CRM.Microservice.Controllers
             var tenantIds = await GetVisibleTenantIdsAsync(tenantId);
             if (tenantIds.Count == 0) return Ok(Array.Empty<object>());
 
-             var q = _context.Notifications
+             var q = _notificationRepository.Query()
                  .Where(n =>
                      // User-targeted notifications follow the user across tenants:
                      // an admin acting from a different (or "all-tenants") context
@@ -2627,7 +2851,7 @@ namespace CRM.Microservice.Controllers
                 })
                 .ToListAsync();
 
-            var unreadCount = await _context.Notifications
+            var unreadCount = await _notificationRepository.Query()
                 .CountAsync(n => (n.UserId == callerId || (string.IsNullOrEmpty(n.UserId) && tenantIds.Contains(n.TenantId))) && !n.IsRead);
 
             return Ok(new { items, unreadCount });
@@ -2641,11 +2865,11 @@ namespace CRM.Microservice.Controllers
             var role = GetCurrentCanonicalRole();
             var callerId = GetCurrentUserId();
             var tenantIds = await GetVisibleTenantIdsAsync(null);
-             var n = await _context.Notifications.FirstOrDefaultAsync(x => x.NotificationId == notificationId
+             var n = await _notificationRepository.Query().FirstOrDefaultAsync(x => x.NotificationId == notificationId
                  && (x.UserId == callerId || tenantIds.Contains(x.TenantId)));
             if (n == null) return NotFound(new { message = "Notification not found." });
             n.IsRead = true;
-            await _context.SaveChangesAsync();
+            await _dbContext.SaveChangesAsync();
             return Ok(new { message = "Marked as read." });
         }
 
@@ -2676,8 +2900,8 @@ namespace CRM.Microservice.Controllers
                 IsRead = false,
                 CreatedAt = DateTime.UtcNow
             };
-            _context.Notifications.Add(n);
-            await _context.SaveChangesAsync();
+            _notificationRepository.Add(n);
+            await _dbContext.SaveChangesAsync();
             return Created($"/crm/notifications/{n.NotificationId}", n);
         }
     }

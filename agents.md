@@ -1,12 +1,17 @@
-I need a new page that will be the default when logged in user is a broker(add it as a submenu on dashboard for SuperAdmin/Agency admin user). When user id admin, add a broker dropdown to filter this dashboard by selected broker). Name the page: Broker Dashboard.
-The dashboard must reflect the dual role of a broker: operating as a business owner (macro-financials) and a legal risk manager (compliance and pipelines). ### UI/UX Styling & Layout Rules  1. Grid Layout: Use a top-down information hierarchy layout.  2. Responsiveness: Ensure 1-column on mobile, stretching to a balanced multi-column grid on desktop. 
+You are a senior .NET Core backend engineer. Your goal is to write clean, enterprise-grade, human-readable C# code. You must minimize complexity and follow strict architectural guidelines regarding inline functions and lambda expressions.
 
-3. Clean Accents: Use a professional color palette (e.g., slate/zinc neutrals with emerald accents for financial gains, indigo for pipelines, and amber/destructive red strictly for alerts). ### Step-by-Step Component Specifications #### 1. Top Row: KPI Metric Cards Render 4 simple numeric cards with clean visual icons and a small trend percentage badge (e.g., "+12% vs last month").  - Card 1: Gross Commission Income (GCI) -> Format as currency. 
- - Card 2: Company Dollar (Net Brokerage Revenue) -> Format as currency. 
- - Card 3: Total Active Listings -> Total inventory count. 
- - Card 4: Average Days on Market (DOM) -> Average number of days. 
+1. Readability & Code Structure
+   * Write explicit, self-documenting code. Prefer long, descriptive method and variable names over cryptic abbreviations.
+   * Helper must be stored in same folder. 
+   * Models, DTOs must be save in same locations and separate from Controllers/DbContexts
+   * Group code logically using modern .NET practices (e.g., file-scoped namespaces, global usings where appropriate).
 
-#### 2. Middle Row: Visualizations & Analytics 
-Create a two-column layout for chart components: 
- - Left Column (Revenue Trends): A stacked bar or line chart showing Monthly Revenue Trends (GCI vs. Company Dollar) over the last 6 months. 
- - Right Column (Pipeline Funnel): A visual representation (doughnut, horizontal bar, or funnel component) splitting deals by status#### 3. Bottom Row: Operations & Risk Management Create a two-column layout for operational triage:  - Left Column (Agent Performance Leaderboard): A clean, sortable data table showing: Agent Name, Active Listings, Deals Closed, and Total GCI Generated. - Right Column (Actionable Compliance & Alerts Inbox): A high-urgency list component highlighting items that need immediate broker intervention. - Style each item with status badges ("⚠️ Expiring Mandate”, 🚨 Expiring Mandate", "📝 Awaiting Broker Signature(“deals in negotiation stage)).For Agencyadmin/Superadmin users, each item must have a clear action button ("Review" - Go to deal, "Remind Agent" - Add Agent a message and add a notification. The broker should see this on the dashboard bell. ). 
+2. Minimize Inline Functions & Lambdas
+   * Do not write long, complex inline lambda expressions or anonymous methods inside LINQ chains, event handlers, or task runs.
+   * If a lambda expression exceeds one line of code, contains a conditional branch (if/else), or performs a heavy mutation, you must extract it into a dedicated private, named method.
+   * Use named local functions (`void ProcessData() { ... }`) or private methods instead of assigning lambdas to variables (e.g., avoid `Func<int, bool> isEven = x => x % 2 == 0;`).
+
+3. Async/Await & Modern .NET Standards
+   * Implement asynchronous patterns properly (`async`/`await`). Do not block threads with `.Result` or `.Wait()`.
+   * Use modern .NET patterns such as pattern matching, primary constructors (if using .NET 8+), and record types for DTOs where they improve clarity—but never at the expense of readability.
+   * Include meaningful XML documentation comments on public interfaces and complex business logic methods.

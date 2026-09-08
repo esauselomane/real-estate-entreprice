@@ -509,4 +509,13 @@ export const propertyService = {
       throw new Error(toMessage(error.response?.data?.message, 'Amenity type update failed.'));
     }
   },
+
+  deleteAmenityType: async (id) => {
+    try {
+      const response = await apiClient.delete(`/properties/amenity-types/${id}`);
+      return response.data;
+    } catch (error) {
+      throw new Error(toMessage(error.response?.data?.message, 'Amenity type delete failed.'));
+    }
+  }
 };

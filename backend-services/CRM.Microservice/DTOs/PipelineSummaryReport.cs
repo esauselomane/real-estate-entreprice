@@ -1,0 +1,13 @@
+using CRM.Microservice.Models;
+
+namespace CRM.Microservice.DTOs
+{
+    public record class PipelineSummaryReport
+    {
+        public int ActiveLeadsCount { get; set; }
+        public int ValuationsInProcessCount { get; set; }
+        public int ConveyancingAtDeedsCount { get; set; }
+        public int FinalizedClosedCount { get; set; }
+        public decimal TotalPipelineEstimatedValue { get; set; }
+    }
+}

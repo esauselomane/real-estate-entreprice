@@ -13,4 +13,8 @@
     <PackageReference Include="PuppeteerSharp" Version="13.1.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Shared.Kafka\Shared.Kafka.csproj" />
+  </ItemGroup>
+
 </Project>

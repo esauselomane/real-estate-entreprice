@@ -51,6 +51,7 @@ export default function BrokerPicker({
   // so we skip pagination and use the first page.
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
     setLoadError('');
     crmService
@@ -71,6 +72,7 @@ export default function BrokerPicker({
   // Single-mode: mirror the picked broker's name into the visible query
   useEffect(() => {
     if (!isMulti && value && typeof value === 'object') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuery(value.fullName || '');
     }
     if (isMulti && (!value || value.length === 0)) {

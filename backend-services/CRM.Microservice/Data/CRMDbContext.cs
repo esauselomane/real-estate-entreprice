@@ -1,4 +1,7 @@
+using System.Linq.Expressions;
+using System.Linq;
 using Microsoft.EntityFrameworkCore;
+using CRM.Microservice.DTOs;
 using CRM.Microservice.Models;
 
 namespace CRM.Microservice.Data

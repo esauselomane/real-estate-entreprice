@@ -490,7 +490,7 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
               ))}
             </div>
             <form onSubmit={handleAddProperty} className="flex gap-2">
-              <input type="number" value={addPropertyId}
+              <input type="number" aria-label="Property ID to add" value={addPropertyId}
                 onChange={(e) => setAddPropertyId(e.target.value)}
                 className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
                 placeholder="Add property by ID..." />

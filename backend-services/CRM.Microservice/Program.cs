@@ -1,14 +1,21 @@
+using CRM.Microservice.DTOs;
+using CRM.Microservice.Models;
 using CRM.Microservice.Data;
+using CRM.Microservice.Services.Abstractions;
+using CRM.Microservice.Services.Implementation;
 using CRM.Microservice.Services;
+using CRM.Microservice.Consumers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Register REST Controller frameworks
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(o => o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles);
 
 // 🔐 JWT AUTHENTICATION (issued by the Identity microservice). Tenant is resolved
 // from the bearer token claims rather than the URL — see GetCurrentTenant() in CRMController.
@@ -45,6 +52,28 @@ builder.Services.AddScoped<PermissionCheckService>();
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<CRMDbContext>(options =>
     options.UseSqlServer(connectionString));
+
+builder.Services.AddScoped<IAgencyRepository, AgencyRepository>();
+builder.Services.AddScoped<IBrokerRepository, BrokerRepository>();
+builder.Services.AddScoped<ILeadRepository, LeadRepository>();
+builder.Services.AddScoped<IDealRepository, DealRepository>();
+builder.Services.AddScoped<ICompanyRepository, CompanyRepository>();
+builder.Services.AddScoped<ILegalEntityRepository, LegalEntityRepository>();
+builder.Services.AddScoped<IContactRepository, ContactRepository>();
+builder.Services.AddScoped<IOwnerTenantRepository, OwnerTenantRepository>();
+builder.Services.AddScoped<IGeographyRepository, GeographyRepository>();
+builder.Services.AddScoped<IOperationalRecordRepository, OperationalRecordRepository>();
+builder.Services.AddScoped<IContactPersonRepository, ContactPersonRepository>();
+builder.Services.AddScoped<IBrochureCardRepository, BrochureCardRepository>();
+builder.Services.AddScoped<IRepository<BrochureCardLine>, BrochureCardLineRepository>();
+builder.Services.AddScoped<IDealBrokerSplitRepository, DealBrokerSplitRepository>();
+builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
+
+// 🔄 Kafka consumers for cross-service events
+builder.Services.AddHostedService<CRM.Microservice.Consumers.NotificationConsumer>();
+builder.Services.AddHostedService<CRM.Microservice.Consumers.ContactImportConsumer>();
+builder.Services.AddHostedService<CRM.Microservice.Consumers.ImportCompletedConsumer>();
+builder.Services.AddHostedService<CRM.Microservice.Consumers.BrochureCompletedConsumer>();
 
 var app = builder.Build();
 // 4. Ensure the database layout matches mappings and seed base data parameters cleanly during startup loops
@@ -131,6 +160,27 @@ using (var serviceScope = app.Services.CreateScope())
             CREATE INDEX [IX_CRMContacts_TenantId] ON [CRMContacts] ([TenantId]);
         END
     ");
+
+    // 🛠️ Idempotent migration: company → legal entity association.
+    // A company MAY belong to a legal entity (AssociatedLegalEntityId).
+    // Nullable so existing companies with no entity are unaffected.
+    // On fresh DBs EF Core creates this column + FK from the CRMCompany model;
+    // on existing DBs EnsureCreated is a no-op, so this ALTER backfills the
+    // column/FK to match the model.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF COL_LENGTH(N'[CRMCompanies]', 'AssociatedLegalEntityId') IS NULL
+            ALTER TABLE [CRMCompanies] ADD [AssociatedLegalEntityId] nvarchar(450) NULL;
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.foreign_keys fk
+            WHERE fk.parent_object_id = OBJECT_ID(N'[CRMCompanies]')
+              AND fk.name = N'FK_CRMCompanies_CRMLegalEntities_AssociatedLegalEntityId'
+        )
+        BEGIN
+            ALTER TABLE [CRMCompanies] ADD CONSTRAINT [FK_CRMCompanies_CRMLegalEntities_AssociatedLegalEntityId]
+                FOREIGN KEY ([AssociatedLegalEntityId]) REFERENCES [CRMLegalEntities] ([LegalEntityId]);
+        END
+    ");
+
 
     // Batch 1: create the operational ledger table (for fresh databases) and
     // idempotently backfill the unit-linkage columns onto existing databases.
@@ -327,7 +377,23 @@ using (var serviceScope = app.Services.CreateScope())
         END
     ");
 
-    CRMSeedData.EnsureSeeded(databaseContext);
+    var agencyRepository = serviceScope.ServiceProvider.GetRequiredService<IAgencyRepository>();
+            var brokerRepository = serviceScope.ServiceProvider.GetRequiredService<IBrokerRepository>();
+            var leadRepository = serviceScope.ServiceProvider.GetRequiredService<ILeadRepository>();
+            var dealRepository = serviceScope.ServiceProvider.GetRequiredService<IDealRepository>();
+            var companyRepository = serviceScope.ServiceProvider.GetRequiredService<ICompanyRepository>();
+            var legalEntityRepository = serviceScope.ServiceProvider.GetRequiredService<ILegalEntityRepository>();
+            var contactRepository = serviceScope.ServiceProvider.GetRequiredService<IContactRepository>();
+            var ownerTenantRepository = serviceScope.ServiceProvider.GetRequiredService<IOwnerTenantRepository>();
+            var geographyRepository = serviceScope.ServiceProvider.GetRequiredService<IGeographyRepository>();
+            var operationalRepository = serviceScope.ServiceProvider.GetRequiredService<IOperationalRecordRepository>();
+            var contactPersonRepository = serviceScope.ServiceProvider.GetRequiredService<IContactPersonRepository>();
+            var brochureCardRepository = serviceScope.ServiceProvider.GetRequiredService<IBrochureCardRepository>();
+            var brochureCardLineRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<BrochureCardLine>>();
+            var dealBrokerSplitRepository = serviceScope.ServiceProvider.GetRequiredService<IDealBrokerSplitRepository>();
+            var notificationRepository = serviceScope.ServiceProvider.GetRequiredService<INotificationRepository>();
+
+            CRMSeedData.EnsureSeeded(databaseContext, agencyRepository, brokerRepository, leadRepository, dealRepository, companyRepository, legalEntityRepository, contactRepository, ownerTenantRepository, geographyRepository, contactPersonRepository, brochureCardRepository, dealBrokerSplitRepository, notificationRepository);
 }
 
 // 5. Inject Pipeline Middleware routing and authorization components

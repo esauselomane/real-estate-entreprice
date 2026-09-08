@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Identity.Microservice.Data;
+using Identity.Microservice.DTOs;
 using Identity.Microservice.Models;
 using Identity.Microservice.Authorization;
 using System.Security.Claims;

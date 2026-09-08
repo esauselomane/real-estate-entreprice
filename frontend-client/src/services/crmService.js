@@ -385,14 +385,21 @@ export const crmService = {
      }
    },
 
-   updateLead: async (leadId, payload) => {
-     try {
-       const response = await apiClient.put(`/crm/lead/${leadId}`, payload);
-       return response.data;
-     } catch (error) {
-       throw normalizeError(error.response?.data?.message, 'Failed to update lead.');
-     }
-   },
+    updateLead: async (leadId, payload) => {
+      try {
+        // 🧑‍💼 LeadRecord.TenantId is [Required] on the server (model-bound by
+        // [ApiController]), so the PUT body must carry a non-empty tenant id
+        // or the request 400s before the handler runs — even though the
+        // action itself scopes via the JWT tenant (GetCurrentTenant).
+        const response = await apiClient.put(`/crm/lead/${leadId}`, {
+          ...payload,
+          tenantId: payload.tenantId || crmService._resolveWriteTenantId(),
+        });
+        return response.data;
+      } catch (error) {
+        throw normalizeError(error.response?.data?.message, 'Failed to update lead.');
+      }
+    },
 
     updateDealStage: async (dealId, nextStage, notesUpdate = '') => {
       try {
@@ -537,12 +544,77 @@ export const crmService = {
     });
   },
 
-  updateLegalEntity: async (legalEntityPayload) => {
-    const response = await apiClient.put('/crm/legal-entity/update', legalEntityPayload);
-    return response.data;
-  },
+   updateLegalEntity: async (legalEntityPayload) => {
+     const response = await apiClient.put('/crm/legal-entity/update', legalEntityPayload);
+     return response.data;
+   },
 
-  getContacts: async (page = 1) => {
+   // 🔎 Auto-complete search over companies (by business name / registration / VAT).
+   searchCompanies: async (query = '') => {
+     try {
+       const response = await apiClient.get('/crm/companies/search', { params: { q: query || '', page: 1, ...crmService._tenantQueryParams() } });
+       return Array.isArray(response.data) ? response.data : [];
+     } catch (error) {
+       throw normalizeError(error.response?.data?.message, 'Company search failed.');
+     }
+   },
+
+   // 🔎 Auto-complete search over legal entities (by registered name / tax ref / type).
+   searchLegalEntities: async (query = '') => {
+     try {
+       const response = await apiClient.get('/crm/legal-entities/search', { params: { q: query || '', page: 1, ...crmService._tenantQueryParams() } });
+       return Array.isArray(response.data) ? response.data : [];
+     } catch (error) {
+       throw normalizeError(error.response?.data?.message, 'Legal entity search failed.');
+     }
+   },
+
+   // 🆕 Create a new CRM company. The server stamps TenantId from the JWT, so a
+   // __pending__ placeholder is sent to satisfy the [Required] model binding.
+   createCompany: async (payload) => {
+     try {
+       const response = await apiClient.post('/crm/company/create', { tenantId: '__pending__', ...payload });
+       return response.data;
+     } catch (error) {
+       throw normalizeError(error.response?.data?.message, 'Company creation failed.');
+     }
+   },
+
+   // 🆕 Create a new CRM legal entity. Belongs to a company via AssociatedCompanyId.
+   createLegalEntity: async (payload) => {
+     try {
+       const response = await apiClient.post('/crm/legal-entity/create', { tenantId: '__pending__', ...payload });
+       return response.data;
+     } catch (error) {
+       throw normalizeError(error.response?.data?.message, 'Legal entity creation failed.');
+     }
+   },
+
+   // 🧾 Fetch a single company by id (edit hydration + resolving SearchableSelect).
+   getCompany: async (companyId) => {
+     if (!companyId) return null;
+     try {
+       const response = await apiClient.get(`/crm/companies/${encodeURIComponent(companyId)}`, { params: crmService._tenantQueryParams() });
+       return response.data || null;
+     } catch (error) {
+       if (error.response?.status === 404) return null;
+       throw normalizeError(error.response?.data?.message, 'Company lookup failed.');
+     }
+   },
+
+   // 🧾 Fetch a single legal entity by id.
+   getLegalEntity: async (legalEntityId) => {
+     if (!legalEntityId) return null;
+     try {
+       const response = await apiClient.get(`/crm/legal-entities/${encodeURIComponent(legalEntityId)}`, { params: crmService._tenantQueryParams() });
+       return response.data || null;
+     } catch (error) {
+       if (error.response?.status === 404) return null;
+       throw normalizeError(error.response?.data?.message, 'Legal entity lookup failed.');
+     }
+   },
+
+   getContacts: async (page = 1) => {
     const response = await apiClient.get('/crm/contacts', { params: { page, ...crmService._tenantQueryParams() } });
     const data = Array.isArray(response.data) ? response.data : [];
     return Object.assign(data, {
@@ -557,6 +629,19 @@ export const crmService = {
       return response.data;
     } catch (error) {
       throw normalizeError(error.response?.data?.message, 'Contact search failed.');
+    }
+  },
+
+  // 🔎 Fetch a single contact by id — used to hydrate an already-linked contact
+  // into the ContactPicker when opening an edit form. Returns null on 404.
+  getContact: async (contactId) => {
+    if (!contactId) return null;
+    try {
+      const response = await apiClient.get(`/crm/contacts/${encodeURIComponent(contactId)}`, { params: crmService._tenantQueryParams() });
+      return response.data || null;
+    } catch (error) {
+      if (error.response?.status === 404) return null;
+      throw normalizeError(error.response?.data?.message, 'Contact lookup failed.');
     }
   },
 
@@ -680,12 +765,30 @@ export const crmService = {
     }
   },
 
-  createNotification: async ({ userId, category, title, body, linkType, linkId }) => {
-    try {
-      const response = await apiClient.post('/crm/notifications', { userId, category, title, body, linkType, linkId });
+   createNotification: async ({ userId, category, title, body, linkType, linkId }) => {
+     try {
+       const response = await apiClient.post('/crm/notifications', { userId, category, title, body, linkType, linkId });
+       return response.data;
+     } catch (error) {
+       throw normalizeError(error.response?.data?.message, 'Notification create failed.');
+     }
+   },
+
+    // 📥 Import data: download Excel template
+    downloadImportTemplate: async () => {
+      const response = await apiClient.get('/properties/import/template', { responseType: 'blob' });
       return response.data;
-    } catch (error) {
-      throw normalizeError(error.response?.data?.message, 'Notification create failed.');
+    },
+
+    // 📥 Import data: upload Excel file (returns jobId)
+    uploadImportFile: async (fileName, base64Content) => {
+      const response = await apiClient.post('/properties/import/upload', { fileName, base64Content });
+      return response.data;
+    },
+
+    // 📥 Get import job status
+    getImportJobStatus: async (jobId) => {
+      const response = await apiClient.get(`/properties/import/jobs/${jobId}`);
+      return response.data;
     }
-  }
-};
+  };

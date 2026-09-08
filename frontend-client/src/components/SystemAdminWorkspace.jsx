@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Building2, UserPlus, Users, Pencil, Trash2, ShieldCheck, Tag, ChevronRight, X, Settings, CircleX, Mail, RefreshCw, AlertCircle, BarChart3, TrendingUp, DollarSign, Trophy } from 'lucide-react';
+import { Building2, UserPlus, Users, Pencil, Trash2, ShieldCheck, Tag, ChevronRight, X, Settings, CircleX, Mail, RefreshCw, AlertCircle, BarChart3, TrendingUp, Banknote, Trophy, Upload } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { systemRolesService } from '../services/systemRolesService.js';
@@ -10,6 +10,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
+import AmenityTypesWorkspace from './AmenityTypesWorkspace.jsx';
 
 export default function SystemAdminWorkspace({ defaultTab }) {
   const { userRole: currentUserRole } = useAuth();
@@ -52,6 +53,12 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     userType: 'Individual', package: '', demoRequested: false, message: '', source: 'website'
   });
   const leadsSentinelRef = useRef(null);
+
+  // 📥 IMPORT DATA
+  const [importFile, setImportFile] = useState(null);
+  const [importJobId, setImportJobId] = useState(null);
+  const [importStatus, setImportStatus] = useState(null);
+  const [importPolling, setImportPolling] = useState(false);
 
   // 📊 REPORTS & ANALYTICS — tenant-scoped pipeline / commission / broker metrics
   const [pipelineSummary, setPipelineSummary] = useState(null);
@@ -99,7 +106,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
 
   const loadData = async () => { await Promise.all([loadAgencies(), loadBrokers(), loadUsers(), isSuperAdmin && loadRoles(), isSuperAdmin && loadPermissions()]); };
 
-  useEffect(() => { loadData(); }, [loadData, activeTenantId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadData(); }, [activeTenantId]);
 
   // Roles an admin may assign: PlatformAdmin gets the full palette; AgencyAdmin only agency-scoped roles.
   const assignableRoles = isSuperAdmin ? ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] : ['Broker', 'Owner', 'Tenant'];
@@ -270,11 +278,34 @@ export default function SystemAdminWorkspace({ defaultTab }) {
 
   const LEAD_STATUSES = ['Contacted', 'QuoteSent', 'Paid', 'AgencyCreated'];
 
-  useEffect(() => {
-    if (activeTab !== 'captured-leads' || !isSuperAdmin || leads.length > 0 || leadsLoading) return;
+   // eslint-disable-next-line react-hooks/exhaustive-deps
+   useEffect(() => {
+    if (activeTab !== 'captured-leads' || !isSuperAdmin) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadLeads(1, true);
-  }, [activeTab, isSuperAdmin, leads.length, leadsLoading]);
+  }, [activeTab, isSuperAdmin]);
+
+  // 📥 Poll import job status
+  useEffect(() => {
+    if (!importJobId || !importPolling) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/properties/import/jobs/${importJobId}`);
+        const data = await res.json();
+        setImportStatus(data);
+        const pct = data.totalRows > 0 ? Math.round((data.processedRows / data.totalRows) * 100) : 0;
+        const bar = document.getElementById('import-progress');
+        const txt = document.getElementById('import-status-text');
+        if (bar) bar.style.width = pct + '%';
+        if (txt) txt.textContent = `${data.status} — ${data.processedRows}/${data.totalRows} rows (${data.successCount} success, ${data.errorCount} errors)`;
+        if (data.status === 'completed' || data.status === 'failed' || data.status === 'completed_with_errors') {
+          clearInterval(interval);
+          setImportPolling(false);
+        }
+      } catch { /* non-fatal */ }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [importJobId, importPolling]);
 
   useEffect(() => {
     const el = leadsSentinelRef.current;
@@ -352,15 +383,15 @@ export default function SystemAdminWorkspace({ defaultTab }) {
         >
           <Users size={12} className="inline mr-1.5" /> User Admin
         </button>
-        <Can permission="users:view">
+        <Can permission="amenities:view">
           <button
-            onClick={() => setActiveTab('access')}
+            onClick={() => setActiveTab('amenities')}
             type="button"
             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
-              activeTab === 'access' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+              activeTab === 'amenities' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
             }`}
           >
-            <ShieldCheck size={12} className="inline mr-1.5" /> User Access
+            <Tag size={12} className="inline mr-1.5" /> Amenity Types
           </button>
         </Can>
          <Can permission="billing:view">
@@ -374,17 +405,30 @@ export default function SystemAdminWorkspace({ defaultTab }) {
              <BarChart3 size={12} className="inline mr-1.5" /> Reports & Analytics
            </button>
          </Can>
-         <Can permission="leads:view">
-           <button
-             onClick={() => setActiveTab('captured-leads')}
-             type="button"
-             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
-               activeTab === 'captured-leads' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-             }`}
-           >
-             <Mail size={12} className="inline mr-1.5" /> Captured Leads
-           </button>
-         </Can>
+          <Can permission="leads:view">
+            <button
+              onClick={() => setActiveTab('captured-leads')}
+              type="button"
+              className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+                activeTab === 'captured-leads' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+              }`}
+            >
+              <Mail size={12} className="inline mr-1.5" /> Captured Leads
+            </button>
+          </Can>
+          {isSuperAdmin && (
+            <Can permission="agencies:create">
+              <button
+                onClick={() => setActiveTab('import')}
+                type="button"
+                className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+                  activeTab === 'import' ? 'bg-orange-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                }`}
+              >
+                <Upload size={12} className="inline mr-1.5" /> Import Data
+              </button>
+            </Can>
+          )}
       </div>
 
       {activeTenantId && (
@@ -441,8 +485,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   </label>
                   {agencyForm.isTrial && (
                     <>
-                      <input type="date" value={agencyForm.trialStartDate ? agencyForm.trialStartDate.substring(0, 10) : ''} onChange={(e) => setAgencyForm({ ...agencyForm, trialStartDate: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
-                      <input type="date" value={agencyForm.trialEndDate ? agencyForm.trialEndDate.substring(0, 10) : ''} onChange={(e) => setAgencyForm({ ...agencyForm, trialEndDate: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                      <input type="date" aria-label="Trial start date" value={agencyForm.trialStartDate ? agencyForm.trialStartDate.substring(0, 10) : ''} onChange={(e) => setAgencyForm({ ...agencyForm, trialStartDate: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                      <input type="date" aria-label="Trial end date" value={agencyForm.trialEndDate ? agencyForm.trialEndDate.substring(0, 10) : ''} onChange={(e) => setAgencyForm({ ...agencyForm, trialEndDate: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
                     </>
                   )}
 
@@ -644,65 +688,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
         </div>
       )}
 
-      {activeTab === 'access' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-          <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4">
-            <ShieldCheck size={14} className="text-violet-500" /> User Access ({isSuperAdmin ? 'All tenants' : 'Your tenant'})
-          </div>
-          {systemUsers.length === 0 ? (
-            <p className="text-xs text-slate-500">No user accounts match your scope.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="text-slate-500 uppercase text-[9px]">
-                    <th className="text-left py-1">User</th>
-                    <th className="text-left py-1">Email</th>
-                    <th className="text-left py-1">Tenant</th>
-                    <th className="text-left py-1">Status</th>
-                    <th className="text-left py-1">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {systemUsers.map((u) => (
-                    <tr key={u.userId} className="border-t border-slate-800">
-                      <td className="py-1 text-white">{u.fullName}</td>
-                      <td className="py-1 text-slate-400">{u.email}</td>
-                      <td className="py-1 text-slate-500 font-mono">{u.tenantId}</td>
-                      <td className="py-1">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-md border R{
-                          u.accountStatus === 'Active'
-                            ? 'border-emerald-900 bg-emerald-950/40 text-emerald-300'
-                            : 'border-red-900 bg-red-950/40 text-red-300'
-                        }`}>{u.accountStatus || '—'}</span>
-                      </td>
-                      <td className="py-1">
-                        {u.accountStatus !== 'Disabled' && u.systemRole !== 'PlatformAdmin' && (
-                          <Can permission="users:edit">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                if (!confirm(`Deactivate user "R{u.fullName}"? They will be unable to sign in.`)) return;
-                                try {
-                                  await authService.disableUser(u.userId);
-                                  setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, accountStatus: 'Disabled' } : x)));
-                                } catch (err) { alert(err || 'Deactivation failed.'); }
-                              }}
-                              className="px-2 py-1 rounded bg-red-950/30 text-red-300 border border-red-900 hover:bg-red-950/50 text-xs"
-                            >
-                              Deactivate
-                            </button>
-                          </Can>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <p className="text-[10px] text-slate-500 mt-3">Role management and deactivation are handled in the User Admin tab. PlatformAdmin accounts cannot be disabled.</p>
-        </div>
+      {activeTab === 'amenities' && (
+        <AmenityTypesWorkspace />
       )}
 
 
@@ -758,13 +745,13 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={reportOverview.monthlyBreakdown || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3a8' }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3a8' }} />
+                    <XAxis dataKey="Period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }} />
-                    <Legend wrapperStyle={{ fontSize: '10px', color: '#94a3a8' }} />
-                    <Line type="monotone" dataKey="leads" stroke="#38bdf8" strokeWidth={2} name="Leads" />
-                    <Line type="monotone" dataKey="deals" stroke="#a78bfa" strokeWidth={2} name="Deals" />
-                    <Line type="monotone" dataKey="revenue" stroke="#4ade80" strokeWidth={2} name="Revenue" />
+                    <Legend wrapperStyle={{ fontSize: '10px', color: '#94a3b8' }} />
+                    <Line type="monotone" dataKey="Leads" stroke="#38bdf8" strokeWidth={2} name="Leads" />
+                    <Line type="monotone" dataKey="Deals" stroke="#a78bfa" strokeWidth={2} name="Deals" />
+                    <Line type="monotone" dataKey="Revenue" stroke="#4ade80" strokeWidth={2} name="Revenue" />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -773,15 +760,15 @@ export default function SystemAdminWorkspace({ defaultTab }) {
             {commissionByStage.length > 0 && (
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
                 <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4">
-                  <DollarSign size={14} className="text-emerald-400" /> Commission by Stage
+                  <Banknote size={14} className="text-emerald-400" /> Commission by Stage
                 </div>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={commissionByStage} layout="vertical" margin={{ top: 5, right: 20, left: 80, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3a8' }} />
-                    <YAxis type="category" dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3a8' }} />
+                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <YAxis type="category" dataKey="Period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }} />
-                    <Bar dataKey="revenue" fill="#4ade80" name="Commission" />
+                    <Bar dataKey="Revenue" fill="#4ade80" name="Commission" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -1048,13 +1035,71 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                 </div>
               )}
 
-              {leadsHasMore && !leadsLoading && (
-                <div ref={leadsSentinelRef} className="h-1" />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+               {leadsHasMore && !leadsLoading && (
+                 <div ref={leadsSentinelRef} className="h-1" />
+               )}
+             </div>
+           </div>
+         </div>
+       )}
+
+       {activeTab === 'import' && isSuperAdmin && (
+         <div className="space-y-6">
+           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+             <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4">
+               <Upload size={14} className="text-orange-400" /> Import Data
+             </div>
+              <p className="text-xs text-slate-500 mb-4">Import properties, units, and contacts from a single Excel file. Imports are processed asynchronously via Kafka and you will be notified when complete.</p>
+
+              <div className="mb-4">
+                <label className="block text-[10px] uppercase tracking-widest text-slate-500 mb-1 font-bold">Excel File</label>
+                <input type="file" accept=".xlsx,.xls" onChange={(e) => setImportFile(e.target.files?.[0] || null)} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700" />
+              </div>
+
+              <div className="flex gap-2 mb-4">
+                <button type="button" onClick={async () => {
+                  try {
+                    const blob = await (await fetch('/api/properties/import/template')).blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'property-import-template.xlsx';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch { alert('Failed to download template.'); }
+                }} className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold hover:bg-slate-700 cursor-pointer">Download Template</button>
+
+                <button type="button" disabled={!importFile} onClick={async () => {
+                  if (!importFile) return;
+                  setImportPolling(true);
+                  setImportStatus(null);
+                  try {
+                    const buffer = await importFile.arrayBuffer();
+                    const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+                    const res = await fetch('/api/properties/import/upload', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ fileName: importFile.name, base64Content: base64 })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.message || 'Upload failed');
+                    setImportJobId(data.jobId);
+                  } catch (err) { alert(err.message); setImportPolling(false); }
+                }} className="px-4 py-2 rounded-xl bg-orange-600 text-white text-xs font-bold hover:bg-orange-500 disabled:opacity-40 cursor-pointer">Upload & Import</button>
+              </div>
+
+             {importJobId && (
+               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+                 <div className="text-xs font-bold text-white mb-2">Job {importJobId}</div>
+                 <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                   <div id="import-progress" className="h-full rounded-full bg-orange-500 transition-all" style={{ width: '0%' }} />
+                 </div>
+                 <div id="import-status-text" className="text-[10px] text-slate-500 mt-1">Queued...</div>
+               </div>
+             )}
+           </div>
+         </div>
+       )}
+     </div>
+   );
 }
