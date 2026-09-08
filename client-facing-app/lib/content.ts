@@ -215,7 +215,7 @@ export const pricing: {
 ];
 
 export const testimonials: { quote: string; name: string; role: string; logo: string }[] = [
-  {
+  /*{
     quote:
       "The brochure Worker turned a 2-hour manual task into a 42-second click. Deals move faster now.",
     name: "Thandi Mokoena",
@@ -228,7 +228,7 @@ export const testimonials: { quote: string; name: string; role: string; logo: st
     name: "Raj Patel",
     role: "Head of Brokerage, Nexus Group",
     logo: "N",
-  },
+  },*/
 ];
 
 export const timeline: { year: string; event: string }[] = [
