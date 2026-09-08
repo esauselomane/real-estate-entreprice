@@ -2,8 +2,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY ["backend-services/BrochureGeneration.Worker/BrochureGeneration.Worker.csproj", "backend-services/BrochureGeneration.Worker/"]
-COPY ["backend-services/BrochureGeneration.Worker/Worker.cs", "backend-services/BrochureGeneration.Worker/"]
-COPY ["backend-services/BrochureGeneration.Worker/Program.cs", "backend-services/BrochureGeneration.Worker/"]
+COPY ["backend-services/BrochureGeneration.Worker/appsettings.json", "backend-services/BrochureGeneration.Worker/"]
+COPY ["backend-services/BrochureGeneration.Worker/", "backend-services/BrochureGeneration.Worker/"]
 
 RUN dotnet restore "backend-services/BrochureGeneration.Worker/BrochureGeneration.Worker.csproj"
 RUN dotnet build "backend-services/BrochureGeneration.Worker/BrochureGeneration.Worker.csproj" -c Release -o /app/build

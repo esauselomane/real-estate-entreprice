@@ -2,11 +2,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY ["Developer.API/Developer.API.csproj", "Developer.API/"]
-COPY ["Developer.API/Data/", "Developer.API/Data/"]
-COPY ["Developer.API/Controllers/", "Developer.API/Controllers/"]
-COPY ["Developer.API/Middleware/", "Developer.API/Middleware/"]
-COPY ["Developer.API/Models/", "Developer.API/Models/"]
-COPY ["Developer.API/Program.cs", "Developer.API/"]
+COPY ["Developer.API/appsettings.json", "Developer.API/"]
+COPY ["Developer.API/", "Developer.API/"]
 
 RUN dotnet restore "Developer.API/Developer.API.csproj"
 RUN dotnet build "Developer.API/Developer.API.csproj" -c Release -o /app/build

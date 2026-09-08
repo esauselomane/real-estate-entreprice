@@ -2,8 +2,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY ["backend-services/ImageProcessor.Worker/ImageProcessor.Worker.csproj", "backend-services/ImageProcessor.Worker/"]
-COPY ["backend-services/ImageProcessor.Worker/Worker.cs", "backend-services/ImageProcessor.Worker/"]
-COPY ["backend-services/ImageProcessor.Worker/Program.cs", "backend-services/ImageProcessor.Worker/"]
+COPY ["backend-services/ImageProcessor.Worker/appsettings.json", "backend-services/ImageProcessor.Worker/"]
+COPY ["backend-services/ImageProcessor.Worker/", "backend-services/ImageProcessor.Worker/"]
 
 RUN dotnet restore "backend-services/ImageProcessor.Worker/ImageProcessor.Worker.csproj"
 RUN dotnet build "backend-services/ImageProcessor.Worker/ImageProcessor.Worker.csproj" -c Release -o /app/build

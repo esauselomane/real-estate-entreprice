@@ -1,7 +1,5 @@
 using System.Net;
 using System.Net.Mail;
-using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Identity.Microservice.DTOs;
 using Identity.Microservice.Models;
@@ -53,16 +51,7 @@ namespace Identity.Microservice.Services
                     htmlBody = $"<h1>Welcome to {agencyName}</h1><p>Hi {toName},</p><p>Your agency account is ready. <a href=\"{activationLink}\">Click here to set your password</a>.</p>";
                 }
 
-                // If a Mailpit API URL is configured, send via HTTP API (avoids SmtpClient .NET 10 issues)
-                if (!string.IsNullOrEmpty(_settings.ApiUrl))
-                {
-                    await SendViaMailpitApiAsync(toEmail, toName, htmlBody, agencyName);
-                    _logger.LogInformation("Password setup email sent via Mailpit API to {Email} ({Name}) for agency {AgencyName}",
-                        toEmail, toName, agencyName);
-                    return;
-                }
-
-                // Fallback: try SMTP if host is configured
+                // Send via SMTP
                 if (!string.IsNullOrEmpty(_settings.Host))
                 {
                     await SendViaSmtpAsync(toEmail, toName, htmlBody, agencyName);
@@ -81,26 +70,6 @@ namespace Identity.Microservice.Services
             }
         }
 
-        private async Task SendViaMailpitApiAsync(string toEmail, string toName, string htmlBody, string agencyName)
-        {
-            var client = _httpClientFactory.CreateClient("Mailpit");
-            var payload = new
-            {
-                From = new { Name = _settings.FromName, Email = _settings.FromAddress },
-                To = new[] { new { Name = toName, Email = toEmail } },
-                Subject = $"Welcome to {agencyName} — Set Your Password",
-                HTML = htmlBody
-            };
-            var json = JsonSerializer.Serialize(payload);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await client.PostAsync(_settings.ApiSendPath ?? "/api/v1/send", content);
-            if (!response.IsSuccessStatusCode)
-            {
-                var respBody = await response.Content.ReadAsStringAsync();
-                throw new InvalidOperationException($"Mailpit API returned {response.StatusCode}: {respBody}");
-            }
-        }
-
         private async Task SendViaSmtpAsync(string toEmail, string toName, string htmlBody, string agencyName)
         {
             using var message = new MailMessage(_settings.FromAddress, toEmail)
@@ -115,7 +84,7 @@ namespace Identity.Microservice.Services
             using var client = new System.Net.Mail.SmtpClient();
             client.Host = _settings.Host;
             client.Port = _settings.Port;
-            client.EnableSsl = false;
+            client.EnableSsl = _settings.EnableSsl;
             client.DeliveryMethod = SmtpDeliveryMethod.Network;
             client.UseDefaultCredentials = false;
             if (!string.IsNullOrEmpty(_settings.Username))
