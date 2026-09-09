@@ -18,6 +18,7 @@ namespace CRM.Microservice.Data
         public DbSet<OwnerTenantRecord> OwnerTenantRecords { get; set; }
         public DbSet<CRMLegalEntity> CRMLegalEntities { get; set; }
         public DbSet<CRMContact> CRMContacts { get; set; }
+        public DbSet<Contact> Contacts { get; set; }
         public DbSet<LeadRecord> LeadRecords { get; set; }
         public DbSet<DealRecord> DealRecords { get; set; }
         public DbSet<OperationalRecord> OperationalRecords { get; set; }
@@ -56,6 +57,28 @@ namespace CRM.Microservice.Data
                 .HasOne(l => l.CompanyDetails)
                 .WithMany()
                 .HasForeignKey(l => l.AssociatedCompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Contact>()
+                .Property(c => c.ContactType)
+                .HasConversion<string>();
+
+            modelBuilder.Entity<Contact>()
+                .HasOne(c => c.CompanyDetails)
+                .WithMany()
+                .HasForeignKey(c => c.AssociatedCompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Contact>()
+                .HasOne(c => c.LegalEntityDetails)
+                .WithMany()
+                .HasForeignKey(c => c.AssociatedLegalEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Contact>()
+                .HasOne(c => c.Agency)
+                .WithMany(a => a.Contacts)
+                .HasForeignKey(c => c.AgencyId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<ContactPerson>()

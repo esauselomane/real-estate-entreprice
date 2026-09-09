@@ -14,8 +14,8 @@ namespace CRM.Microservice.Data
             BackfillColumn(context, "CRMContacts", "LinkedDealIds", "nvarchar(max) NULL DEFAULT ''");
             BackfillColumn(context, "CRMContacts", "Area", "nvarchar(max) NULL DEFAULT ''");
             BackfillColumn(context, "CRMContacts", "Budget", "nvarchar(max) NULL DEFAULT ''");
-            BackfillColumn(context, "OwnerTenantRecords", "PropertyTypeInterests", "nvarchar(max) NULL DEFAULT ''");
-            BackfillColumn(context, "OwnerTenantRecords", "AreaInterestIds", "nvarchar(max) NULL DEFAULT ''");
+            BackfillColumn(context, "Contacts", "PropertyTypeInterests", "nvarchar(max) NULL DEFAULT ''");
+            BackfillColumn(context, "Contacts", "AreaInterestIds", "nvarchar(max) NULL DEFAULT ''");
         }
 
         private static void BackfillColumn(CRMDbContext context, string tableName, string columnName, string definition)
@@ -37,7 +37,7 @@ namespace CRM.Microservice.Data
             BackfillColumn(context, "AgencyRecords", "TrialEndDate", "datetime2 NULL");
         }
 
-        public static void EnsureSeeded(CRMDbContext context, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, ILeadRepository leadRepository, IDealRepository dealRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, IOwnerTenantRepository ownerTenantRepository, IGeographyRepository geographyRepository, IContactPersonRepository contactPersonRepository, IBrochureCardRepository brochureCardRepository, IDealBrokerSplitRepository dealBrokerSplitRepository, INotificationRepository notificationRepository)
+        public static void EnsureSeeded(CRMDbContext context, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, ILeadRepository leadRepository, IDealRepository dealRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, IGeographyRepository geographyRepository, IBrochureCardRepository brochureCardRepository, IDealBrokerSplitRepository dealBrokerSplitRepository, INotificationRepository notificationRepository)
         {
             if (context == null)
             {
@@ -79,15 +79,24 @@ namespace CRM.Microservice.Data
                 agencyRepository.AddRange(agencies);
             }
 
-            if (contactPersonRepository.Query().Count() == 0)
+            var existingAgencyContactIds = contactRepository.Query()
+                .Where(cp => cp.AgencyId != null && cp.AgencyId != string.Empty)
+                .Select(cp => cp.ContactId)
+                .ToHashSet();
+
+            if (existingAgencyContactIds.Count < 100)
             {
-                var contactPersons = new List<ContactPerson>
+                var agencyContacts = new List<Contact>
                 {
-                    new() { ContactPersonId = "CPT-00001", AgencyId = "AG-0001", FullName = "Liam Nel", Email = "liam.nel@agency1.local", Phone = "+27821000001", Position = "Managing Director", Role = "Manager", IsAgencyAdmin = true,  CreatedAt = DateTime.UtcNow },
-                    new() { ContactPersonId = "CPT-00002", AgencyId = "AG-0001", FullName = "Sarah du Toit", Email = "sarah.d@agency1.local", Phone = "+27821000002", Position = "Leasing Broker", Role = "Broker", IsAgencyAdmin = false, CreatedAt = DateTime.UtcNow },
-                    new() { ContactPersonId = "CPT-00003", AgencyId = "AG-0002", FullName = "Marco Botha", Email = "marco.b@agency2.local", Phone = "+27821000003", Position = "Property Manager", Role = "Owner", IsAgencyAdmin = false, CreatedAt = DateTime.UtcNow }
+                    new() { ContactId = "CON-AG-01", AgencyId = "AG-0001", TenantId = "TEN-0001", FullName = "Liam Nel", EmailAddress = "liam.nel@agency1.local", PhoneNumber = "+27821000001", PositionJobTitle = "Managing Director", ContactType = ContactType.Manager, IsAgencyAdmin = true,  CreatedAt = DateTime.UtcNow },
+                    new() { ContactId = "CON-AG-02", AgencyId = "AG-0001", TenantId = "TEN-0001", FullName = "Sarah du Toit", EmailAddress = "sarah.d@agency1.local", PhoneNumber = "+27821000002", PositionJobTitle = "Leasing Broker", ContactType = ContactType.Broker, IsAgencyAdmin = false, CreatedAt = DateTime.UtcNow },
+                    new() { ContactId = "CON-AG-03", AgencyId = "AG-0002", TenantId = "TEN-0002", FullName = "Marco Botha", EmailAddress = "marco.b@agency2.local", PhoneNumber = "+27821000003", PositionJobTitle = "Property Manager", ContactType = ContactType.Owner, IsAgencyAdmin = false, CreatedAt = DateTime.UtcNow }
                 };
-                contactPersonRepository.AddRange(contactPersons);
+                var newAgencyContacts = agencyContacts.Where(c => !existingAgencyContactIds.Contains(c.ContactId)).ToList();
+                if (newAgencyContacts.Any())
+                {
+                    contactRepository.AddRange(newAgencyContacts);
+                }
             }
 
             if (agencyRepository.Query().Any(a => string.IsNullOrWhiteSpace(a.TradingName)))
@@ -136,32 +145,31 @@ namespace CRM.Microservice.Data
 
             context.SaveChanges();
 
-            if (ownerTenantRepository.Query().Count() < 1000)
+            if (contactRepository.Query().Count(ct => (ct.ContactType == ContactType.Owner || ct.ContactType == ContactType.Tenant) && ct.TenantId != null && ct.TenantId != string.Empty) < 1000)
             {
-                var ownersTenants = new List<OwnerTenantRecord>();
-                var ownerCount = ownerTenantRepository.Query().Count() + 1;
-                for (var i = ownerCount; i <= 1000; i++)
+                var ownerTenantCount = contactRepository.Query()
+                    .Count(ct => ct.ContactType == ContactType.Owner || ct.ContactType == ContactType.Tenant);
+                var ownersTenants = new List<Contact>();
+                for (var i = ownerTenantCount + 1; i <= 1000; i++)
                 {
-                    // 🧬 Each row is stamped with the tenant of an agency
-                    // chosen deterministically by index, so picking "Agency 42"
-                    // in the dropdown surfaces only the owners/tenants that
-                    // rolled into that tenant.
-                    ownersTenants.Add(new OwnerTenantRecord
+                    var isOwner = i % 2 == 0;
+                    ownersTenants.Add(new Contact
                     {
+                        ContactId = $"CON-OT-{i:0000}",
                         TenantId = $"TEN-{(i % 1000) + 1:0000}",
-                        RecordType = i % 2 == 0 ? "Owner" : "Tenant",
-                        FullName = i % 2 == 0 ? $"Owner {i}" : $"Tenant {i}",
-                        CompanyName = i % 2 == 0 ? $"Capital Holdings {i}" : $"Tenant Group {i}",
-                        EmailAddress = i % 2 == 0 ? $"owner{i}@invest.local" : $"tenant{i}@occupy.local",
+                        ContactType = isOwner ? ContactType.Owner : ContactType.Tenant,
+                        FullName = isOwner ? $"Owner {i}" : $"Tenant {i}",
+                        CompanyName = isOwner ? $"Capital Holdings {i}" : $"Tenant Group {i}",
+                        EmailAddress = isOwner ? $"owner{i}@invest.local" : $"tenant{i}@occupy.local",
                         PhoneNumber = $"+27{(200000000 + i).ToString().Substring(0, 9)}",
                         PrimaryLocation = i % 3 == 0 ? "Johannesburg" : i % 3 == 1 ? "Cape Town" : "Durban",
                         BudgetLimit = 250000 + (i * 4000),
-                        Notes = i % 2 == 0 ? "Owner relationship ready for portfolio expansion." : "Tenant relationship active with renewal cycle.",
+                        Notes = isOwner ? "Owner relationship ready for portfolio expansion." : "Tenant relationship active with renewal cycle.",
                         CreatedAt = DateTime.UtcNow.AddDays(-i)
                     });
                 }
 
-                ownerTenantRepository.AddRange(ownersTenants);
+                contactRepository.AddRange(ownersTenants);
             }
 
             context.SaveChanges();
@@ -217,12 +225,12 @@ namespace CRM.Microservice.Data
 
             if (contactRepository.Query().Count() < 1000)
             {
-                var contacts = new List<CRMContact>();
+                var contacts = new List<Contact>();
                 var companyIds = companyRepository.Query().Select(c => c.CompanyId).ToList();
                 var legalIds = legalEntityRepository.Query().Select(l => l.LegalEntityId).ToList();
                 for (var i = contactRepository.Query().Count() + 1; i <= 1000; i++)
                 {
-                    contacts.Add(new CRMContact
+                    contacts.Add(new Contact
                     {
                         ContactId = $"CON-{i:0000}",
                         TenantId = $"TEN-{(i % 1000) + 1:0000}",
@@ -230,7 +238,7 @@ namespace CRM.Microservice.Data
                         EmailAddress = $"contact{i}@pipeline.local",
                         PhoneNumber = $"+27{(300000000 + i).ToString().Substring(0, 9)}",
                         PositionJobTitle = i % 2 == 0 ? "Director" : "Relationship Manager",
-                        ContactRoleType = i % 3 == 0 ? "Seller" : i % 2 == 0 ? "Buyer" : "Broker",
+                        ContactType = (ContactType)(i % 3),
                         AssociatedCompanyId = companyIds[(i - 1) % companyIds.Count],
                         AssociatedLegalEntityId = legalIds[(i - 1) % legalIds.Count],
                         CreatedAt = DateTime.UtcNow.AddDays(-i)
@@ -348,10 +356,12 @@ namespace CRM.Microservice.Data
                 });
             }
 
-            // Backfill a representative interest profile onto existing owner/tenant rows.
-            if (ownerTenantRepository.Query().Any())
+            // Backfill a representative interest profile onto existing owner/tenant contacts.
+            if (contactRepository.Query().Any(c => c.ContactType == ContactType.Owner || c.ContactType == ContactType.Tenant))
             {
-                var ots = ownerTenantRepository.Query().ToList();
+                var ots = contactRepository.Query()
+                    .Where(c => c.ContactType == ContactType.Owner || c.ContactType == ContactType.Tenant)
+                    .ToList();
                 var types = new[] { "Residential", "Commercial", "Retail", "Industrial" };
                 for (int i = 0; i < ots.Count; i++)
                 {
@@ -370,12 +380,12 @@ namespace CRM.Microservice.Data
             // row lands in a per-agency tenant (mirrors the seeder's
             // `i % 1000 + 1` distribution). Idempotent: once no rows carry
             // TEN-001, the UPDATE has nothing to do.
-            BackfillLegacySingleTenantDistribution(context, agencyRepository, brokerRepository, ownerTenantRepository, companyRepository, legalEntityRepository, contactRepository, leadRepository, dealRepository);
+            BackfillLegacySingleTenantDistribution(context, agencyRepository, brokerRepository, companyRepository, legalEntityRepository, contactRepository, leadRepository, dealRepository);
 
             context.SaveChanges();
         }
 
-        private static void BackfillLegacySingleTenantDistribution(CRMDbContext context, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, IOwnerTenantRepository ownerTenantRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, ILeadRepository leadRepository, IDealRepository dealRepository)
+        private static void BackfillLegacySingleTenantDistribution(CRMDbContext context, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, ILeadRepository leadRepository, IDealRepository dealRepository)
         {
             var legacyTenants = new[] { "TEN-001", "" };
             // Agencies: each agency gets a unique tenant + (if i > 8) a parent.
@@ -422,18 +432,10 @@ namespace CRM.Microservice.Data
             }
             context.SaveChanges();
 
-            // OwnerTenantRecords.PrimaryKey is OwnerTenantId (int). Spread
-            // legacy TEN-001 rows across the new tenant distribution.
-            var staleOwners = ownerTenantRepository.Query().Where(r => legacyTenants.Contains(r.TenantId)).ToList();
-            foreach (var rec in staleOwners)
-            {
-                var slot = (Math.Abs(rec.OwnerTenantId) % 1000) + 1;
-                rec.TenantId = $"TEN-{slot:0000}";
-            }
-            context.SaveChanges();
-
             // CRMCompany / LegalEntity / Contact use string PKs. Parse trailing
             // digits from the id (COM-0042 → 42) and assign the matching tenant.
+            // Owner-tenant contacts now share the Contacts table with string PKs
+            // (CON-OT-XXXX), so they are covered by the same distribution pass.
             int ParseTrailingInt(string id)
             {
                 if (string.IsNullOrEmpty(id)) return 0;

@@ -423,6 +423,13 @@ export default function DealsPage() {
                     allowCreate={false}
                     placeholder="Search buyer by name, email, or phone..."
                   />
+                  {editSelectedBuyer && (
+                    <div className="mt-1 p-2 bg-slate-950 border border-slate-800 rounded-lg text-[10px] text-slate-400">
+                      {editSelectedBuyer.emailAddress && (<p><span className="text-slate-500">Email:</span> {editSelectedBuyer.emailAddress}</p>)}
+                      {editSelectedBuyer.phoneNumber && (<p><span className="text-slate-500">Phone:</span> {editSelectedBuyer.phoneNumber}</p>)}
+                      {editSelectedBuyer.positionJobTitle && (<p><span className="text-slate-500">Title:</span> {editSelectedBuyer.positionJobTitle}</p>)}
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Seller Client</label>
                   <ContactPicker
@@ -431,6 +438,13 @@ export default function DealsPage() {
                     allowCreate={false}
                     placeholder="Search seller by name, email, or phone..."
                   />
+                  {editSelectedSeller && (
+                    <div className="mt-1 p-2 bg-slate-950 border border-slate-800 rounded-lg text-[10px] text-slate-400">
+                      {editSelectedSeller.emailAddress && (<p><span className="text-slate-500">Email:</span> {editSelectedSeller.emailAddress}</p>)}
+                      {editSelectedSeller.phoneNumber && (<p><span className="text-slate-500">Phone:</span> {editSelectedSeller.phoneNumber}</p>)}
+                      {editSelectedSeller.positionJobTitle && (<p><span className="text-slate-500">Title:</span> {editSelectedSeller.positionJobTitle}</p>)}
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Transaction Value (R)</label><input required type="number" value={editForm.transactionValue} onChange={(e) => setEditForm({ ...editForm, transactionValue: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Linked Property ID</label><input type="number" value={editForm.linkedPropertyId} onChange={(e) => setEditForm({ ...editForm, linkedPropertyId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>

@@ -40,5 +40,8 @@ namespace CRM.Microservice.Models
 
         [JsonIgnore]
         public ICollection<ContactPerson> ContactPersons { get; set; } = new List<ContactPerson>();
+
+        [JsonIgnore]
+        public ICollection<Contact> Contacts { get; set; } = new List<Contact>();
     }
 }

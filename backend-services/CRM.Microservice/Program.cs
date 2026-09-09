@@ -60,10 +60,8 @@ builder.Services.AddScoped<IDealRepository, DealRepository>();
 builder.Services.AddScoped<ICompanyRepository, CompanyRepository>();
 builder.Services.AddScoped<ILegalEntityRepository, LegalEntityRepository>();
 builder.Services.AddScoped<IContactRepository, ContactRepository>();
-builder.Services.AddScoped<IOwnerTenantRepository, OwnerTenantRepository>();
 builder.Services.AddScoped<IGeographyRepository, GeographyRepository>();
 builder.Services.AddScoped<IOperationalRecordRepository, OperationalRecordRepository>();
-builder.Services.AddScoped<IContactPersonRepository, ContactPersonRepository>();
 builder.Services.AddScoped<IBrochureCardRepository, BrochureCardRepository>();
 builder.Services.AddScoped<IRepository<BrochureCardLine>, BrochureCardLineRepository>();
 builder.Services.AddScoped<IDealBrokerSplitRepository, DealBrokerSplitRepository>();
@@ -157,11 +155,47 @@ using (var serviceScope = app.Services.CreateScope())
                 FOREIGN KEY ([AssociatedCompanyId]) REFERENCES [CRMCompanies] ([CompanyId]);
             ALTER TABLE [CRMContacts] ADD CONSTRAINT [FK_CRMContacts_LegalEntities_AssociatedLegalEntityId]
                 FOREIGN KEY ([AssociatedLegalEntityId]) REFERENCES [CRMLegalEntities] ([LegalEntityId]);
-            CREATE INDEX [IX_CRMContacts_TenantId] ON [CRMContacts] ([TenantId]);
+             CREATE INDEX [IX_CRMContacts_TenantId] ON [CRMContacts] ([TenantId]);
+         END
+     ");
+
+    // 🛠️ Unified Contacts table — consolidates CRMContact, ContactPerson, and OwnerTenantRecord
+    // into a single entity distinguished by ContactType (Buyer/Seller/Broker/Owner/Tenant/Staff/Manager).
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[Contacts]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [Contacts] (
+                [ContactId]              nvarchar(450) NOT NULL CONSTRAINT PK_Contacts PRIMARY KEY,
+                [TenantId]               nvarchar(50)  NOT NULL,
+                [ContactType]            nvarchar(50)  NOT NULL CONSTRAINT DF_Contacts_ContactType DEFAULT N'Buyer',
+                [FullName]               nvarchar(256) NOT NULL,
+                [CompanyName]            nvarchar(256) NULL,
+                [EmailAddress]           nvarchar(256) NOT NULL,
+                [PhoneNumber]            nvarchar(64)  NULL,
+                [PositionJobTitle]       nvarchar(128) NULL,
+                [PrimaryLocation]        nvarchar(256) NULL,
+                [BudgetLimit]            decimal(18,2) NULL,
+                [PropertyTypeInterests]  nvarchar(max) NULL,
+                [AreaInterestIds]        nvarchar(max) NULL,
+                [Notes]                  nvarchar(max) NULL,
+                [AssociatedCompanyId]    nvarchar(450) NULL,
+                [AssociatedLegalEntityId] nvarchar(450) NULL,
+                [LinkedDealIds]          nvarchar(max) NULL,
+                [AgencyId]               nvarchar(64)  NULL,
+                [IsAgencyAdmin]          bit           NOT NULL CONSTRAINT DF_Contacts_IsAgencyAdmin DEFAULT 0,
+                [CreatedAt]              datetime2     NOT NULL CONSTRAINT DF_Contacts_CreatedAt DEFAULT GETUTCDATE()
+            );
+            CREATE INDEX [IX_Contacts_TenantId] ON [Contacts] ([TenantId]);
+            CREATE INDEX [IX_Contacts_ContactType] ON [Contacts] ([ContactType]);
+            CREATE INDEX [IX_Contacts_AgencyId] ON [Contacts] ([AgencyId]) WHERE [AgencyId] IS NOT NULL;
+            ALTER TABLE [Contacts] ADD CONSTRAINT [FK_Contacts_CRMCompanies_AssociatedCompanyId]
+                FOREIGN KEY ([AssociatedCompanyId]) REFERENCES [CRMCompanies] ([CompanyId]);
+            ALTER TABLE [Contacts] ADD CONSTRAINT [FK_Contacts_LegalEntities_AssociatedLegalEntityId]
+                FOREIGN KEY ([AssociatedLegalEntityId]) REFERENCES [CRMLegalEntities] ([LegalEntityId]);
+            ALTER TABLE [Contacts] ADD CONSTRAINT [FK_Contacts_AgencyRecords_AgencyId]
+                FOREIGN KEY ([AgencyId]) REFERENCES [AgencyRecords] ([AgencyId]);
         END
     ");
-
-    // 🛠️ Idempotent migration: company → legal entity association.
     // A company MAY belong to a legal entity (AssociatedLegalEntityId).
     // Nullable so existing companies with no entity are unaffected.
     // On fresh DBs EF Core creates this column + FK from the CRMCompany model;
@@ -384,16 +418,14 @@ using (var serviceScope = app.Services.CreateScope())
             var companyRepository = serviceScope.ServiceProvider.GetRequiredService<ICompanyRepository>();
             var legalEntityRepository = serviceScope.ServiceProvider.GetRequiredService<ILegalEntityRepository>();
             var contactRepository = serviceScope.ServiceProvider.GetRequiredService<IContactRepository>();
-            var ownerTenantRepository = serviceScope.ServiceProvider.GetRequiredService<IOwnerTenantRepository>();
             var geographyRepository = serviceScope.ServiceProvider.GetRequiredService<IGeographyRepository>();
             var operationalRepository = serviceScope.ServiceProvider.GetRequiredService<IOperationalRecordRepository>();
-            var contactPersonRepository = serviceScope.ServiceProvider.GetRequiredService<IContactPersonRepository>();
             var brochureCardRepository = serviceScope.ServiceProvider.GetRequiredService<IBrochureCardRepository>();
             var brochureCardLineRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<BrochureCardLine>>();
             var dealBrokerSplitRepository = serviceScope.ServiceProvider.GetRequiredService<IDealBrokerSplitRepository>();
             var notificationRepository = serviceScope.ServiceProvider.GetRequiredService<INotificationRepository>();
 
-            CRMSeedData.EnsureSeeded(databaseContext, agencyRepository, brokerRepository, leadRepository, dealRepository, companyRepository, legalEntityRepository, contactRepository, ownerTenantRepository, geographyRepository, contactPersonRepository, brochureCardRepository, dealBrokerSplitRepository, notificationRepository);
+            CRMSeedData.EnsureSeeded(databaseContext, agencyRepository, brokerRepository, leadRepository, dealRepository, companyRepository, legalEntityRepository, contactRepository, geographyRepository, brochureCardRepository, dealBrokerSplitRepository, notificationRepository);
 }
 
 // 5. Inject Pipeline Middleware routing and authorization components

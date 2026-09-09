@@ -38,7 +38,7 @@ export default function CRMWorkspace() {
   });
   const [contactForm, setContactForm] = useState({
     fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
-    contactRoleType: 'Buyer', associatedCompanyId: '',
+    contactType: 'Buyer', associatedCompanyId: '',
     linkedDealIds: '', area: '', budget: ''
   });
 
@@ -165,7 +165,7 @@ export default function CRMWorkspace() {
       });
       setContactForm({
         fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
-        contactRoleType: 'Buyer', associatedCompanyId: '',
+        contactType: 'Buyer', associatedCompanyId: '',
         linkedDealIds: '', area: '', budget: ''
       });
       setIsContactFormOpen(false);
@@ -343,9 +343,9 @@ export default function CRMWorkspace() {
                     onClick={() => {
                       setIsContactFormOpen(!isContactFormOpen);
                       if (!isContactFormOpen) {
-                        setContactForm({
+            setContactForm({
                           fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
-                          contactRoleType: 'Buyer', associatedCompanyId: '',
+                          contactType: 'Buyer', associatedCompanyId: '',
                           linkedDealIds: '', area: '', budget: ''
                         });
                       }
@@ -418,7 +418,7 @@ export default function CRMWorkspace() {
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Email</label><input required type="email" value={contactForm.emailAddress} onChange={(e) => setContactForm({ ...contactForm, emailAddress: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Phone</label><input type="text" value={contactForm.phoneNumber} onChange={(e) => setContactForm({ ...contactForm, phoneNumber: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Job Title</label><input type="text" value={contactForm.positionJobTitle} onChange={(e) => setContactForm({ ...contactForm, positionJobTitle: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Role Type</label><select value={contactForm.contactRoleType} onChange={(e) => setContactForm({ ...contactForm, contactRoleType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option>Buyer</option><option>Seller</option><option>Broker</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Contact Type</label><select value={contactForm.contactType} onChange={(e) => setContactForm({ ...contactForm, contactType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option>Buyer</option><option>Seller</option><option>Broker</option><option>Owner</option><option>Tenant</option><option>Staff</option><option>Manager</option></select></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Preferred Area</label><input type="text" placeholder="e.g. Sandton, Cape Town" value={contactForm.area} onChange={(e) => setContactForm({ ...contactForm, area: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Budget</label><input type="text" placeholder="e.g. R 1.5M - 2M" value={contactForm.budget} onChange={(e) => setContactForm({ ...contactForm, budget: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Linked Deal IDs (CSV)</label><input type="text" placeholder="e.g. 12,15" value={contactForm.linkedDealIds} onChange={(e) => setContactForm({ ...contactForm, linkedDealIds: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
@@ -461,14 +461,14 @@ export default function CRMWorkspace() {
           ))}
 
           {activeTab === 'contacts' && firstVisible(contacts, [
-            (c) => c.fullName, (c) => c.contactRoleType, (c) => c.positionJobTitle,
+            (c) => c.fullName, (c) => c.contactType, (c) => c.positionJobTitle,
             (c) => c.emailAddress, (c) => c.phoneNumber,
-            (c) => c.area, (c) => c.budget
+            (c) => c.primaryLocation, (c) => c.budgetLimit
           ]).map((con) => (
             <div key={con.contactId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center hover:border-slate-700 transition-colors">
               <div>
                 <h4 className="text-white font-bold text-base tracking-tight">{con.fullName}</h4>
-                <p className="text-xs text-slate-400 mt-1">Role: <span className="text-purple-400 font-bold">{con.contactRoleType}</span> ({con.positionJobTitle}) • Email: {con.emailAddress} • Phone: {con.phoneNumber}</p>
+                <p className="text-xs text-slate-400 mt-1">Type: <span className="text-purple-400 font-bold">{con.contactType}</span> ({con.positionJobTitle}) • Email: {con.emailAddress} • Phone: {con.phoneNumber}</p>
                 {(con.area || con.budget) && (
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     Area: <span className="text-slate-400">{con.area || 'N/A'}</span> • Budget: <span className="text-slate-400">{con.budget || 'N/A'}</span>
@@ -601,9 +601,9 @@ export default function CRMWorkspace() {
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Email</label><input required type="email" value={editingContact ? editingContact.emailAddress : contactForm.emailAddress} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, emailAddress: e.target.value }) : setContactForm({ ...contactForm, emailAddress: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Phone</label><input type="text" value={editingContact ? editingContact.phoneNumber : contactForm.phoneNumber} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, phoneNumber: e.target.value }) : setContactForm({ ...contactForm, phoneNumber: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Job Title</label><input type="text" value={editingContact ? editingContact.positionJobTitle : contactForm.positionJobTitle} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, positionJobTitle: e.target.value }) : setContactForm({ ...contactForm, positionJobTitle: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Role Type</label><select value={editingContact ? editingContact.contactRoleType : contactForm.contactRoleType} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, contactRoleType: e.target.value }) : setContactForm({ ...contactForm, contactRoleType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option>Buyer</option><option>Seller</option><option>Broker</option></select></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Preferred Area</label><input type="text" placeholder="e.g. Sandton" value={editingContact ? (editingContact.area || '') : contactForm.area} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, area: e.target.value }) : setContactForm({ ...contactForm, area: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Budget</label><input type="text" placeholder="e.g. R 1.5M - 2M" value={editingContact ? (editingContact.budget || '') : contactForm.budget} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, budget: e.target.value }) : setContactForm({ ...contactForm, budget: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Contact Type</label><select value={editingContact ? editingContact.contactType : contactForm.contactType} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, contactType: e.target.value }) : setContactForm({ ...contactForm, contactType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option>Buyer</option><option>Seller</option><option>Broker</option><option>Owner</option><option>Tenant</option><option>Staff</option><option>Manager</option></select></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Primary Location</label><input type="text" placeholder="e.g. Sandton" value={editingContact ? (editingContact.primaryLocation || '') : contactForm.area} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, primaryLocation: e.target.value }) : setContactForm({ ...contactForm, area: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Budget Limit</label><input type="number" placeholder="e.g. 1500000" value={editingContact ? (editingContact.budgetLimit || '') : contactForm.budget} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, budgetLimit: parseFloat(e.target.value) || null }) : setContactForm({ ...contactForm, budget: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Company</label>
                   <SearchableSelect
                     placeholder="Search companies..."

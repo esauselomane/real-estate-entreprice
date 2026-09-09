@@ -25,10 +25,8 @@ namespace CRM.Microservice.Controllers
         private readonly ICompanyRepository _companyRepository;
         private readonly ILegalEntityRepository _legalEntityRepository;
         private readonly IContactRepository _contactRepository;
-        private readonly IOwnerTenantRepository _ownerTenantRepository;
         private readonly IGeographyRepository _geographyRepository;
         private readonly IOperationalRecordRepository _operationalRepository;
-        private readonly IContactPersonRepository _contactPersonRepository;
         private readonly IBrochureCardRepository _brochureCardRepository;
         private readonly IRepository<BrochureCardLine> _brochureCardLineRepository;
         private readonly IDealBrokerSplitRepository _dealBrokerSplitRepository;
@@ -37,7 +35,7 @@ namespace CRM.Microservice.Controllers
         private readonly ILogger<CRMController> _logger;
         private readonly PermissionCheckService _permissionCheck;
 
-        public CRMController(CRMDbContext dbContext, IHttpClientFactory http, IConfiguration configuration, ILogger<CRMController> logger, PermissionCheckService permissionCheck, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, ILeadRepository leadRepository, IDealRepository dealRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, IOwnerTenantRepository ownerTenantRepository, IGeographyRepository geographyRepository, IOperationalRecordRepository operationalRepository, IContactPersonRepository contactPersonRepository, IBrochureCardRepository brochureCardRepository, IRepository<BrochureCardLine> brochureCardLineRepository, IDealBrokerSplitRepository dealBrokerSplitRepository, INotificationRepository notificationRepository)
+        public CRMController(CRMDbContext dbContext, IHttpClientFactory http, IConfiguration configuration, ILogger<CRMController> logger, PermissionCheckService permissionCheck, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, ILeadRepository leadRepository, IDealRepository dealRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, IGeographyRepository geographyRepository, IOperationalRecordRepository operationalRepository, IBrochureCardRepository brochureCardRepository, IRepository<BrochureCardLine> brochureCardLineRepository, IDealBrokerSplitRepository dealBrokerSplitRepository, INotificationRepository notificationRepository)
         {
             _dbContext = dbContext;
         _agencyRepository = agencyRepository;
@@ -47,10 +45,8 @@ namespace CRM.Microservice.Controllers
         _companyRepository = companyRepository;
         _legalEntityRepository = legalEntityRepository;
         _contactRepository = contactRepository;
-        _ownerTenantRepository = ownerTenantRepository;
         _geographyRepository = geographyRepository;
         _operationalRepository = operationalRepository;
-        _contactPersonRepository = contactPersonRepository;
         _brochureCardRepository = brochureCardRepository;
         _brochureCardLineRepository = brochureCardLineRepository;
         _dealBrokerSplitRepository = dealBrokerSplitRepository;
@@ -478,24 +474,39 @@ namespace CRM.Microservice.Controllers
             return Ok(items);
         }
 
-        [HttpGet("owners-tenants")]
-        public async Task<IActionResult> GetOwnerTenantRecords([FromQuery] int page, [FromQuery] string? tenantId)
+        [HttpGet("contacts")]
+        public async Task<IActionResult> GetContacts([FromQuery] int page, [FromQuery] string? tenantId, [FromQuery] string? contactType, [FromQuery] decimal? budgetMin, [FromQuery] decimal? budgetMax, [FromQuery] string? area)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:view"))
             {
-                _logger.LogWarning("GetOwnerTenantRecords: forbidden — caller lacks users:view permission");
+                _logger.LogWarning("GetContacts: forbidden — caller lacks users:view permission");
                 return Forbid();
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<OwnerTenantRecord> query = _ownerTenantRepository.Query();
+            IQueryable<Contact> query = _contactRepository.Query()
+                .AsNoTracking()
+                .Include(c => c.CompanyDetails)
+                .Include(c => c.LegalEntityDetails);
             if (visibleTenants.Count > 0)
-                query = query.Where(r => visibleTenants.Contains(r.TenantId));
-            var ordered = query.OrderByDescending(r => r.CreatedAt);
+                query = query.Where(c => visibleTenants.Contains(c.TenantId));
+            if (!string.IsNullOrEmpty(contactType) && Enum.TryParse<ContactType>(contactType, true, out var typeFilter))
+                query = query.Where(c => c.ContactType == typeFilter);
+            if (budgetMin.HasValue)
+                query = query.Where(c => c.BudgetLimit >= budgetMin.Value);
+            if (budgetMax.HasValue)
+                query = query.Where(c => c.BudgetLimit <= budgetMax.Value);
+            if (!string.IsNullOrWhiteSpace(area))
+            {
+                var areaTerm = area.Trim().ToLower();
+                query = query.Where(c => c.PrimaryLocation != null && c.PrimaryLocation.ToLower().Contains(areaTerm));
+            }
+            var ordered = query.OrderBy(c => c.FullName);
             var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
             {
-                ["recordType"] = await AggregateStringAsync(ordered, r => r.RecordType),
-                ["primaryLocation"] = await AggregateStringAsync(ordered, r => r.PrimaryLocation)
+                ["contactType"] = await AggregateStringAsync(ordered, c => c.ContactType.ToString()),
+                ["position"] = await AggregateStringAsync(ordered, c => c.PositionJobTitle ?? string.Empty),
+                ["hasCompany"] = await AggregateBoolAsync(ordered, c => !string.IsNullOrEmpty(c.AssociatedCompanyId))
             };
             var (items, total) = await PageAsync(ordered, page);
             HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
@@ -503,22 +514,53 @@ namespace CRM.Microservice.Controllers
             return Ok(items);
         }
 
-        [HttpGet("owners-tenants/{ownerTenantId:int}")]
-        public async Task<IActionResult> GetOwnerTenantRecord(int ownerTenantId)
+        // 📥 POST-based contact search with body-bound filters (budget range, contact type, area ids, area text).
+        // Supports an "all types" mode when ContactType is null.
+        [HttpPost("contacts/search")]
+        public async Task<IActionResult> SearchContacts([FromBody] ContactSearchDto request)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:view"))
             {
-                _logger.LogWarning("GetOwnerTenantRecord: forbidden — caller lacks users:view permission");
+                _logger.LogWarning("SearchContacts: forbidden — caller lacks users:view permission");
                 return Forbid();
             }
 
-            var record = await _ownerTenantRepository.GetByIdAsync(ownerTenantId);
-            return record == null
-                ? NotFound(new { message = "Owner or tenant record not found." })
-                : Ok(record);
+            var visibleTenants = await GetVisibleTenantIdsAsync(request.TenantId);
+            IQueryable<Contact> query = _contactRepository.Query()
+                .AsNoTracking()
+                .Include(c => c.CompanyDetails)
+                .Include(c => c.LegalEntityDetails);
+            if (visibleTenants.Count > 0)
+                query = query.Where(c => visibleTenants.Contains(c.TenantId));
+            if (!string.IsNullOrEmpty(request.ContactType) && Enum.TryParse<ContactType>(request.ContactType, true, out var typeFilter))
+                query = query.Where(c => c.ContactType == typeFilter);
+            if (request.BudgetMin.HasValue)
+                query = query.Where(c => c.BudgetLimit >= request.BudgetMin.Value);
+            if (request.BudgetMax.HasValue)
+                query = query.Where(c => c.BudgetLimit <= request.BudgetMax.Value);
+            if (!string.IsNullOrWhiteSpace(request.Area))
+            {
+                var areaTerm = request.Area.Trim().ToLower();
+                query = query.Where(c => c.PrimaryLocation != null && c.PrimaryLocation.ToLower().Contains(areaTerm));
+            }
+            if (request.AreaIds != null && request.AreaIds.Any())
+            {
+                var areaIdStrings = request.AreaIds.Select(id => id.ToString()).ToList();
+                query = query.Where(c => c.AreaInterestIds != null && areaIdStrings.Any(s => c.AreaInterestIds.Contains(s)));
+            }
+            var ordered = query.OrderBy(c => c.FullName);
+            var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["contactType"] = await AggregateStringAsync(ordered, c => c.ContactType.ToString()),
+                ["position"] = await AggregateStringAsync(ordered, c => c.PositionJobTitle ?? string.Empty),
+                ["hasCompany"] = await AggregateBoolAsync(ordered, c => !string.IsNullOrEmpty(c.AssociatedCompanyId))
+            };
+            var (items, total) = await PageAsync(ordered, GetPage(request.Page));
+            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
+            HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
+            return Ok(items);
         }
 
-        // 🌍 Geography auto-complete reference data for owner/tenant area-of-interest selection.
         [HttpGet("geography")]
         public async Task<IActionResult> SearchGeography([FromQuery] string? search)
         {
@@ -556,47 +598,62 @@ namespace CRM.Microservice.Controllers
             return geo == null ? NotFound(new { message = "Geography record not found." }) : Ok(geo);
         }
 
-        [HttpPost("owners-tenants")]
-        public async Task<IActionResult> CreateOwnerTenantRecord([FromBody] OwnerTenantRecord record)
+        [HttpPost("contacts")]
+        public async Task<IActionResult> CreateContact([FromBody] Contact contact)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:create"))
             {
-                _logger.LogWarning("CreateOwnerTenantRecord: forbidden — caller lacks users:create permission");
+                _logger.LogWarning("CreateContact: forbidden — caller lacks users:create permission");
                 return Forbid();
             }
 
-            if (record == null || string.IsNullOrWhiteSpace(record.FullName))
-                return BadRequest(new { message = "Owner / Tenant details are required." });
+            if (contact == null || string.IsNullOrWhiteSpace(contact.FullName))
+                return BadRequest(new { message = "Contact details are required." });
 
-            record.CreatedAt = DateTime.UtcNow;
-            _ownerTenantRepository.Add(record);
+            if (string.IsNullOrEmpty(contact.ContactId))
+                contact.ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
+            contact.TenantId = GetCurrentTenant();
+            contact.CreatedAt = DateTime.UtcNow;
+
+            if (string.IsNullOrEmpty(contact.AssociatedLegalEntityId) && !string.IsNullOrEmpty(contact.AssociatedCompanyId))
+            {
+                var co = await _companyRepository.Query().FirstOrDefaultAsync(c => c.CompanyId == contact.AssociatedCompanyId);
+                if (co?.AssociatedLegalEntityId != null)
+                    contact.AssociatedLegalEntityId = co.AssociatedLegalEntityId;
+            }
+
+            _contactRepository.Add(contact);
             await _dbContext.SaveChangesAsync();
-            return Ok(record);
+            return Ok(contact);
         }
 
-        [HttpPut("owners-tenants")]
-        public async Task<IActionResult> UpdateOwnerTenantRecord([FromBody] OwnerTenantRecord updatedRecord)
+        [HttpPut("contacts/{contactId}")]
+        public async Task<IActionResult> UpdateContact(string contactId, [FromBody] Contact updatedContact)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:edit"))
             {
-                _logger.LogWarning("UpdateOwnerTenantRecord: forbidden — caller lacks users:edit permission");
+                _logger.LogWarning("UpdateContact: forbidden — caller lacks users:edit permission");
                 return Forbid();
             }
 
-            var existing = await _ownerTenantRepository.GetByIdAsync(updatedRecord.OwnerTenantId);
-            if (existing == null) return NotFound(new { message = "Owner or tenant record not found." });
+            var existing = await _contactRepository.GetByIdAsync(contactId);
+            if (existing == null) return NotFound(new { message = "Contact record not found." });
 
-            existing.RecordType = updatedRecord.RecordType;
-            existing.FullName = updatedRecord.FullName;
-            existing.CompanyName = updatedRecord.CompanyName;
-            existing.EmailAddress = updatedRecord.EmailAddress;
-            existing.PhoneNumber = updatedRecord.PhoneNumber;
-             existing.PrimaryLocation = updatedRecord.PrimaryLocation;
-             existing.BudgetLimit = updatedRecord.BudgetLimit;
-             existing.PropertyTypeInterests = updatedRecord.PropertyTypeInterests;
-             existing.AreaInterestIds = updatedRecord.AreaInterestIds;
-             existing.Notes = updatedRecord.Notes;
-
+            existing.ContactType = updatedContact.ContactType;
+            existing.FullName = updatedContact.FullName;
+            existing.CompanyName = updatedContact.CompanyName;
+            existing.EmailAddress = updatedContact.EmailAddress;
+            existing.PhoneNumber = updatedContact.PhoneNumber;
+            existing.PositionJobTitle = updatedContact.PositionJobTitle;
+            existing.PrimaryLocation = updatedContact.PrimaryLocation;
+            existing.BudgetLimit = updatedContact.BudgetLimit;
+            existing.PropertyTypeInterests = updatedContact.PropertyTypeInterests;
+            existing.AreaInterestIds = updatedContact.AreaInterestIds;
+            existing.Notes = updatedContact.Notes;
+            existing.AssociatedCompanyId = updatedContact.AssociatedCompanyId;
+            existing.AssociatedLegalEntityId = updatedContact.AssociatedLegalEntityId;
+            existing.AgencyId = updatedContact.AgencyId;
+            existing.IsAgencyAdmin = updatedContact.IsAgencyAdmin;
 
             await _dbContext.SaveChangesAsync();
             return Ok(existing);
@@ -741,7 +798,7 @@ namespace CRM.Microservice.Controllers
             }
 
             var agency = await _agencyRepository.Query()
-                .Include(a => a.ContactPersons)
+                .Include(a => a.Contacts)
                 .FirstOrDefaultAsync(a => a.AgencyId == agencyId);
             if (agency == null) return NotFound(new { message = "Agency record not found." });
             agency.Name = updatedAgency.Name;
@@ -767,7 +824,7 @@ namespace CRM.Microservice.Controllers
             return Ok(agency);
         }
 
-        // 📇 Contact-person sub-resource for an agency (editable; promotable to a broker).
+        // 📇 Agency-scoped contacts (staff contacts bound to an agency).
         [HttpGet("agencies/{agencyId}/contacts")]
         public async Task<IActionResult> GetAgencyContacts(string agencyId)
         {
@@ -779,18 +836,18 @@ namespace CRM.Microservice.Controllers
 
             var exists = await _agencyRepository.Query().AnyAsync(a => a.AgencyId == agencyId);
             if (!exists) return NotFound(new { message = "Agency not found." });
-            var contacts = await _contactPersonRepository.Query()
+            var contacts = await _contactRepository.Query()
                 .Where(c => c.AgencyId == agencyId)
                 .OrderBy(c => c.FullName).ToListAsync();
             return Ok(contacts);
         }
 
         [HttpPost("agencies/{agencyId}/contacts")]
-        public async Task<IActionResult> CreateContactPerson(string agencyId, [FromBody] ContactPerson contact)
+        public async Task<IActionResult> CreateAgencyContact(string agencyId, [FromBody] Contact contact)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:create"))
             {
-                _logger.LogWarning("CreateContactPerson: forbidden — caller lacks users:create permission");
+                _logger.LogWarning("CreateAgencyContact: forbidden — caller lacks users:create permission");
                 return Forbid();
             }
 
@@ -799,53 +856,32 @@ namespace CRM.Microservice.Controllers
             if (string.IsNullOrWhiteSpace(contact.FullName))
                 return BadRequest(new { message = "Contact full name is required." });
 
-            contact.ContactPersonId = "CPT-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
+            contact.ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
             contact.AgencyId = agencyId;
             contact.CreatedAt = DateTime.UtcNow;
-            _contactPersonRepository.Add(contact);
+            _contactRepository.Add(contact);
             await _dbContext.SaveChangesAsync();
             return Ok(contact);
         }
 
-        [HttpPut("contact-persons/{contactId}")]
-        public async Task<IActionResult> UpdateContactPerson(string contactId, [FromBody] ContactPerson updated)
-        {
-            if (!await _permissionCheck.HasPermissionAsync("users:edit"))
-            {
-                _logger.LogWarning("UpdateContactPerson: forbidden — caller lacks users:edit permission");
-                return Forbid();
-            }
-
-            var existing = await _contactPersonRepository.Query().FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
-            if (existing == null) return NotFound(new { message = "Contact person not found." });
-            existing.FullName = updated.FullName;
-            existing.Email = updated.Email;
-            existing.Phone = updated.Phone;
-            existing.Position = updated.Position;
-            existing.Role = updated.Role;
-            existing.IsAgencyAdmin = updated.IsAgencyAdmin;
-            await _dbContext.SaveChangesAsync();
-            return Ok(existing);
-        }
-
-        [HttpDelete("contact-persons/{contactId}")]
-        public async Task<IActionResult> DeleteContactPerson(string contactId)
+        [HttpDelete("contacts/{contactId}")]
+        public async Task<IActionResult> DeleteContact(string contactId)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:delete"))
             {
-                _logger.LogWarning("DeleteContactPerson: forbidden — caller lacks users:delete permission");
+                _logger.LogWarning("DeleteContact: forbidden — caller lacks users:delete permission");
                 return Forbid();
             }
 
-            var existing = await _contactPersonRepository.Query().FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
-            if (existing == null) return NotFound(new { message = "Contact person not found." });
-            _contactPersonRepository.Remove(existing);
+            var existing = await _contactRepository.GetByIdAsync(contactId);
+            if (existing == null) return NotFound(new { message = "Contact not found." });
+            _contactRepository.Remove(existing);
             await _dbContext.SaveChangesAsync();
-            return Ok(new { message = "Contact person removed." });
+            return Ok(new { message = "Contact removed." });
         }
 
-        // 🚀 Promote an agency contact into a Broker record (creates an AgencyAdmin profile).
-        [HttpPost("contact-persons/{contactId}/promote-to-broker")]
+        // 🚀 Promote an agency staff contact into a Broker record.
+        [HttpPost("contacts/{contactId}/promote-to-broker")]
         public async Task<IActionResult> PromoteContactToBroker(string contactId)
         {
             if (!await _permissionCheck.HasPermissionAsync("users:edit"))
@@ -854,8 +890,8 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var contact = await _contactPersonRepository.Query().FirstOrDefaultAsync(c => c.ContactPersonId == contactId);
-            if (contact == null) return NotFound(new { message = "Contact person not found." });
+            var contact = await _contactRepository.Query().FirstOrDefaultAsync(c => c.ContactId == contactId);
+            if (contact == null) return NotFound(new { message = "Contact not found." });
 
             var broker = new BrokerRecord
             {
@@ -863,14 +899,14 @@ namespace CRM.Microservice.Controllers
                 TenantId = GetCurrentTenant(),
                 AgencyId = contact.AgencyId,
                 FullName = contact.FullName,
-                Email = contact.Email,
-                Phone = contact.Phone,
+                Email = contact.EmailAddress,
+                Phone = contact.PhoneNumber,
                 Role = contact.IsAgencyAdmin ? "Manager" : "Broker",
                 Status = "Active",
                 CreatedAt = DateTime.UtcNow
             };
             _brokerRepository.Add(broker);
-            contact.IsAgencyAdmin = true;
+            contact.ContactType = ContactType.Broker;
             await _dbContext.SaveChangesAsync();
             return Ok(new { broker, contact = contact });
         }
@@ -1076,35 +1112,6 @@ namespace CRM.Microservice.Controllers
             return Ok(new { message = "Legal Entity parameters updated successfully.", data = existing });
         }
 
-        [HttpGet("contacts")]
-        public async Task<IActionResult> GetContacts([FromQuery] int page, [FromQuery] string? tenantId)
-        {
-            if (!await _permissionCheck.HasPermissionAsync("users:view"))
-            {
-                _logger.LogWarning("GetContacts: forbidden — caller lacks users:view permission");
-                return Forbid();
-            }
-
-            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<CRMContact> query = _contactRepository.Query()
-                .AsNoTracking()
-                .Include(c => c.CompanyDetails)
-                .Include(c => c.LegalEntityDetails);
-            if (visibleTenants.Count > 0)
-                query = query.Where(c => visibleTenants.Contains(c.TenantId));
-            var ordered = query.OrderBy(c => c.FullName);
-            var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["contactRole"] = await AggregateStringAsync(ordered, c => c.ContactRoleType),
-                ["position"] = await AggregateStringAsync(ordered, c => c.PositionJobTitle),
-                ["hasCompany"] = await AggregateBoolAsync(ordered, c => !string.IsNullOrEmpty(c.AssociatedCompanyId))
-            };
-            var (items, total) = await PageAsync(ordered, page);
-            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
-            HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
-            return Ok(items);
-        }
-
         // 🔍 Auto-complete search over companies (by name / registration / VAT).
         [HttpGet("companies/search")]
         public async Task<IActionResult> SearchCompanies([FromQuery] string q, [FromQuery] int page = 1, [FromQuery] string? tenantId = null)
@@ -1219,37 +1226,6 @@ namespace CRM.Microservice.Controllers
             return Ok(company);
         }
 
-        [HttpGet("contacts/search")]
-        public async Task<IActionResult> SearchContacts([FromQuery] string q, [FromQuery] int page = 1, [FromQuery] string? tenantId = null)
-        {
-            if (!await _permissionCheck.HasPermissionAsync("users:view"))
-            {
-                _logger.LogWarning("SearchContacts: forbidden — caller lacks users:view permission");
-                return Forbid();
-            }
-
-            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            IQueryable<CRMContact> query = _contactRepository.Query()
-                .AsNoTracking()
-                .Include(c => c.CompanyDetails)
-                .Include(c => c.LegalEntityDetails);
-            if (visibleTenants.Count > 0)
-                query = query.Where(c => visibleTenants.Contains(c.TenantId));
-
-            var term = (q ?? string.Empty).Trim().ToLower();
-            if (!string.IsNullOrEmpty(term))
-            {
-                query = query.Where(c =>
-                    c.FullName.ToLower().Contains(term) ||
-                    c.EmailAddress.ToLower().Contains(term) ||
-                    (c.PhoneNumber ?? string.Empty).ToLower().Contains(term));
-            }
-
-            var (items, total) = await PageAsync(query.OrderBy(c => c.FullName), page);
-            HttpContext.Response.Headers["X-Total-Count"] = total.ToString();
-            return Ok(items);
-        }
-
         // --- 📋 ENDPOINT: FETCH A SINGLE CONTACT BY ID (edit hydration) ---
         [HttpGet("contacts/{contactId}")]
         public async Task<IActionResult> GetContactById([FromRoute] string contactId, [FromQuery] string? tenantId = null)
@@ -1278,8 +1254,6 @@ namespace CRM.Microservice.Controllers
                 return NotFound(new { message = "Contact record not found." });
             }
 
-            // Tenant-subtree guard: a contact is only surfaced if its tenant sits
-            // inside the caller's visible subtree (AgencyAdmin/child/PlatformAdmin).
             if (visibleTenants.Count > 0 && !visibleTenants.Contains(contact.TenantId))
             {
                 _logger.LogWarning("GetContactById: ContactId={ContactId} outside visible tenants", contactId);
@@ -1287,69 +1261,6 @@ namespace CRM.Microservice.Controllers
             }
 
             return Ok(contact);
-        }
-
-        [HttpPost("contact/create")]
-        public async Task<IActionResult> CreateContact([FromBody] CRMContact contact)
-        {
-            if (!await _permissionCheck.HasPermissionAsync("users:create"))
-            {
-                _logger.LogWarning("CreateContact: forbidden — caller lacks users:create permission");
-                return Forbid();
-            }
-
-            if (string.IsNullOrEmpty(contact.ContactId))
-                contact.ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
-            // 🔐 Tenant taken from the caller's JWT, never from the request body.
-            contact.TenantId = GetCurrentTenant();
-            contact.CreatedAt = DateTime.UtcNow;
-
-            // 🧠 Infer the contact's legal entity from its company when the
-            // caller didn't supply one — "legal entity can be inferred from company".
-            if (string.IsNullOrEmpty(contact.AssociatedLegalEntityId) && !string.IsNullOrEmpty(contact.AssociatedCompanyId))
-            {
-                var co = await _companyRepository.Query().FirstOrDefaultAsync(c => c.CompanyId == contact.AssociatedCompanyId);
-                if (co?.AssociatedLegalEntityId != null)
-                    contact.AssociatedLegalEntityId = co.AssociatedLegalEntityId;
-            }
-
-            _contactRepository.Add(contact);
-            await _dbContext.SaveChangesAsync();
-            return Ok(contact);
-        }
-
-        [HttpPut("contact/update")]
-        public async Task<IActionResult> UpdateContact([FromBody] CRMContact updatedContact)
-        {
-            if (!await _permissionCheck.HasPermissionAsync("users:edit"))
-            {
-                _logger.LogWarning("UpdateContact: forbidden — caller lacks users:edit permission");
-                return Forbid();
-            }
-
-            var existing = await _contactRepository.GetByIdAsync(updatedContact.ContactId);
-            if (existing == null) return NotFound(new { message = "Contact tracking profile record not found." });
-
-            existing.FullName = updatedContact.FullName;
-            existing.EmailAddress = updatedContact.EmailAddress;
-            existing.PhoneNumber = updatedContact.PhoneNumber;
-            existing.PositionJobTitle = updatedContact.PositionJobTitle;
-            existing.ContactRoleType = updatedContact.ContactRoleType;
-            existing.AssociatedCompanyId = updatedContact.AssociatedCompanyId;
-            existing.AssociatedLegalEntityId = updatedContact.AssociatedLegalEntityId;
-            existing.LinkedDealIds = updatedContact.LinkedDealIds;
-
-            // 🧠 Re-infer the legal entity from the company if the caller left it blank
-            // but supplied a company (legal entity is inferred from company).
-            if (string.IsNullOrEmpty(existing.AssociatedLegalEntityId) && !string.IsNullOrEmpty(existing.AssociatedCompanyId))
-            {
-                var co = await _companyRepository.Query().FirstOrDefaultAsync(c => c.CompanyId == existing.AssociatedCompanyId);
-                if (co?.AssociatedLegalEntityId != null)
-                    existing.AssociatedLegalEntityId = co.AssociatedLegalEntityId;
-            }
-
-            await _dbContext.SaveChangesAsync();
-            return Ok(new { message = "Contact directory record updated successfully.", data = existing });
         }
 
         [HttpGet("boards")]
@@ -1513,21 +1424,31 @@ namespace CRM.Microservice.Controllers
             if (lead == null) return NotFound(new { message = "Target lead record not found." });
             if (lead.IsConvertedToDeal) return Conflict(new { message = "Lead already promoted to a deal." });
 
-            // Resolve / create the buyer contact (reuse the contact-linking pattern).
+            // Resolve the buyer contact: prefer the lead's LinkedContactId; otherwise search by email.
             var tenantId = lead.TenantId;
-            var buyerContact = !string.IsNullOrEmpty(lead.ContactEmail)
-                ? await _contactRepository.Query().FirstOrDefaultAsync(c => c.TenantId == tenantId && c.EmailAddress == lead.ContactEmail)
-                : null;
+            Contact? buyerContact = null;
+            if (!string.IsNullOrEmpty(lead.LinkedContactId))
+            {
+                buyerContact = await _contactRepository.Query()
+                    .FirstOrDefaultAsync(c => c.ContactId == lead.LinkedContactId && c.TenantId == tenantId);
+            }
+
+            if (buyerContact == null && !string.IsNullOrEmpty(lead.ContactEmail))
+            {
+                buyerContact = await _contactRepository.Query()
+                    .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.EmailAddress == lead.ContactEmail);
+            }
+
             if (buyerContact == null)
             {
-                buyerContact = new CRMContact
+                buyerContact = new Contact
                 {
                     ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper(),
                     TenantId = tenantId,
                     FullName = lead.ClientName,
                     EmailAddress = lead.ContactEmail,
                     PhoneNumber = lead.ContactPhone,
-                    ContactRoleType = "Buyer",
+                    ContactType = ContactType.Buyer,
                     PositionJobTitle = "Private Individual",
                     CreatedAt = DateTime.UtcNow
                 };
@@ -1580,12 +1501,12 @@ namespace CRM.Microservice.Controllers
                     .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.FullName.Contains(request.SellerNameIfNewDeal));
                 if (sellerContact == null)
                 {
-                    sellerContact = new CRMContact
+                    sellerContact = new Contact
                     {
                         ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper(),
                         TenantId = tenantId,
                         FullName = request.SellerNameIfNewDeal,
-                        ContactRoleType = "Seller",
+                        ContactType = ContactType.Seller,
                         PositionJobTitle = "Property Owner / Developer",
                         CreatedAt = DateTime.UtcNow
                     };
@@ -1826,14 +1747,14 @@ namespace CRM.Microservice.Controllers
 
                 if (buyerContact == null)
                 {
-                    buyerContact = new CRMContact
+                    buyerContact = new Contact
                     {
                         ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper(),
                         TenantId = lead.TenantId,
                         FullName = lead.ClientName,
                         EmailAddress = lead.ContactEmail,
                         PhoneNumber = lead.ContactPhone,
-                        ContactRoleType = "Buyer",
+                        ContactType = ContactType.Buyer,
                         PositionJobTitle = "Private Individual",
                         CreatedAt = DateTime.UtcNow
                     };
@@ -1846,12 +1767,12 @@ namespace CRM.Microservice.Controllers
 
                 if (sellerContact == null)
                 {
-                    sellerContact = new CRMContact
+                    sellerContact = new Contact
                     {
                         ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper(),
                         TenantId = lead.TenantId,
                         FullName = sellerName,
-                        ContactRoleType = "Seller",
+                        ContactType = ContactType.Seller,
                         PositionJobTitle = "Property Owner / Developer",
                         CreatedAt = DateTime.UtcNow
                     };
@@ -2744,12 +2665,15 @@ namespace CRM.Microservice.Controllers
             var items = new List<object>();
 
             // (2) Awaiting-broker-signature: deals in Negotiation stage.
-            var awaiting = await _dealRepository.Query()
-                .Where(d => tenantIds.Contains(d.TenantId)
-                    && d.DealStage == DealWorkflowStage.Negotiation
-                    && (effectiveBrokerId == null || BrokerMatches(d.AllocatedBrokerIds, effectiveBrokerId)))
+            // Filter broker-matching client-side because BrokerMatches uses string.Split
+            // which EF cannot translate to SQL.
+            var awaitingDeals = await _dealRepository.Query()
+                .Where(d => tenantIds.Contains(d.TenantId) && d.DealStage == DealWorkflowStage.Negotiation)
                 .OrderBy(d => d.LastStageUpdatedAt)
                 .Take(20)
+                .ToListAsync();
+            var awaiting = awaitingDeals
+                .Where(d => effectiveBrokerId == null || BrokerMatches(d.AllocatedBrokerIds, effectiveBrokerId))
                 .Select(d => new
                 {
                     itemId = $"deal-{d.DealId}",
@@ -2761,7 +2685,7 @@ namespace CRM.Microservice.Controllers
                     linkId = d.DealId.ToString(),
                     icon = "📝"
                 })
-                .ToListAsync();
+                .ToList();
             items.AddRange(awaiting);
 
             // (1) Expiring mandates: call the property service over HTTP.

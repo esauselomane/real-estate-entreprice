@@ -30,10 +30,10 @@ public class AgencyRepository : Repository<AgencyRecord>, IAgencyRepository
     /// <inheritdoc/>
     public async Task<AgencyRecord?> GetWithChildrenAsync(string agencyId, CancellationToken cancellationToken = default)
     {
-        return await _dbSet
-            .Where(agency => agency.AgencyId == agencyId)
-            .Include(agency => agency.ContactPersons)
-            .FirstOrDefaultAsync(cancellationToken);
+            return await _dbSet
+                .Where(agency => agency.AgencyId == agencyId)
+                .Include(agency => agency.Contacts)
+                .FirstOrDefaultAsync(cancellationToken);
     }
 
     /// <inheritdoc/>

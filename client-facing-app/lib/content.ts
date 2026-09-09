@@ -230,31 +230,30 @@ export const testimonials: { quote: string; name: string; role: string; logo: st
 ];
 
 export const timeline: { year: string; event: string }[] = [
-  { year: "2022", event: "Founded to solve deal-closing fragmentation for brokers." },
-  { year: "2023", event: "Launched the CRM pipeline and property catalogue." },
-  { year: "2024", event: "Introduced background Workers for brochure + image processing." },
-  { year: "2025", event: "Added market syndication and multi-tenant isolation." },
+  { year: "2015", event: "Founded to solve deal-closing fragmentation for brokers." },
+  { year: "2024", event: "Started developing system architecture." },
+  { year: "2026", event: "Goes live." },
 ];
 
 export const leadership: TeamMember[] = [
   {
-    name: "Amara Okafor",
-    role: "Chief Executive Officer",
-    image: "/images/team/amara.jpg",
-    linkedin: "#",
-  },
-  {
-    name: "Derek Liu",
+    name: "Esau Selomane",
     role: "Chief Technology Officer",
-    image: "/images/team/derek.jpg",
-    linkedin: "#",
+    image: "/images/team/amara.jpg",
+    linkedin: "https://www.linkedin.com/in/esau-selomane-49a68b24/",
   },
   {
+    name: "Ntuthuko Sokutu",
+    role: "https://www.linkedin.com/in/ntuthuko-sokutu-449a44273/",
+    image: "/images/team/derek.jpg",
+    linkedin: "https://www.linkedin.com/in/ntuthuko-sokutu-449a44273/",
+  },
+  /*{
     name: "Siyabonga Dlamini",
     role: "Head of Product",
     image: "/images/team/siyabonga.jpg",
     linkedin: "#",
-  },
+  },*/
 ];
 
 export type IconMap = {

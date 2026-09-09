@@ -34,7 +34,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
   });
   const [userForm, setUserForm] = useState({ fullName: '', email: '', password: '', systemRole: 'Broker' });
   const [editingUser, setEditingUser] = useState(null);
-  const [contactForm, setContactForm] = useState({ fullName: '', email: '', phone: '', position: '', role: 'Owner', isAgencyAdmin: false });
+  const [contactForm, setContactForm] = useState({ fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '', contactType: 'Staff', isAgencyAdmin: false });
   const [error, setError] = useState('');
   const [editingAgency, setEditingAgency] = useState(null);
   const [editingContact, setEditingContact] = useState(null);
@@ -179,9 +179,9 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     e.preventDefault();
     const targetAgency = editingContact ? editingContact.agencyId : expandedAgency;
     try {
-      if (editingContact) await crmService.updateContactPerson(editingContact.contactPersonId, contactForm);
+       if (editingContact) await crmService.updateContact(editingContact.contactId, contactForm);
       else await crmService.createContactPerson(targetAgency, contactForm);
-      setContactForm({ fullName: '', email: '', phone: '', position: '', role: 'Owner', isAgencyAdmin: false });
+      setContactForm({ fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '', contactType: 'Staff', isAgencyAdmin: false });
       setEditingContact(null);
       await loadContacts(targetAgency);
     } catch (err) { alert(err || 'Contact person save failed.'); }
@@ -518,14 +518,14 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px]">
                     <UserPlus size={14} className="text-emerald-500" /> {editingContact ? 'Edit Contact' : 'Add Contact'}
                   </div>
-                  <button type="button" onClick={() => { setExpandedAgency(null); setEditingContact(null); setContactForm({ fullName: '', email: '', phone: '', position: '', role: 'Owner', isAgencyAdmin: false }); }} className="text-slate-400 hover:text-white"><X size={14} /></button>
+                  <button type="button" onClick={() => { setExpandedAgency(null); setEditingContact(null); setContactForm({ fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '', contactType: 'Staff', isAgencyAdmin: false }); }} className="text-slate-400 hover:text-white"><X size={14} /></button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <input value={contactForm.fullName} onChange={(e) => setContactForm({ ...contactForm, fullName: e.target.value })} placeholder="Full name" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
-                  <input value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} type="email" placeholder="Email" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
-                  <input value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })} placeholder="Phone" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
-                  <input value={contactForm.position} onChange={(e) => setContactForm({ ...contactForm, position: e.target.value })} placeholder="Position" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
-                  <select value={contactForm.role} onChange={(e) => setContactForm({ ...contactForm, role: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"><option>Owner</option><option>Tenant</option><option>Manager</option></select>
+                  <input value={contactForm.emailAddress} onChange={(e) => setContactForm({ ...contactForm, emailAddress: e.target.value })} type="email" placeholder="Email" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                  <input value={contactForm.phoneNumber} onChange={(e) => setContactForm({ ...contactForm, phoneNumber: e.target.value })} placeholder="Phone" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                  <input value={contactForm.positionJobTitle} onChange={(e) => setContactForm({ ...contactForm, positionJobTitle: e.target.value })} placeholder="Position" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                  <select value={contactForm.contactType} onChange={(e) => setContactForm({ ...contactForm, contactType: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"><option>Owner</option><option>Tenant</option><option>Staff</option><option>Manager</option><option>Broker</option></select>
                   <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-400"><input type="checkbox" checked={contactForm.isAgencyAdmin} onChange={(e) => setContactForm({ ...contactForm, isAgencyAdmin: e.target.checked })} /> Promote to AgencyAdmin on save</label>
                 </div>
                 <Can permission={editingContact ? 'users:edit' : 'users:create'}>
@@ -568,18 +568,18 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   {/* Expanded contact persons */}
                   {expandedAgency === agency.agencyId && (
                     <div className="px-4 pb-3 border-t border-slate-800 pt-2 space-y-2">
-                      <div className="text-[10px] text-slate-400 font-bold uppercase">Contact persons — promote to broker/AgencyAdmin</div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Agency contacts — promote to broker</div>
                       {(agencyContacts[agency.agencyId] || []).map((c) => (
-                        <div key={c.contactPersonId} className="flex justify-between items-center rounded-lg border border-slate-800 bg-slate-950/40 p-2.5">
+                        <div key={c.contactId} className="flex justify-between items-center rounded-lg border border-slate-800 bg-slate-950/40 p-2.5">
                           <div className="flex-1 truncate">
                             <div className="text-slate-200 text-xs font-semibold">{c.fullName}</div>
-                            <div className="text-[10px] text-slate-500">{c.email} • {c.position || '—'}{c.isAgencyAdmin && <Tag size={10} className="ml-1 text-violet-400" />}</div>
+                            <div className="text-[10px] text-slate-500">{c.emailAddress} • {c.positionJobTitle || '—'}{c.isAgencyAdmin && <Tag size={10} className="ml-1 text-violet-400" />}</div>
                           </div>
                           <div className="flex gap-1.5">
                             <Can permission="users:edit">
                               <button type="button" onClick={async () => {
-                                if (window.confirm(`Promote R{c.fullName} to a broker profile?`)) {
-                                  try { await crmService.promoteContactToBroker(c.contactPersonId); await loadBrokers(); await loadAgencies(); await loadContacts(agency.agencyId); }
+                                if (window.confirm(`Promote ${c.fullName} to a broker profile?`)) {
+                                  try { await crmService.promoteContactToBroker(c.contactId); await loadBrokers(); await loadAgencies(); await loadContacts(agency.agencyId); }
                                   catch (err) { alert(err || 'Promotion failed.'); }
                                 }
                               }} className="p-1 rounded bg-violet-950 text-violet-300 border border-violet-900 hover:text-white" title="Promote to broker">
@@ -588,8 +588,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                             </Can>
                             <Can permission="users:delete">
                               <button type="button" onClick={async () => {
-                                if (window.confirm('Remove this contact person?')) {
-                                  try { await crmService.deleteContactPerson(c.contactPersonId); await loadContacts(agency.agencyId); await loadAgencies(); }
+                                if (window.confirm('Remove this contact?')) {
+                                  try { await crmService.deleteContactPerson(c.contactId); await loadContacts(agency.agencyId); await loadAgencies(); }
                                   catch (err) { alert(err || 'Removal failed.'); }
                                 }
                               }} className="p-1 rounded bg-red-950/30 text-red-300 border border-red-900 hover:text-white" title="Delete">

@@ -12,7 +12,7 @@ const STATUS_COLORS = { Active: '#22c55e', Review: '#f59e0b', Inactive: '#ef4444
 const ROLE_COLORS = { PlatformAdmin: '#7c3aed', AgencyAdmin: '#3b82f6', Broker: '#14b8a4', Owner: '#f97316', Tenant: '#0ea5e9' };
 const DEAL_COLORS = { DiscoveryNeedsAnalysis: '#0ea5e9', Presentation: '#3b82f6', ProposalQuoteSent: '#a78bfa', Negotiation: '#f59e0b', ClosedWon: '#22c55e', ClosedLost: '#ef4444' };
 const TYPE_COLORS = { Residential: '#22c55e', Commercial: '#3b82f6', Retail: '#f97316', Industrial: '#6b7280' };
-const next = (role) => role === 'Tenant' ? 'operations' : role === 'Owner' ? 'owners-tenants' : role === 'Broker' ? 'crm' : 'admin';
+const next = (role) => role === 'Tenant' ? 'operations' : role === 'Owner' ? 'crm' : role === 'Broker' ? 'crm' : 'admin';
 
 const formatTitle = (raw) => {
   if (!raw) return '';
@@ -185,15 +185,15 @@ export default function RoleDashboard() {
           ]);
         } else if (role === 'Owner') {
           const ots = await crmService.getOwnerTenantRecords();
-          // 📊 Server-side aggregates (recordType, primaryLocation) reflect every
+          // 📊 Server-side aggregates (contactType, primaryLocation) reflect every
           // record in the active tenant scope, not just the 20 returned for the
           // current page — keeps the chart consistent with the rest of the app.
           const otsAggregates = ots.aggregates || {};
-          const recordTypeBuckets = otsAggregates.recordType || {};
+          const recordTypeBuckets = otsAggregates.contactType || {};
           const locationBuckets = otsAggregates.primaryLocation || {};
           setMetrics([{ label: 'Interested parties', value: ots.totalCount || ots.length, icon: Users }, { label: 'Property operations', value: 'Active', icon: Home }]);
           setCharts([
-            { title: 'Record type distribution', icon: Users, kind: 'pie', data: Object.entries(recordTypeBuckets).map(([name, value]) => ({ name, value })), colors: TYPE_COLORS },
+            { title: 'Contact type distribution', icon: Users, kind: 'pie', data: Object.entries(recordTypeBuckets).map(([name, value]) => ({ name, value })), colors: TYPE_COLORS },
             { title: 'Primary location breakdown', icon: Home, kind: 'bar', data: Object.entries(locationBuckets).map(([name, value]) => ({ name, value })), colors: { default: '#3b82f6' } }
           ]);
         } else {
