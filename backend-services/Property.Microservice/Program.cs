@@ -346,7 +346,7 @@ app.UseAuthorization();
 
 // 7. MAP TARGET REST API ENDPOINT CONTROLLERS
 app.MapControllers();
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "property" }));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "property" })).AllowAnonymous();
 
 // 8. START THE MICROSERVICE WORKSPACE ENGINE LISTENER
 app.Run();

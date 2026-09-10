@@ -125,14 +125,52 @@ export const authService = {
    },
 
   // --- 📝 TRIAL ACCOUNT: Set password from activation token ---
-  setTrialPassword: async (token, password) => {
-    try {
-      const response = await apiClient.post('/auth/trial/set-password', { token, password });
-      return response.data;
-    } catch (error) {
-      throw new Error(toMessage(error.response?.data?.message, 'Failed to set trial password.'));
-    }
-  },
+   setTrialPassword: async (token, password) => {
+     try {
+       const response = await apiClient.post('/auth/trial/set-password', { token, password });
+       return response.data;
+     } catch (error) {
+       throw new Error(toMessage(error.response?.data?.message, 'Failed to set trial password.'));
+     }
+   },
+
+    // --- 👤 SELF-ADMIN: profile, out-of-office, picture upload ---
+    getProfile: async () => {
+      try {
+        const response = await apiClient.get('/user/profile');
+        return response.data;
+      } catch (error) {
+        throw new Error(toMessage(error.response?.data?.message, 'Failed to load profile.'));
+      }
+    },
+    updateProfile: async (updates) => {
+      try {
+        const response = await apiClient.put('/user/profile', updates);
+        return response.data;
+      } catch (error) {
+        throw new Error(toMessage(error.response?.data?.message, 'Failed to update profile.'));
+      }
+    },
+    uploadProfilePicture: async (file) => {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await apiClient.post('/user/profile/picture', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+      } catch (error) {
+        throw new Error(toMessage(error.response?.data?.message, 'Failed to upload profile picture.'));
+      }
+    },
+    changePassword: async (currentPassword, newPassword) => {
+      try {
+        const response = await apiClient.post('/auth/change-password', { currentPassword, newPassword });
+        return response.data;
+      } catch (error) {
+        throw new Error(toMessage(error.response?.data?.message, 'Failed to change password.'));
+      }
+    },
 
     // --- 👤 LOCAL ACCOUNT STATUS CLEARING ---
     logout: () => {

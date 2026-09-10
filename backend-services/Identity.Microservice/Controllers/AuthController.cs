@@ -19,38 +19,24 @@ namespace Identity.Microservice.Controllers
         private readonly ITenantRepository _tenantRepository;
         private readonly ISystemRoleRepository _systemRoleRepository;
         private readonly IUserAccessClaimRepository _userAccessClaimRepository;
-        private readonly IRolePermissionRepository _rolePermissionRepository;
-        private readonly IPermissionRepository _permissionRepository;
         private readonly TokenService _tokenService;
         private readonly ILogger<AuthController> _logger;
         private readonly IEmailService _emailService;
         private readonly IConfiguration _configuration;
 
-        public AuthController(IdentityDbContext dbContext, TokenService tokenService, ILogger<AuthController> logger, IEmailService emailService, IConfiguration configuration, IUserRepository userRepository, ITenantRepository tenantRepository, ISystemRoleRepository systemRoleRepository, IUserAccessClaimRepository userAccessClaimRepository, IRolePermissionRepository rolePermissionRepository, IPermissionRepository permissionRepository)
+        public AuthController(IdentityDbContext dbContext, TokenService tokenService, ILogger<AuthController> logger, IEmailService emailService, IConfiguration configuration, IUserRepository userRepository, ITenantRepository tenantRepository, ISystemRoleRepository systemRoleRepository, IUserAccessClaimRepository userAccessClaimRepository)
         {
             _dbContext = dbContext;
             _userRepository = userRepository;
             _tenantRepository = tenantRepository;
             _systemRoleRepository = systemRoleRepository;
             _userAccessClaimRepository = userAccessClaimRepository;
-            _rolePermissionRepository = rolePermissionRepository;
-            _permissionRepository = permissionRepository;
             _tokenService = tokenService;
             _logger = logger;
             _emailService = emailService;
             _configuration = configuration;
         }
 
-        // --- 📥 TRANSFER DATA STRUCUTRE MODEL BINDINGS ---
-                                 
-         
-                                                             
-                                                                
-         
-
-                                          
-         
-                                                             
          
         // --- 🔐 ENDPOINT A: MULTI-TENANT SECURE AUTHENTICATION ---
         [HttpPost("login")]
@@ -223,12 +209,6 @@ namespace Identity.Microservice.Controllers
             return Ok(new { message = "If the account path matches an active profile, a recovery reset link has been dispatched." });
         }
 
-                                          
-         
-                                                                       
-                                                                   
-         
-
         // --- 🔐 ENDPOINT: SELF-SERVICE PASSWORD CHANGE (any authenticated user, own account only) ---
         [Authorize]
         [HttpPost("change-password")]
@@ -338,11 +318,6 @@ namespace Identity.Microservice.Controllers
             }));
         }
 
-                                          
-         
-                                                                  
-         
-
         // --- 🔧 ENDPOINT: Assign / change (add or remove) a role on a user account.
         // Role changes run through the same data-driven matrix as RegisterUser, so an
         // AgencyAdmin can only down-scope to agency-scoped roles within its own tenant.
@@ -410,6 +385,7 @@ namespace Identity.Microservice.Controllers
                 AgencyName = request.AgencyName,
                 ContactEmail = request.AdminEmail,
                 HeadquartersAddress = request.HeadquartersAddress,
+                BrokerageLicense = request.BrokerageLicense,
                 OperationalStatus = "TrialPending",
                 IsTrial = true,
                 TrialStartDate = trialStartDate,
@@ -431,6 +407,7 @@ namespace Identity.Microservice.Controllers
                 IsTrial = true,
                 TrialStartDate = trialStartDate,
                 TrialEndDate = trialEndDate,
+                LicenseNumber = request.BrokerageLicense,
                 ActivationToken = activationToken,
                 ActivationTokenExpiry = trialStartDate.AddHours(48),
                 CreatedAt = DateTime.UtcNow

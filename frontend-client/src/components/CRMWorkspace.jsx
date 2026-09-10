@@ -16,6 +16,9 @@ export default function CRMWorkspace() {
   const [legalEntitiesTotalCount, setLegalEntitiesTotalCount] = useState(0);
   const [contacts, setContacts] = useState([]);
   const [contactsTotalCount, setContactsTotalCount] = useState(0);
+  const [companiesPage, setCompaniesPage] = useState(1);
+  const [legalEntitiesPage, setLegalEntitiesPage] = useState(1);
+  const [contactsPage, setContactsPage] = useState(1);
 
   const [summaryReport, setSummaryReport] = useState({
     activeLeadsCount: 0, valuationsInProcessCount: 0, conveyancingAtDeedsCount: 0, finalizedClosedCount: 0, totalPipelineEstimatedValue: 0
@@ -45,7 +48,11 @@ export default function CRMWorkspace() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const loadActiveWorkspaceData = async () => {
+  const loadActiveWorkspaceData = async (resetPages = false) => {
+    const coPage = resetPages ? 1 : companiesPage;
+    const lePage = resetPages ? 1 : legalEntitiesPage;
+    const ctPage = resetPages ? 1 : contactsPage;
+
     setIsLoading(true);
     setErrorMessage('');
     try {
@@ -60,17 +67,17 @@ export default function CRMWorkspace() {
       // pickers and the contact form's company autocomplete always have a
       // source list to resolve the currently-linked record's display name.
       const [companiesRes, legalRes] = await Promise.all([
-        crmService.getCompanies(),
-        crmService.getLegalEntities()
+        crmService.getCompanies(coPage),
+        crmService.getLegalEntities(lePage)
       ]);
-      setCompanies((companiesRes || []).items || (companiesRes || []));
+      setCompanies((prev) => resetPages ? ((companiesRes || []).items || (companiesRes || [])) : [...prev, ...((companiesRes || []).items || (companiesRes || []))]);
       setCompaniesTotalCount((companiesRes || []).totalCount || 0);
-      setLegalEntities((legalRes || []).items || (legalRes || []));
+      setLegalEntities((prev) => resetPages ? ((legalRes || []).items || (legalRes || [])) : [...prev, ...((legalRes || []).items || (legalRes || []))]);
       setLegalEntitiesTotalCount((legalRes || []).totalCount || 0);
 
       if (activeTab === 'contacts') {
-        const res = await crmService.getContacts();
-        setContacts((res || []).items || (res || []));
+        const res = await crmService.getContacts(ctPage);
+        setContacts((prev) => resetPages ? ((res || []).items || (res || [])) : [...prev, ...((res || []).items || (res || []))]);
         setContactsTotalCount((res || []).totalCount || 0);
       }
     } catch (err) {
@@ -81,17 +88,21 @@ export default function CRMWorkspace() {
   };
 
   useEffect(() => {
-    loadActiveWorkspaceData();
+    loadActiveWorkspaceData(true);
   }, [activeTab]);
 
-  const PAGE_SIZE = 20;
   const [searchTerm, setSearchTerm] = useState('');
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const handleSetTab = (id) => {
     setActiveTab(id);
     setSearchTerm('');
-    setVisibleCount(PAGE_SIZE);
+    setCompaniesPage(1);
+    setLegalEntitiesPage(1);
+    setContactsPage(1);
+    setCompanies([]);
+    setLegalEntities([]);
+    setContacts([]);
+    loadActiveWorkspaceData(true);
   };
 
   const sentinelRef = useRef(null);
@@ -99,11 +110,30 @@ export default function CRMWorkspace() {
     const el = sentinelRef.current;
     if (!el) return;
     const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) setVisibleCount((c) => c + PAGE_SIZE);
+      if (!entries[0].isIntersecting) return;
+      const currentTotal =
+        activeTab === 'companies' ? companiesTotalCount :
+        activeTab === 'legalEntities' ? legalEntitiesTotalCount :
+        activeTab === 'contacts' ? contactsTotalCount : 0;
+      const currentPage =
+        activeTab === 'companies' ? companiesPage :
+        activeTab === 'legalEntities' ? legalEntitiesPage :
+        activeTab === 'contacts' ? contactsPage : 0;
+      const currentLen =
+        activeTab === 'companies' ? companies.length :
+        activeTab === 'legalEntities' ? legalEntities.length :
+        activeTab === 'contacts' ? contacts.length : 0;
+      if (currentLen < currentTotal && !isLoading) {
+        const nextPage = currentPage + 1;
+        if (activeTab === 'companies') setCompaniesPage(nextPage);
+        else if (activeTab === 'legalEntities') setLegalEntitiesPage(nextPage);
+        else if (activeTab === 'contacts') setContactsPage(nextPage);
+        loadActiveWorkspaceData();
+      }
     }, { threshold: 1 });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [sentinelRef]);
+  }, [sentinelRef, activeTab, isLoading]);
 
   const filterBySearch = (items, fieldFns) => {
     const term = searchTerm.trim().toLowerCase();
@@ -112,7 +142,6 @@ export default function CRMWorkspace() {
       fieldFns.some((fn) => String(fn(item) ?? '').toLowerCase().includes(term))
     );
   };
-  const firstVisible = (items, fieldFns) => filterBySearch(items, fieldFns).slice(0, visibleCount);
 
   const handleUpdateCompanySubmit = async (e) => {
     e.preventDefault();
@@ -430,7 +459,7 @@ export default function CRMWorkspace() {
             )}
           </div>
 
-          {activeTab === 'companies' && firstVisible(companies, [
+          {activeTab === 'companies' && filterBySearch(companies, [
             (c) => c.businessName, (c) => c.registrationNumber, (c) => c.vatNumber, (c) => c.industryVertical
           ]).map((comp) => (
             <div key={comp.companyId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center hover:border-slate-700 transition-colors">
@@ -445,7 +474,7 @@ export default function CRMWorkspace() {
             </div>
           ))}
 
-          {activeTab === 'legalEntities' && firstVisible(legalEntities, [
+          {activeTab === 'legalEntities' && filterBySearch(legalEntities, [
             (e) => e.registeredLegalName, (e) => e.entityTypeClassifier, (e) => e.taxRegistrationIndex, (e) => e.deedsOfficeIdentifier
           ]).map((ent) => (
             <div key={ent.legalEntityId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center hover:border-slate-700 transition-colors">
@@ -460,7 +489,7 @@ export default function CRMWorkspace() {
             </div>
           ))}
 
-          {activeTab === 'contacts' && firstVisible(contacts, [
+          {activeTab === 'contacts' && filterBySearch(contacts, [
             (c) => c.fullName, (c) => c.contactType, (c) => c.positionJobTitle,
             (c) => c.emailAddress, (c) => c.phoneNumber,
             (c) => c.primaryLocation, (c) => c.budgetLimit

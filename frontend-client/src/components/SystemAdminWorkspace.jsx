@@ -30,9 +30,10 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     name: '', tradingName: '', registrationNumber: '', companyLogoUrl: '',
     contactEmail: '', headquartersAddress: '',
     adminFullName: '', adminEmail: '', adminPassword: '',
-    parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: ''
+    parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: '',
+    brokerageLicense: ''
   });
-  const [userForm, setUserForm] = useState({ fullName: '', email: '', password: '', systemRole: 'Broker' });
+  const [userForm, setUserForm] = useState({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '' });
   const [editingUser, setEditingUser] = useState(null);
   const [contactForm, setContactForm] = useState({ fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '', contactType: 'Staff', isAgencyAdmin: false });
   const [error, setError] = useState('');
@@ -157,19 +158,20 @@ export default function SystemAdminWorkspace({ defaultTab }) {
         // same tenant, so the new agency has an accountable administrator login.
         if (agencyForm.adminEmail) {
           try {
-            await authService.registerUser({
+             await authService.registerUser({
               fullName: agencyForm.adminFullName || agencyForm.contactEmail,
               email: agencyForm.adminEmail,
               systemRole: 'AgencyAdmin',
               tenantId: created?.tenantId || created?.TenantId,
-              passwordHash: agencyForm.adminPassword || 'ChangeMeNow!'
+              passwordHash: agencyForm.adminPassword || 'ChangeMeNow!',
+              licenseNumber: agencyForm.brokerageLicense || ''
             });
           } catch {
             alert(`Agency created, but the linked admin user could not be provisioned: registration failed`);
           }
         }
       }
-      setAgencyForm({ name: '', tradingName: '', registrationNumber: '', companyLogoUrl: '', contactEmail: '', headquartersAddress: '', adminFullName: '', adminEmail: '', adminPassword: '', parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: '' });
+      setAgencyForm({ name: '', tradingName: '', registrationNumber: '', companyLogoUrl: '', contactEmail: '', headquartersAddress: '', adminFullName: '', adminEmail: '', adminPassword: '', parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: '', brokerageLicense: '' });
       setEditingAgency(null);
       await loadAgencies();
     } catch (err) { alert(err || 'Agency creation failed.'); }
@@ -196,7 +198,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
       parentAgencyId: agency.parentAgencyId || '',
       isTrial: !!agency.isTrial,
       trialStartDate: agency.trialStartDate || '',
-      trialEndDate: agency.trialEndDate || ''
+      trialEndDate: agency.trialEndDate || '',
+      brokerageLicense: agency.brokerageLicense || ''
     });
   };
 
@@ -457,6 +460,9 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   <input value={agencyForm.tradingName} onChange={(e) => setAgencyForm({ ...agencyForm, tradingName: e.target.value })} placeholder="Trading name" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
                   <input value={agencyForm.registrationNumber} onChange={(e) => setAgencyForm({ ...agencyForm, registrationNumber: e.target.value })} placeholder="Registration number" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
 
+                  {/* 🪪 Brokerage License — required for agency operation */}
+                  <input value={agencyForm.brokerageLicense} onChange={(e) => setAgencyForm({ ...agencyForm, brokerageLicense: e.target.value })} placeholder="Brokerage license #" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
+
                   {/* 🖼️ LOGO: either paste a URL or upload a file (stored as a data-URI on the agency record) */}
                   <div className="flex items-center gap-1">
                     <label className="text-[10px] text-slate-400">Logo</label>
@@ -619,14 +625,15 @@ export default function SystemAdminWorkspace({ defaultTab }) {
               if (editingUser && editingUser.userId) {
                 await authService.updateUserRole(editingUser.userId, userForm.systemRole);
               } else {
-                await authService.registerUser({
+                 await authService.registerUser({
                   fullName: userForm.fullName,
                   email: userForm.email,
                   systemRole: userForm.systemRole,
-                  passwordHash: userForm.password || 'ChangeMeNow!'
+                  passwordHash: userForm.password || 'ChangeMeNow!',
+                  licenseNumber: userForm.licenseNumber || ''
                 });
-              }
-              setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker' });
+               }
+               setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '' });
               setEditingUser(null);
               await loadUsers();
             } catch (err) { alert(err || 'User save failed.'); }
@@ -637,14 +644,18 @@ export default function SystemAdminWorkspace({ defaultTab }) {
               <input value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} type="email" placeholder="Email" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
               <input value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} type="text" placeholder={editingUser ? 'Leave blank to keep' : 'Password'} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
             </div>
-            <select value={userForm.systemRole} onChange={(e) => setUserForm({ ...userForm, systemRole: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
-              {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
+                <select value={userForm.systemRole} onChange={(e) => setUserForm({ ...userForm, systemRole: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+                  {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+                {/* 🪪 License number — required for brokers, optional for AgencyAdmin (brokerage license) */}
+                {(userForm.systemRole === 'Broker' || userForm.systemRole === 'AgencyAdmin') && (
+                  <input value={userForm.licenseNumber} onChange={(e) => setUserForm({ ...userForm, licenseNumber: e.target.value })} placeholder={userForm.systemRole === 'Broker' ? 'Broker License #' : 'Brokerage License #'} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
+                )}
             <div className="flex gap-2">
               <Can permission={editingUser ? 'users:edit' : 'users:create'}>
                 <button type="submit" className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold">{editingUser ? 'Save user' : 'Create user'}</button>
               </Can>
-              {editingUser && <button type="button" onClick={() => { setEditingUser(null); setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker' }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
+              {editingUser && <button type="button" onClick={() => { setEditingUser(null); setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '' }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
             </div>
           </form>
           )}

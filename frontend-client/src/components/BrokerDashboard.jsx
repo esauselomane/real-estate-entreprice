@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, Legend, PieChart, Pie, Cell
+  AreaChart, Area, Legend, PieChart, Pie, Cell
 } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { authService } from '../services/authService.js';
@@ -264,15 +264,15 @@ export default function BrokerDashboard() {
               <EmptyState label="No revenue data yet." />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={trendData}>
+                <AreaChart data={trendData}>
                   <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
                   <XAxis dataKey="period" stroke="#94a3b8" fontSize={11} />
                   <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(v) => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : v} />
                   <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8 }} formatter={(v) => fmtCurrency(v)} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Line type="monotone" dataKey="GCI" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
-                  <Line type="monotone" dataKey="CompanyRand" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3 }} />
-                </LineChart>
+                  <Area type="monotone" dataKey="GCI" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} fill="#10b981" fillOpacity={0.15} />
+                  <Area type="monotone" dataKey="CompanyRand" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3 }} fill="#6366f1" fillOpacity={0.15} />
+                </AreaChart>
               </ResponsiveContainer>
             )}
           </div>
@@ -326,10 +326,10 @@ export default function BrokerDashboard() {
                 <tbody>
                   {sortableRows.map((row) => (
                     <tr key={row.brokerId} className={`border-b border-slate-800/50 ${pickedBroker?.brokerId === row.brokerId ? 'bg-blue-950/30' : 'hover:bg-slate-800/30'}`}>
-                      <td className="py-2.5 text-white font-medium">{row.name}</td>
-                      <td className="py-2.5 text-right text-slate-300">{fmtNumber(row.activeListings)}</td>
-                      <td className="py-2.5 text-right text-slate-300">{fmtNumber(row.dealsClosed)}</td>
-                      <td className="py-2.5 text-right font-semibold text-emerald-400">{fmtCurrency(row.totalGci)}</td>
+                      <td className="py-2.5 px-3 text-white font-medium">{row.name}</td>
+                      <td className="py-2.5 px-3 text-right text-slate-300">{fmtNumber(row.activeListings)}</td>
+                      <td className="py-2.5 px-3 text-right text-slate-300">{fmtNumber(row.dealsClosed)}</td>
+                      <td className="py-2.5 px-3 text-right font-semibold text-emerald-400">{fmtCurrency(row.totalGci)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -403,7 +403,7 @@ export default function BrokerDashboard() {
 
 function SortHeader({ label, field, active, dir, onRequest, right = false }) {
   return (
-    <th className={`py-2 font-semibold cursor-pointer select-none ${right ? 'text-right' : 'text-left'}`} onClick={() => onRequest(field)}>
+    <th className={`py-2 px-3 font-semibold cursor-pointer select-none ${right ? 'text-right' : 'text-left'}`} onClick={() => onRequest(field)}>
       <button type="button" className={`inline-flex items-center gap-1 font-semibold ${active ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}>
         {label}
         {active && (dir ? <ArrowUp size={10} /> : <ArrowDown size={10} />)}

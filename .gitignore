@@ -28,3 +28,14 @@ out/
 agents.md
 developer-api*
 google*
+
+# Block user-specific connection strings and local configurations
+appsettings.Development.json
+appsettings.local.json
+
+# Block local SQL Server Express / SQLite files generated during debugging
+*.db
+*.db-shm
+*.db-wal
+*.mdf
+*.ldf

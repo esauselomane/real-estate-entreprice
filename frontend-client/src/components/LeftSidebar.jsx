@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Home, Search, Users, Briefcase, BarChart3, ChevronLeft, ChevronRight, LogOut, Shield, Map, UserPlus, Settings, Activity } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { useAgency } from '../contexts/AgencyContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
+import UserSelfAdminPopout from './UserSelfAdminPopout.jsx';
 
 export default function LeftSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [popoutOpen, setPopoutOpen] = useState(false);
+  const profilePicRef = useRef(null);
   const { userRole, activeProfile, logout } = useAuth();
   const { currentView, navigateTo } = useAppUi();
   const { currentAgency } = useAgency();
@@ -84,9 +87,13 @@ export default function LeftSidebar() {
         </nav>
       </div>
 
-      {/* 👤 Account Profile Session Footer Section */}
+          {/* 👤 Account Profile Session Footer Section */}
       <div className="p-3 border-t border-slate-800 bg-slate-950/40">
-        <div className="flex items-center gap-3 p-1 overflow-hidden">
+        <div
+          ref={profilePicRef}
+          className="flex items-center gap-3 p-1 overflow-hidden cursor-pointer"
+          onClick={() => setPopoutOpen(true)}
+        >
           {/* Professional Round Profile Image Layout Container */}
           <div className="w-10 h-10 rounded-full border-2 border-slate-700 bg-blue-600 flex items-center justify-center text-sm font-bold text-white min-w-10">
             {(activeProfile?.name || 'U').split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()}
@@ -105,6 +112,12 @@ export default function LeftSidebar() {
           {!isCollapsed && <span>Sign Out</span>}
         </button>
       </div>
+
+      <UserSelfAdminPopout
+        isOpen={popoutOpen}
+        onClose={() => setPopoutOpen(false)}
+        anchorRect={profilePicRef.current?.getBoundingClientRect() || null}
+      />
     </div>
   );
 }

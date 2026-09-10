@@ -80,6 +80,29 @@ using (var serviceScope = app.Services.CreateScope())
     var databaseContext = serviceScope.ServiceProvider.GetRequiredService<CRMDbContext>();
     databaseContext.Database.EnsureCreated();
 
+    // 🎯 Fix: If the __EFMigrationsHistory table exists from EnsureCreated() but lacks
+    // the ProductVersion column (pre-EF-Core-10 schema), or if it doesn't exist at all,
+    // seed the migration history so Migrate() doesn't try to re-create tables.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NULL
+        BEGIN
+            CREATE TABLE [__EFMigrationsHistory] (
+                [MigrationId] nvarchar(150) NOT NULL,
+                [ProductVersion] nvarchar(32) NOT NULL,
+                CONSTRAINT [PK___EFMigrationsHistory] PRIMARY KEY ([MigrationId])
+            );
+        END
+        ELSE IF COL_LENGTH(N'[__EFMigrationsHistory]', N'ProductVersion') IS NULL
+        BEGIN
+            ALTER TABLE [__EFMigrationsHistory] ADD [ProductVersion] nvarchar(32) NOT NULL CONSTRAINT DF_EFH_History_ProductVersion DEFAULT N'';
+        END
+        IF NOT EXISTS (SELECT 1 FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260909224814_InitialCreate')
+            INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+            VALUES (N'20260909224814_InitialCreate', N'10.0.0');
+    ");
+    // 🎯 Apply any future migrations added via `dotnet ef migrations add`
+    databaseContext.Database.Migrate();
+
     // 🛠️ EnsureCreated() is a no-op once the database has any table, so tables that are
     // ever DROPPED (or created first on a fresh DB) must be recreated here — mirroring the
     // [OperationalRecords]/[GeographyRecords]/[ContactPersons] scripts below. CRMContacts
@@ -282,6 +305,9 @@ using (var serviceScope = app.Services.CreateScope())
             ALTER TABLE [AgencyRecords] ADD [RegistrationNumber] nvarchar(128) NOT NULL CONSTRAINT DF_Agency_RegNo DEFAULT N'';
         IF COL_LENGTH(N'[AgencyRecords]', 'CompanyLogoUrl') IS NULL
             ALTER TABLE [AgencyRecords] ADD [CompanyLogoUrl] nvarchar(512) NOT NULL CONSTRAINT DF_Agency_Logo DEFAULT N'';
+        -- 🏢 Agency brokerage license column
+        IF COL_LENGTH(N'[AgencyRecords]', 'BrokerageLicense') IS NULL
+            ALTER TABLE [AgencyRecords] ADD [BrokerageLicense] nvarchar(256) NOT NULL CONSTRAINT DF_Agency_BrokerageLicense DEFAULT N'';
     ");
 
     // Batch 2: filtered index referencing [PropertyId]. Issued in its OWN batch so it

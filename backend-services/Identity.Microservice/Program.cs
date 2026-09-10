@@ -11,23 +11,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 var builder = WebApplication.CreateBuilder(args);
-var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowViteFrontend", policy =>
-    {
-        policy.WithOrigins(allowedOrigins)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
-    });
-});
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<IdentityDbContext>(options =>
 {
     options.UseSqlServer(connectionString);
+    // Suppress pending model changes warning — we use EnsureCreated + raw SQL
+    // for schema evolution, not EF migrations. Properties added to the model
+    // are handled via raw SQL ALTER TABLE statements at startup.
+    options.ConfigureWarnings(warnings => warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
 });
 
 builder.Services.AddScoped<ITenantRepository, TenantRepository>();
@@ -73,6 +66,42 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
     var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
     db.Database.EnsureCreated();
+    // 🎯 Fix: If the __EFMigrationsHistory table exists from EnsureCreated() but lacks
+    // the ProductVersion column (pre-EF-Core-10 schema), or if it doesn't exist at all,
+    // seed the migration history so Migrate() doesn't try to re-create tables.
+    db.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NULL
+        BEGIN
+            CREATE TABLE [__EFMigrationsHistory] (
+                [MigrationId] nvarchar(150) NOT NULL,
+                [ProductVersion] nvarchar(32) NOT NULL,
+                CONSTRAINT [PK___EFMigrationsHistory] PRIMARY KEY ([MigrationId])
+            );
+        END
+        ELSE IF COL_LENGTH(N'[__EFMigrationsHistory]', N'ProductVersion') IS NULL
+        BEGIN
+            ALTER TABLE [__EFMigrationsHistory] ADD [ProductVersion] nvarchar(32) NOT NULL CONSTRAINT DF_EFH_History_ProductVersion DEFAULT N'';
+        END
+        IF NOT EXISTS (SELECT 1 FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260909224756_InitialCreate')
+            INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+            VALUES (N'20260909224756_InitialCreate', N'10.0.0');
+    ");
+    // 🎯 Apply any future migrations added via `dotnet ef migrations add`
+    db.Database.Migrate();
+    // 🪪 Add LicenseNumber + LicenseExpiry columns for broker licensing
+    // and BrokerageLicense column for agency-level brokerage license
+    db.Database.ExecuteSqlRaw(@"
+        IF COL_LENGTH(N'[UserAccounts]', N'LicenseNumber') IS NULL
+            ALTER TABLE [UserAccounts] ADD [LicenseNumber] nvarchar(100) NOT NULL CONSTRAINT DF_User_LicenseNumber DEFAULT N'';
+        IF COL_LENGTH(N'[UserAccounts]', N'LicenseExpiry') IS NULL
+            ALTER TABLE [UserAccounts] ADD [LicenseExpiry] datetime2 NULL;
+        -- 🏢 Agency-level brokerage license column
+        IF COL_LENGTH(N'[TenantAgencies]', N'BrokerageLicense') IS NULL
+            ALTER TABLE [TenantAgencies] ADD [BrokerageLicense] nvarchar(256) NOT NULL CONSTRAINT DF_TenantAgencies_BrokerageLicense DEFAULT N'';
+        -- 🚫 Out-of-office flag for brokers (self-toggled via profile pop-out)
+        IF COL_LENGTH(N'[UserAccounts]', N'OutOfOffice') IS NULL
+            ALTER TABLE [UserAccounts] ADD [OutOfOffice] bit NOT NULL CONSTRAINT DF_User_OutOfOffice DEFAULT 0;
+    ");
     var tenantRepository = scope.ServiceProvider.GetRequiredService<ITenantRepository>();
     var userRepository = scope.ServiceProvider.GetRequiredService<IUserRepository>();
     var userAccessClaimRepository = scope.ServiceProvider.GetRequiredService<IUserAccessClaimRepository>();
@@ -83,7 +112,7 @@ using (var scope = app.Services.CreateScope())
 
     IdentitySeedData.EnsureSeeded(db, config, tenantRepository, userRepository, userAccessClaimRepository, permissionRepository, systemRoleRepository, rolePermissionRepository, pricingPackageRepository);
 }
-app.UseCors("AllowViteFrontend");
+app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
