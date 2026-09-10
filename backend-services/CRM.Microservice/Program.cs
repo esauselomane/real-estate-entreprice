@@ -67,9 +67,13 @@ builder.Services.AddScoped<IRepository<BrochureCardLine>, BrochureCardLineReposi
 builder.Services.AddScoped<IDealBrokerSplitRepository, DealBrokerSplitRepository>();
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
 builder.Services.AddScoped<IRepository<BrokerMonthlyTarget>, BrokerMonthlyTargetRepository>();
+builder.Services.AddScoped<IBrokerPerformanceMetricsRepository, BrokerPerformanceMetricsRepository>();
+builder.Services.AddScoped<IBrokerScoreService, BrokerScoreService>();
 builder.Services.AddScoped<IContactPersonRepository, ContactPersonRepository>();
 builder.Services.AddScoped<IUserGrowthRepository, UserGrowthRepository>();
 builder.Services.AddScoped<IPropertyCountService, PropertyCountService>();
+
+builder.Services.AddHostedService<BrokerMetricsBackgroundJob>();
 
 // 🔄 Kafka consumers for cross-service events
 builder.Services.AddHostedService<CRM.Microservice.Consumers.NotificationConsumer>();
@@ -436,10 +440,55 @@ using (var serviceScope = app.Services.CreateScope())
                 [IsRead]          bit            NOT NULL CONSTRAINT DF_Notif_IsRead DEFAULT 0,
                 [CreatedAt]       datetime2      NOT NULL CONSTRAINT DF_Notif_CreatedAt DEFAULT SYSUTCDATETIME()
             );
-            CREATE INDEX [IX_Notifications_UserId_IsRead_CreatedAt] ON [Notifications] ([UserId], [IsRead], [CreatedAt] DESC);
+    CREATE INDEX [IX_Notifications_UserId_IsRead_CreatedAt] ON [Notifications] ([UserId], [IsRead], [CreatedAt] DESC);
             CREATE INDEX [IX_Notifications_TenantId_CreatedAt] ON [Notifications] ([TenantId], [CreatedAt] DESC);
+         END
+     ");
+
+     databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[BrokerPerformanceMetrics]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [BrokerPerformanceMetrics] (
+                [Id]                            int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [TenantId]                      nvarchar(50)      NOT NULL,
+                [BrokerId]                      nvarchar(256)     NOT NULL,
+                [MetricDate]                    datetime2         NOT NULL,
+                [LeadToDealConversionRate]      decimal(7,2)      NOT NULL CONSTRAINT DF_BPM_ConvRate DEFAULT 0,
+                [AvgDaysToClose]                decimal(7,1)      NOT NULL CONSTRAINT DF_BPM_Days DEFAULT 0,
+                [AvgDealValue]                  decimal(18,2)     NOT NULL CONSTRAINT DF_BPM_DealValue DEFAULT 0,
+                [AvgCommissionGenerated]        decimal(18,2)     NOT NULL CONSTRAINT DF_BPM_Comm DEFAULT 0,
+                [StageVelocityScore]            decimal(7,2)      NOT NULL CONSTRAINT DF_BPM_Velocity DEFAULT 0,
+                [GeoSpecializationScore]        decimal(7,2)      NOT NULL CONSTRAINT DF_BPM_Geo DEFAULT 0,
+                [PropertyTypeConversionScore]   nvarchar(max)     NOT NULL CONSTRAINT DF_BPM_PropType DEFAULT N'{{}}',
+                [PriceBandScore]                nvarchar(max)     NOT NULL CONSTRAINT DF_BPM_PriceBand DEFAULT N'{{}}',
+                [CrmHygieneScore]               decimal(7,2)      NOT NULL CONSTRAINT DF_BPM_Hygiene DEFAULT 0,
+                [OverallScore]                  decimal(7,2)      NOT NULL CONSTRAINT DF_BPM_Overall DEFAULT 0,
+                [TotalLeadsAssigned]            int               NOT NULL CONSTRAINT DF_BPM_Leads DEFAULT 0,
+                [TotalDealsWon]                 int               NOT NULL CONSTRAINT DF_BPM_DealsWon DEFAULT 0,
+                [ComputedAt]                    datetime2         NOT NULL CONSTRAINT DF_BPM_ComputedAt DEFAULT GETUTCDATE()
+            );
+            CREATE INDEX [IX_BrokerPerfMetrics_Tenant_Date] ON [BrokerPerformanceMetrics] ([TenantId], [MetricDate]);
+            CREATE INDEX [IX_BrokerPerfMetrics_Broker] ON [BrokerPerformanceMetrics] ([TenantId], [BrokerId], [MetricDate] DESC);
+         END
+     ");
+
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[BrokerMonthlyTargets]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [BrokerMonthlyTargets] (
+                [Id]                int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [TenantId]          nvarchar(50)      NOT NULL,
+                [BrokerId]          nvarchar(256)     NOT NULL,
+                [Year]              int               NOT NULL,
+                [Month]             int               NOT NULL,
+                [TargetCommission]  decimal(18,2)     NOT NULL CONSTRAINT DF_BMT_Target DEFAULT 0,
+                [CreatedAt]         datetime2         NOT NULL CONSTRAINT DF_BMT_CreatedAt DEFAULT GETUTCDATE(),
+                [UpdatedAt]         datetime2         NOT NULL CONSTRAINT DF_BMT_UpdatedAt DEFAULT GETUTCDATE()
+            );
+            CREATE INDEX [IX_BrokerMonthlyTargets_Tenant_Broker] ON [BrokerMonthlyTargets] ([TenantId], [BrokerId]);
+            CREATE INDEX [IX_BrokerMonthlyTargets_YearMonth] ON [BrokerMonthlyTargets] ([TenantId], [BrokerId], [Year], [Month]);
         END
-    ");
+     ");
 
     var agencyRepository = serviceScope.ServiceProvider.GetRequiredService<IAgencyRepository>();
             var brokerRepository = serviceScope.ServiceProvider.GetRequiredService<IBrokerRepository>();

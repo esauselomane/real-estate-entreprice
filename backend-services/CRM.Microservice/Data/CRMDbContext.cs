@@ -13,7 +13,7 @@ namespace CRM.Microservice.Data
             if (string.IsNullOrWhiteSpace(value))
                 return ContactType.None;
 
-            var parts = value                .Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var parts = value.Split(',', StringSplitOptions.RemoveEmptyEntries);
             ContactType result = ContactType.None;
             foreach (var part in parts)
             {
@@ -25,6 +25,14 @@ namespace CRM.Microservice.Data
 
         public CRMDbContext(DbContextOptions<CRMDbContext> options) : base(options)
         {
+        }
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            // Tables are managed via raw SQL in Program.cs (EnsureCreated + idempotent ALTERs),
+            // so suppress the pending-model-changes warning that Migrate() raises for entities
+            // whose schema is created outside of EF migrations.
+            optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
         }
 
         public DbSet<CRMCompany> CRMCompanies { get; set; }
@@ -44,6 +52,7 @@ namespace CRM.Microservice.Data
         public DbSet<DealBrokerSplit> DealBrokerSplits { get; set; } = null!;
         public DbSet<Notification> Notifications { get; set; } = null!;
         public DbSet<BrokerMonthlyTarget> BrokerMonthlyTargets { get; set; } = null!;
+    public DbSet<BrokerPerformanceMetrics> BrokerPerformanceMetrics { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

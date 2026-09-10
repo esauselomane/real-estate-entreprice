@@ -38,13 +38,45 @@ public class LeadsController : CRMControllerBase
         IRepository<BrochureCardLine> brochureCardLineRepository,
         IDealBrokerSplitRepository dealBrokerSplitRepository,
         INotificationRepository notificationRepository,
-        IRepository<BrokerMonthlyTarget> brokerTargetRepository)
+        IRepository<BrokerMonthlyTarget> brokerTargetRepository,
+        IBrokerScoreService brokerScoreService)
         : base(dbContext, http, configuration, logger, permissionCheck,
                agencyRepository, brokerRepository, leadRepository, dealRepository,
                companyRepository, legalEntityRepository, contactRepository,
                geographyRepository, operationalRepository, brochureCardRepository,
                brochureCardLineRepository, dealBrokerSplitRepository, notificationRepository, brokerTargetRepository)
     {
+        BrokerScoreService = brokerScoreService;
+    }
+
+    private IBrokerScoreService BrokerScoreService { get; }
+
+    [HttpGet("brokers/suggested")]
+    public async Task<IActionResult> GetSuggestedBrokers(
+        [FromQuery] string? area,
+        [FromQuery] decimal? budgetMin,
+        [FromQuery] decimal? budgetMax,
+        [FromQuery] string? propertyType,
+        [FromQuery] int limit = 3)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("leads:view"))
+        {
+            Logger.LogWarning("GetSuggestedBrokers: forbidden — caller lacks leads:view permission");
+            return Forbid();
+        }
+
+        var tenantId = GetCurrentTenant();
+        var currentUserId = GetCurrentUserId();
+
+        var suggested = await BrokerScoreService.GetSuggestedBrokersAsync(
+            tenantId, budgetMin, budgetMax, propertyType, area, currentUserId);
+
+        var response = new SuggestedBrokersResponse
+        {
+            Brokers = suggested.Take(limit).ToList()
+        };
+
+        return Ok(response);
     }
 
         [HttpPost("lead/create")]
@@ -110,9 +142,19 @@ public class LeadsController : CRMControllerBase
 
             if (GetCurrentCanonicalRole() == "Broker")
             {
+                // 🔐 Self-assignment prevention: a broker can only edit leads they
+                // originally created/own. They cannot assign themselves to a lead
+                // created by another broker or user — unless they are PlatformAdmin.
                 var brokerId = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
                 if (!string.IsNullOrWhiteSpace(brokerId))
+                {
+                    // Check if the broker is already assigned to this lead
+                    if (!CallerIsAssignedTo(lead.AllocatedBrokerIds, brokerId))
+                    {
+                        return Forbid();
+                    }
                     updatedLead.AllocatedBrokerIds = brokerId;
+                }
             }
 
             lead.ClientName = updatedLead.ClientName;

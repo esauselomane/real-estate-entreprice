@@ -1090,10 +1090,29 @@ namespace CRM.Microservice.Controllers
                 .OrderBy(x => x.Year).ThenBy(x => x.Month)
                 .ToListAsync();
 
+            // Closed-deal commission trend: realised commission is the inferred
+            // commission from deals that reached ClosedWon, grouped by the month
+            // in which the deal was actually closed (LastStageUpdatedAt).
+            var closedDealTrend = await deals
+                .Where(d => d.DealStage == DealWorkflowStage.ClosedWon
+                    && d.LastStageUpdatedAt >= new DateTime(startDate.Year, startDate.Month, 1))
+                .GroupBy(d => new { d.LastStageUpdatedAt.Year, d.LastStageUpdatedAt.Month })
+                .Select(g => new
+                {
+                    Year = g.Key.Year,
+                    Month = g.Key.Month,
+                    Commission = g.Sum(d => d.RealisedCommission ?? (d.CommissionType == CommissionTypes.Percent
+                        ? d.TransactionValue * d.CommissionValue / 100m
+                        : d.CommissionValue))
+                })
+                .OrderBy(x => x.Year).ThenBy(x => x.Month)
+                .ToListAsync();
+
             // If a specific month was requested, filter the trend to just that month.
             if (targetMonth.HasValue)
             {
                 trend = trend.Where(t => t.Year == targetMonth.Value.Year && t.Month == targetMonth.Value.Month).ToList();
+                closedDealTrend = closedDealTrend.Where(t => t.Year == targetMonth.Value.Year && t.Month == targetMonth.Value.Month).ToList();
             }
             var monthlyTrend = trend.Select(t => new
             {
@@ -1142,8 +1161,8 @@ namespace CRM.Microservice.Controllers
                 .ToListAsync();
 
             var targetProgress = targets.Select(t => {
-                var monthTrend = trend.FirstOrDefault(mt => mt.Year == t.Year && mt.Month == t.Month);
-                var realised = monthTrend?.Gci ?? 0m;
+                var closedMonth = closedDealTrend.FirstOrDefault(mt => mt.Year == t.Year && mt.Month == t.Month);
+                var realised = closedMonth?.Commission ?? 0m;
                 return new
                 {
                     year = t.Year,

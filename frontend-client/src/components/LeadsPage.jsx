@@ -51,6 +51,9 @@ export default function LeadsPage() {
   const [editSelectedContact, setEditSelectedContact] = useState(null);
   const [showEditContactDropdown, setShowEditContactDropdown] = useState(false);
   const [editSelectedBrokers, setEditSelectedBrokers] = useState([]);
+  const [suggestedBrokers, setSuggestedBrokers] = useState([]);
+  const [leadForm, setLeadForm] = useState({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', leadType: 'ForSale', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedBrokerIds: [] });
+  const [selectedBrokers, setSelectedBrokers] = useState([]);
   const [errorMessage, setErrorMessage] = useState('');
 
   const toErrorString = (err, fallback) => {
@@ -83,6 +86,33 @@ export default function LeadsPage() {
   };
 
   useEffect(() => { loadData(1); }, [activeTenantId]);
+
+  const fetchSuggestedBrokers = async () => {
+    if (!isLeadFormOpen) return;
+    try {
+      const budget = parseFloat(leadForm.estimatedBudget) || 0;
+      const suggestions = await crmService.getSuggestedBrokers({
+        area: leadForm.preferredArea || undefined,
+        budgetMin: budget > 0 ? budget : undefined,
+        propertyType: leadForm.propertyInterestClass || undefined
+      });
+      setSuggestedBrokers(suggestions || []);
+    } catch {
+      setSuggestedBrokers([]);
+    }
+  };
+
+  const handleOpenLeadForm = () => {
+    clearContact();
+    setLeadForm({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedBrokerIds: [] });
+    setSelectedBrokers([]);
+  };
+
+  useEffect(() => {
+    if (!isLeadFormOpen) return;
+    const timer = setTimeout(() => { fetchSuggestedBrokers(); }, 500);
+    return () => clearTimeout(timer);
+  }, [isLeadFormOpen, leadForm.preferredArea, leadForm.estimatedBudget, leadForm.propertyInterestClass]);
 
   const handleLeadPageChange = (newPage) => {
     if (newPage < 1) return;
@@ -244,10 +274,7 @@ export default function LeadsPage() {
     } catch (err) {
       alert(toErrorString(err, 'Failed to update lead.'));
     }
-  };
-
-  const [leadForm, setLeadForm] = useState({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', leadType: 'ForSale', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedBrokerIds: [] });
-  const [selectedBrokers, setSelectedBrokers] = useState([]);
+   };
 
   const filteredLeads = leads.filter((l) => {
     if (!searchTerm.trim()) return true;
@@ -266,7 +293,7 @@ export default function LeadsPage() {
           <p className="text-xs text-slate-400 mt-1">Tenant-scoped leads • {leadTotalCount} total</p>
         </div>
         <Can permission="leads:create">
-          <button type="button" onClick={() => { setIsLeadFormOpen(!isLeadFormOpen); if (!isLeadFormOpen) { clearContact(); setLeadForm({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedBrokerIds: [] }); setSelectedBrokers([]); } }} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all">
+          <button type="button" onClick={() => { const opening = !isLeadFormOpen; setIsLeadFormOpen(!isLeadFormOpen); if (opening) { handleOpenLeadForm(); fetchSuggestedBrokers(); } }} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all">
             <UserPlus size={14} /> New Lead
           </button>
         </Can>
@@ -352,6 +379,51 @@ export default function LeadsPage() {
             <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">{leadForm.commissionType === 'Percent' ? '% Commission' : 'Amount (R)'}</label><input required type="number" value={leadForm.commissionValue} onChange={(e) => setLeadForm({ ...leadForm, commissionValue: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
             <div className="space-y-1 lg:col-span-3">
               <label className="text-[10px] text-slate-400 uppercase">Allocated Brokers</label>
+              {suggestedBrokers.length > 0 && (
+                <div className="mb-3">
+                  <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-2 block">Suggested Brokers (Top Matches)</label>
+                  <div className="space-y-1">
+                    {suggestedBrokers.map((sb) => {
+                      const bgClass = sb.matchScore >= 85 ? 'bg-gradient-to-r from-green-950/40 to-emerald-950/40 border-green-800'
+                        : sb.matchScore >= 60 ? 'bg-slate-900/60 border-slate-700'
+                        : 'bg-slate-900/40 border-slate-800';
+                      const labelClass = sb.matchScore >= 85 ? 'text-green-400'
+                        : sb.matchScore >= 60 ? 'text-amber-400'
+                        : 'text-slate-400';
+                      const label = sb.matchScore >= 85 ? 'Top Match — Most likely to close'
+                        : sb.matchScore >= 60 ? 'Good Match'
+                        : 'Fair Match';
+                      return (
+                        <button
+                          key={sb.brokerId}
+                          type="button"
+                          onClick={() => {
+                            const brokerObj = brokers.find((b) => b.brokerId === sb.brokerId) || { brokerId: sb.brokerId, fullName: sb.brokerName, email: '' };
+                            if (!selectedBrokers.find((b) => b.brokerId === sb.brokerId)) {
+                              setSelectedBrokers([...selectedBrokers, brokerObj]);
+                            }
+                          }}
+                          className={`w-full text-left p-2.5 border rounded-xl transition-all ${bgClass} hover:border-blue-700/50`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="font-semibold text-xs text-white">{sb.brokerName}</div>
+                              <div className={`text-[10px] ${labelClass}`}>{label} — Score: {sb.matchScore.toFixed(1)}</div>
+                              <div className="text-[10px] text-slate-500 mt-0.5">
+                                Conv: {sb.conversionRate.toFixed(0)}% • Avg days: {sb.avgDaysToClose.toFixed(0)} • Avg deal: R {Number(sb.avgDealValue || 0).toLocaleString()}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-xs font-bold text-blue-400">{sb.matchScore.toFixed(1)}</div>
+                              <div className="text-[10px] text-slate-500">match score</div>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <BrokerPicker
                 multi
                 value={selectedBrokers}

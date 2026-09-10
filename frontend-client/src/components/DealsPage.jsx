@@ -496,13 +496,21 @@ export default function DealsPage() {
                     <div className="flex gap-2 pt-1">
                       <Can permission="billing:edit">
                         <button type="button" onClick={async () => {
-                          const evenPct = 100 / (brokers.length || 1);
+                          const selected = editSelectedBrokers || [];
+                          if (selected.length === 0) {
+                            alert('Select brokers to split with first.');
+                            return;
+                          }
+                          const evenPct = 100 / selected.length;
                           const commissionVal = parseFloat(editForm.commissionValue) || 0;
-                          const newSplits = brokers.map(b => ({
+                          const realizedCommission = editForm.commissionType === 'Percent'
+                            ? (parseFloat(editForm.transactionValue) || 0) * commissionVal / 100
+                            : commissionVal;
+                          const newSplits = selected.map((b) => ({
                             brokerId: b.brokerId,
                             brokerName: b.fullName,
                             splitPercentage: Math.round(evenPct * 100) / 100,
-                            splitAmount: Math.round(commissionVal * evenPct / 100 * 100) / 100
+                            splitAmount: Math.round(realizedCommission * evenPct / 100 * 100) / 100
                           }));
                           setBrokerSplits(newSplits);
                         }} className="text-[10px] font-bold text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg">Auto-Split Evenly</button>

@@ -51,7 +51,7 @@ export const heroSlides: HeroSlide[] = [
     description: "",
   },
   {
-    image: "/pleasing.png",
+    image: "/pleasing.jpg",
     description: "Never let a lead slip through the cracks. Our intelligent CRM transforms unverified leads into a structured, visual sales pipeline."
   },
   {

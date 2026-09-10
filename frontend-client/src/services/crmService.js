@@ -351,6 +351,24 @@ export const crmService = {
     }
   },
 
+  getSuggestedBrokers: async (filters = {}) => {
+    try {
+      const response = await apiClient.get('/crm/brokers/suggested', {
+        params: {
+          area: filters.area,
+          budgetMin: filters.budgetMin,
+          budgetMax: filters.budgetMax,
+          propertyType: filters.propertyType,
+          limit: filters.limit || 3,
+          ...crmService._tenantQueryParams()
+        }
+      });
+      return response.data.brokers || [];
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Broker recommendation fetch failed.');
+    }
+  },
+
   createBroker: async (payload) => {
     try {
       const response = await apiClient.post('/crm/brokers', {
@@ -712,7 +730,7 @@ export const crmService = {
   },
 
   upsertDealBrokerSplits: async (dealId, splits) => {
-    const response = await apiClient.put(`/crm/deals/${dealId}/broker-splits`, { dealId, splits });
+    const response = await apiClient.put(`/crm/deals/${dealId}/broker-splits`, { dealId, splits }, { params: crmService._tenantQueryParams() });
     return response.data;
   },
 

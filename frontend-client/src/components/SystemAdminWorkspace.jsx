@@ -33,7 +33,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: '',
     brokerageLicense: ''
   });
-  const [userForm, setUserForm] = useState({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '' });
+  const [userForm, setUserForm] = useState({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '', monthlyTargetCommission: '' });
   const [editingUser, setEditingUser] = useState(null);
   const [contactForm, setContactForm] = useState({ fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '', contactType: 'Staff', isAgencyAdmin: false });
   const [error, setError] = useState('');
@@ -630,20 +630,30 @@ export default function SystemAdminWorkspace({ defaultTab }) {
           {/* 👤 USER FORM — SuperAdmin and AgencyAdmin can create/edit users with assignable roles */}
           {(isSuperAdmin || currentUserRole === 'AgencyAdmin') && (
           <form onSubmit={async (e) => {
-            e.preventDefault();
-            try {
-              if (editingUser && editingUser.userId) {
-                await authService.updateUserRole(editingUser.userId, userForm.systemRole);
-              } else {
-                 await authService.registerUser({
-                  fullName: userForm.fullName,
-                  email: userForm.email,
-                  systemRole: userForm.systemRole,
-                  passwordHash: userForm.password || 'ChangeMeNow!',
-                  licenseNumber: userForm.licenseNumber || ''
-                });
-               }
-               setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '' });
+             e.preventDefault();
+             try {
+               if (editingUser && editingUser.userId) {
+                 await authService.updateUserRole(editingUser.userId, userForm.systemRole);
+               } else {
+                  await authService.registerUser({
+                   fullName: userForm.fullName,
+                   email: userForm.email,
+                   systemRole: userForm.systemRole,
+                   passwordHash: userForm.password || 'ChangeMeNow!',
+                   licenseNumber: userForm.licenseNumber || ''
+                 });
+                }
+                // 🎯 If this is a Broker, upsert the current month's target.
+                if (userForm.systemRole === 'Broker' && userForm.monthlyTargetCommission) {
+                  const now = new Date();
+                  await crmService.setBrokerTarget({
+                    brokerId: editingUser?.userId || undefined,
+                    year: now.getFullYear(),
+                    month: now.getMonth() + 1,
+                    targetCommission: Number(userForm.monthlyTargetCommission)
+                  });
+                }
+                setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '', monthlyTargetCommission: '' });
               setEditingUser(null);
               await loadUsers();
             } catch (err) { alert(err || 'User save failed.'); }
@@ -661,11 +671,15 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                 {(userForm.systemRole === 'Broker' || userForm.systemRole === 'AgencyAdmin') && (
                   <input value={userForm.licenseNumber} onChange={(e) => setUserForm({ ...userForm, licenseNumber: e.target.value })} placeholder={userForm.systemRole === 'Broker' ? 'Broker License #' : 'Brokerage License #'} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
                 )}
+                {/* 🎯 Monthly target commission — only for Brokers */}
+                {userForm.systemRole === 'Broker' && (
+                  <input value={userForm.monthlyTargetCommission} onChange={(e) => setUserForm({ ...userForm, monthlyTargetCommission: e.target.value })} type="number" placeholder="Monthly Target Commission (R)" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                )}
             <div className="flex gap-2">
               <Can permission={editingUser ? 'users:edit' : 'users:create'}>
                 <button type="submit" className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold">{editingUser ? 'Save user' : 'Create user'}</button>
               </Can>
-              {editingUser && <button type="button" onClick={() => { setEditingUser(null); setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '' }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
+              {editingUser && <button type="button" onClick={() => { setEditingUser(null); setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '', monthlyTargetCommission: '' }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
             </div>
           </form>
           )}
@@ -685,9 +699,22 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                     <span className="text-[10px] px-2 py-1 rounded-md bg-violet-950 text-violet-300 border border-violet-900">{u.systemRole}</span>
                       {(isSuperAdmin || currentUserRole === 'AgencyAdmin') && u.systemRole !== 'PlatformAdmin' && (
                         <>
-                          <Can permission="users:edit">
-                            <button type="button" onClick={() => { setEditingUser(u); setUserForm({ fullName: u.fullName || '', email: u.email || '', password: '', systemRole: u.systemRole || 'Broker' }); }} className="p-2 text-slate-400 hover:text-white"><Pencil size={13} /></button>
-                          </Can>
+                           <Can permission="users:edit">
+                             <button type="button" onClick={async () => {
+                               setEditingUser(u);
+                               setUserForm({ fullName: u.fullName || '', email: u.email || '', password: '', systemRole: u.systemRole || 'Broker', licenseNumber: u.licenseNumber || '', monthlyTargetCommission: '' });
+                               if (u.systemRole === 'Broker') {
+                                 try {
+                                   const now = new Date();
+                                   const targets = await crmService.getBrokerTargets(u.userId, now.getFullYear());
+                                   const currentTarget = targets.find(t => t.month === now.getMonth() + 1 && t.year === now.getFullYear());
+                                   if (currentTarget) {
+                                     setUserForm((prev) => ({ ...prev, monthlyTargetCommission: currentTarget.targetCommission }));
+                                   }
+                                 } catch { /* non-fatal */ }
+                               }
+                             }} className="p-2 text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                           </Can>
                           {u.accountStatus !== 'Disabled' && (
                             <Can permission="users:edit">
                               <button type="button" onClick={async () => {
