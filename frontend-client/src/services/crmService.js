@@ -752,6 +752,28 @@ export const crmService = {
     }
   },
 
+  // 🎯 Broker monthly target management
+  getBrokerTargets: async (brokerId = null, year = null) => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      if (brokerId) params.brokerId = brokerId;
+      if (year) params.year = year;
+      const response = await apiClient.get('/crm/broker-targets', { params });
+      return response.data || [];
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Targets sync failed.');
+    }
+  },
+
+  setBrokerTarget: async (payload) => {
+    try {
+      const response = await apiClient.post('/crm/broker-targets', payload);
+      return response.data;
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Failed to set broker target.');
+    }
+  },
+
   // 📥 Compliance inbox (expiring mandates + awaiting-broker-signature).
   getComplianceInbox: async (brokerId = null) => {
     try {

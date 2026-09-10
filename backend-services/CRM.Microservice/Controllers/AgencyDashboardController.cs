@@ -48,12 +48,13 @@ namespace CRM.Microservice.Controllers
             INotificationRepository notificationRepository,
             IContactPersonRepository contactPersonRepository,
             IUserGrowthRepository userGrowthRepository,
-            IPropertyCountService propertyCountService)
+            IPropertyCountService propertyCountService,
+            IRepository<BrokerMonthlyTarget> brokerTargetRepository)
             : base(dbContext, http, configuration, logger, permissionCheck,
                    agencyRepository, brokerRepository, leadRepository, dealRepository,
                    companyRepository, legalEntityRepository, contactRepository,
                    geographyRepository, operationalRepository, brochureCardRepository,
-                   brochureCardLineRepository, dealBrokerSplitRepository, notificationRepository)
+                   brochureCardLineRepository, dealBrokerSplitRepository, notificationRepository, brokerTargetRepository)
         {
             _contactPersonRepository = contactPersonRepository;
             _userGrowthRepository = userGrowthRepository;

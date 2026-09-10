@@ -22,6 +22,27 @@ apiClient.interceptors.request.use(
   }
 );
 
+// 🚨 RESPONSE INTERCEPTOR: Normalises backend errors so the UI always
+//   receives a consistent { message } shape. Gateway timeouts, 500s,
+//   and 401/403s are caught here — the UI shows a red banner rather
+//   than crashing the entire page.
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error.response?.status;
+    const backendMessage = error.response?.data?.message;
+    if (backendMessage) error.message = backendMessage;
+    if (status === 401) error.message = 'Your session has expired. Please sign in again.';
+    if (status === 403) error.message = 'You do not have permission to view this resource.';
+    if (status === 500 || status === 502 || status === 503 || status === 504)
+      error.message = 'Service temporarily unavailable. Please try again.';
+    if (!error.message || error.message === 'Network Error')
+      error.message = 'Network error — the server is not responding.';
+    return Promise.reject(error);
+  }
+);
+
+
 // 🔁 GET request coalescing.
 // Collapses *concurrent* duplicate GETs into a single HTTP round-trip so that:
 //   • React 18 StrictMode's dev double-invoke of mount effects doesn't fire

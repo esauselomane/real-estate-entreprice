@@ -2,16 +2,17 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
    Briefcase, Banknote, Home, Clock,   TrendingUp, TrendingDown,
    AlertTriangle, Bell, ChevronRight, Send,
-   Users, CheckCircle2, ArrowUp, ArrowDown, Calendar
+   Users, CheckCircle2, ArrowUp, ArrowDown, Calendar, Target
 } from 'lucide-react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area, Legend, PieChart, Pie, Cell
+  AreaChart, Area, Legend, PieChart, Pie, Cell, RadialBarChart, RadialBar
 } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { authService } from '../services/authService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
+import LoadingOverlay from './LoadingOverlay.jsx';
 import { useCelebration } from './CelebrationOverlay.jsx';
 import { useEpilepsySafeMode } from './EpilepsySafeMode.jsx';
 import BrokerPicker from './BrokerPicker.jsx';
@@ -89,9 +90,10 @@ export default function BrokerDashboard() {
    const [sortKey, setSortKey] = useState('totalGci');
   const [sortDir, setSortDir] = useState('desc');
   const [compliance, setCompliance] = useState([]);
-   const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [busyRemind, setBusyRemind] = useState(null);
+    const [showTargetDialog, setShowTargetDialog] = useState(false);
     const [userIndex, setUserIndex] = useState({});
 
     // Activity log state — only populated when a broker is selected.
@@ -270,6 +272,12 @@ export default function BrokerDashboard() {
 
   return (
     <div className="space-y-6">
+      <TargetDialog
+        open={showTargetDialog}
+        onClose={() => setShowTargetDialog(false)}
+        brokerId={effectiveBrokerId || undefined}
+        onSaved={refresh}
+      />
       {/* HEADER: title + admin broker filter */}
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
@@ -346,7 +354,15 @@ export default function BrokerDashboard() {
         />
       </div>
 
-      {/* ROW 2: revenue trend + pipeline funnel */}
+      {/* ROW 2: monthly target gauge */}
+      <TargetGauge
+        realised={metrics?.monthlyTargets?.find(t => t.progress >= 0 && t.realised != null)?.realised || 0}
+        target={metrics?.monthlyTargets?.find(t => t.progress >= 0 && t.target != null)?.target || 0}
+        period={metrics?.monthlyTargets?.find(t => t.progress >= 0)?.period || 'N/A'}
+        onSetTarget={() => setShowTargetDialog(true)}
+      />
+
+      {/* ROW 3: revenue trend + pipeline funnel */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
           <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
@@ -397,7 +413,7 @@ export default function BrokerDashboard() {
         </div>
       </div>
 
-      {/* ROW 3: leaderboard + activity log (when broker selected) or compliance inbox */}
+      {/* ROW 4: leaderboard + activity log (when broker selected) or compliance inbox */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
            <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
@@ -525,7 +541,7 @@ export default function BrokerDashboard() {
       </div>
 
       {loading && (
-        <div className="text-xs text-slate-500 text-center">Refreshing broker metrics…</div>
+        <LoadingOverlay label="Loading broker dashboard…" subtitle="Syncing performance metrics" />
       )}
     </div>
   );
@@ -577,3 +593,114 @@ function EmptyState({ label }) {
     </div>
   );
 }
+
+const TargetGauge = ({ realised, target, period, onSetTarget }) => {
+  const progress = target > 0 ? Math.min(100, (realised / target) * 100) : 0;
+  const gaugeColor = progress >= 100 ? '#22c55e' : progress >= 75 ? '#f59e0b' : '#ef4444';
+  const displayValue = target > 0 ? `${Math.round(progress)}%` : '—';
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col items-center">
+      <div className="flex items-center gap-2 text-slate-400 font-bold uppercase tracking-[0.12em] text-[10px] mb-3">
+        <Target size={12} className="text-blue-500" /> Monthly Target vs Realised
+      </div>
+      <div className="text-xs text-slate-500 mb-2">{period}</div>
+      <ResponsiveContainer width="100%" height={180}>
+        <RadialBarChart
+          cx="50%" cy="50%"
+          innerRadius={60}
+          outerRadius={90}
+          data={[{ value: progress, fill: gaugeColor }]}
+          startAngle={90}
+          endAngle={-270}
+        >
+          <RadialBar dataKey="Value" cornerRadius={10} />
+          <text x="50%" y="50%" textAnchor="middle" dominantBaseline="middle"
+            className="text-3xl font-bold" fill="#ffffff">
+            {displayValue}
+          </text>
+        </RadialBarChart>
+      </ResponsiveContainer>
+      <div className="mt-3 text-center">
+        <div className="text-sm text-slate-400">
+          Realised: <span className="text-white font-bold">{fmtCurrency(realised)}</span>
+        </div>
+        <div className="text-sm text-slate-400">
+          Target: <span className="text-white font-bold">{fmtCurrency(target)}</span>
+        </div>
+      </div>
+      <button
+        onClick={onSetTarget}
+        className="mt-3 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-bold text-white transition-colors"
+      >
+        Set Target
+      </button>
+    </div>
+  );
+}
+
+const TargetDialog = ({ open, onClose, brokerId, onSaved }) => {
+  const [target, setTarget] = useState('');
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+
+  const handleSave = async () => {
+    if (!target) return;
+    const [year, m] = month.split('-').map(Number);
+    try {
+      await crmService.setBrokerTarget({
+        brokerId: brokerId || undefined,
+        year,
+        month: m,
+        targetCommission: Number(target)
+      });
+      onSaved?.();
+      onClose();
+    } catch (err) {
+      alert(err?.message || 'Failed to set target.');
+    }
+  };
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-center justify-center">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 w-80">
+        <h3 className="text-white font-bold text-sm mb-4">Set Monthly Target</h3>
+        <div className="space-y-3 text-xs">
+          <div>
+            <label className="block text-slate-400 mb-1">Month</label>
+            <input
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-slate-400 mb-1">Target Commission (R)</label>
+            <input
+              type="number"
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              placeholder="e.g. 50000"
+              className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white text-xs focus:outline-none focus:border-blue-500"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={onClose}
+            className="flex-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-medium text-slate-300"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-bold text-white"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};

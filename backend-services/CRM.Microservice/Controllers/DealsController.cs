@@ -37,12 +37,13 @@ public class DealsController : CRMControllerBase
         IBrochureCardRepository brochureCardRepository,
         IRepository<BrochureCardLine> brochureCardLineRepository,
         IDealBrokerSplitRepository dealBrokerSplitRepository,
-        INotificationRepository notificationRepository)
+        INotificationRepository notificationRepository,
+        IRepository<BrokerMonthlyTarget> brokerTargetRepository)
         : base(dbContext, http, configuration, logger, permissionCheck,
                agencyRepository, brokerRepository, leadRepository, dealRepository,
                companyRepository, legalEntityRepository, contactRepository,
                geographyRepository, operationalRepository, brochureCardRepository,
-               brochureCardLineRepository, dealBrokerSplitRepository, notificationRepository)
+               brochureCardLineRepository, dealBrokerSplitRepository, notificationRepository, brokerTargetRepository)
     {
     }
 
@@ -376,4 +377,220 @@ public class DealsController : CRMControllerBase
             await DbContext.SaveChangesAsync();
             return Ok(new { message = "Contact linked to deal.", linkedDealIds = contact.LinkedDealIds });
         }
-}
+
+        // 🧾 brochure cards — retrieved by dealId (broker dashboard card viewer).
+        [HttpGet("brochure-cards")]
+        public async Task<IActionResult> GetBrochureCardByDeal([FromQuery] int dealId, [FromQuery] string? tenantId = null)
+        {
+            if (!await PermissionCheck.HasPermissionAsync("billing:view"))
+            {
+                Logger.LogWarning("GetBrochureCardByDeal: forbidden — caller lacks billing:view permission");
+                return Forbid();
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
+            var isBroker = GetCurrentCanonicalRole() == "Broker";
+
+            IQueryable<BrochureCard> cardQuery = BrochureCardRepository.Query()
+                .Include(c => c.Lines)
+                .Where(c => c.DealId == dealId && !c.IsDeleted);
+            if (visibleTenants.Count > 0)
+                cardQuery = cardQuery.Where(c => visibleTenants.Contains(c.TenantId));
+
+            var card = await cardQuery.FirstOrDefaultAsync();
+            if (card == null) return NotFound(new { message = "No brochure card found for this deal." });
+            if (isBroker && card.BrokerAgentId != callerName) return Forbid();
+
+            return Ok(new
+            {
+                cardId = card.CardId,
+                dealId = card.DealId,
+                clientName = card.ClientName,
+                clientEmail = card.ClientEmail,
+                clientPhone = card.ClientPhone,
+                companyName = card.CompanyName,
+                companyLogoUrl = card.CompanyLogoUrl,
+                status = card.Status.ToString(),
+                generatedFilePath = card.GeneratedFilePath,
+                createdAt = card.CreatedAt,
+                lines = card.Lines
+                    .Where(l => !l.IsDeleted)
+                    .Select(l => new
+                    {
+                        lineId = l.LineId,
+                        propertyId = l.PropertyId,
+                        unitId = l.UnitId,
+                        unitNumber = l.UnitNumber,
+                        unitDescription = l.UnitDescription,
+                        propertyDescription = l.PropertyDescription,
+                        netRentableAreaSqM = l.NetRentableAreaSqM,
+                        selectedImageRefs = string.IsNullOrEmpty(l.SelectedImageRefs)
+                            ? new List<string>()
+                            : l.SelectedImageRefs.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList()
+                    })
+            });
+        }
+
+        // 🧾 Active brochure cards for the broker notification badge.
+        [HttpGet("brochure-cards/active")]
+        public async Task<IActionResult> GetActiveBrochureCards([FromQuery] string? tenantId = null)
+        {
+            if (!await PermissionCheck.HasPermissionAsync("billing:view"))
+            {
+                Logger.LogWarning("GetActiveBrochureCards: forbidden — caller lacks billing:view permission");
+                return Forbid();
+            }
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
+            var isBroker = GetCurrentCanonicalRole() == "Broker";
+
+            IQueryable<BrochureCard> query = BrochureCardRepository.Query()
+                .Where(c => !c.IsDeleted &&
+                            (c.Status == BrochureCardStatus.Active || c.Status == BrochureCardStatus.Generating));
+            if (visibleTenants.Count > 0)
+                query = query.Where(c => visibleTenants.Contains(c.TenantId));
+            if (isBroker) query = query.Where(c => c.BrokerAgentId == callerName);
+
+            var cards = await query.Select(c => new
+            {
+                cardId = c.CardId,
+                dealId = c.DealId,
+                clientName = c.ClientName,
+                status = c.Status.ToString(),
+                createdAt = c.CreatedAt
+            }).ToListAsync();
+            return Ok(cards);
+        }
+
+        // 🧾 Upsert the broker's brochure card (client details + curated <=5 unit lines).
+        [HttpPut("brochure-cards")]
+        public async Task<IActionResult> UpsertBrochureCard([FromBody] BrochureCardUpsertRequest request)
+        {
+            if (!await PermissionCheck.HasPermissionAsync("billing:edit"))
+            {
+                Logger.LogWarning("UpsertBrochureCard: forbidden — caller lacks billing:edit permission");
+                return Forbid();
+            }
+
+            if (request == null || request.DealId <= 0)
+                return BadRequest(new { message = "DealId is required for a brochure card." });
+
+            var tenantId = GetCurrentTenant();
+            var brokerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
+            var brokerId = GetCurrentUserId();
+            var role = GetCurrentCanonicalRole();
+
+            if (role == "Broker")
+            {
+                var deal = await DealRepository.Query()
+                    .FirstOrDefaultAsync(d => d.DealId == request.DealId && d.TenantId == tenantId);
+                if (deal == null) return NotFound(new { message = "Target deal record not found." });
+                if (!CallerIsAssignedTo(deal.AllocatedBrokerIds, brokerId)) return Forbid();
+            }
+            else
+            {
+                var dealExists = await DealRepository.Query().AnyAsync(d => d.DealId == request.DealId && d.TenantId == tenantId);
+                if (!dealExists) return NotFound(new { message = "Target deal record not found." });
+            }
+
+            BrochureCard card;
+            if (request.CardId.HasValue && request.CardId > 0)
+            {
+                card = await BrochureCardRepository.Query()
+                    .Include(c => c.Lines)
+                    .FirstOrDefaultAsync(c => c.CardId == request.CardId.Value && c.TenantId == tenantId);
+                if (card == null) return NotFound(new { message = "Brochure card not found." });
+                foreach (var ln in card.Lines.Where(l => !l.IsDeleted)) ln.IsDeleted = true;
+            }
+            else
+            {
+                card = new BrochureCard { TenantId = tenantId, DealId = request.DealId, BrokerAgentId = brokerName, Status = BrochureCardStatus.Active };
+                BrochureCardRepository.Add(card);
+                await DbContext.SaveChangesAsync();
+            }
+
+            card.ClientName = request.ClientName;
+            card.ClientEmail = request.ClientEmail;
+            card.ClientPhone = request.ClientPhone;
+            card.CompanyName = request.CompanyName;
+            card.CompanyLogoUrl = request.CompanyLogoUrl;
+            card.UpdatedAt = DateTime.UtcNow;
+
+            foreach (var unit in request.Units.Take(5))
+            {
+                BrochureCardLineRepository.Add(new BrochureCardLine
+                {
+                    CardId = card.CardId,
+                    PropertyId = unit.PropertyId,
+                    UnitId = unit.UnitId,
+                    UnitNumber = unit.UnitNumber ?? string.Empty,
+                    UnitDescription = unit.UnitDescription ?? string.Empty,
+                    PropertyDescription = unit.PropertyDescription ?? string.Empty,
+                    NetRentableAreaSqM = unit.NetRentableAreaSqM,
+                    SelectedImageRefs = unit.SelectedImageRefs != null && unit.SelectedImageRefs.Any()
+                        ? string.Join(",", unit.SelectedImageRefs)
+                        : string.Empty
+                });
+            }
+
+            await DbContext.SaveChangesAsync();
+            return Ok(new { cardId = card.CardId });
+        }
+
+        // 🧾 Remove a single unit line from a broker's card.
+        [HttpDelete("brochure-cards/{cardId:int}/lines/{lineId:int}")]
+        public async Task<IActionResult> DeleteBrochureCardLine(int cardId, int lineId)
+        {
+            if (!await PermissionCheck.HasPermissionAsync("billing:delete"))
+            {
+                Logger.LogWarning("DeleteBrochureCardLine: forbidden — caller lacks billing:delete permission");
+                return Forbid();
+            }
+
+            var tenantId = GetCurrentTenant();
+            var line = await BrochureCardLineRepository.Query().FirstOrDefaultAsync(l => l.LineId == lineId && l.CardId == cardId);
+            if (line == null) return NotFound(new { message = "Brochure card line not found." });
+            var owned = await BrochureCardRepository.Query().AnyAsync(c => c.CardId == cardId && c.TenantId == tenantId);
+            if (!owned) return Forbid();
+            line.IsDeleted = true;
+            await DbContext.SaveChangesAsync();
+            return Ok(new { message = "Brochure card line removed." });
+        }
+
+        // 🧾 Worker callback (AllowAnonymous — the worker holds no bearer token):
+        // close the card + advance the deal once the PDF has been rendered to disk.
+        [AllowAnonymous]
+        [HttpPost("brochure-cards/{cardId:int}/generated")]
+        public async Task<IActionResult> CompleteBrochureCard(int cardId, [FromBody] BrochureCardGeneratedDto payload)
+        {
+            if (payload == null) return BadRequest(new { message = "Callback payload is required." });
+
+            var card = await BrochureCardRepository.Query()
+                .Include(c => c.Lines)
+                .FirstOrDefaultAsync(c => c.CardId == cardId);
+            if (card == null) return NotFound(new { message = "Brochure card not found." });
+
+            card.Status = BrochureCardStatus.Generated;
+            card.IsDeleted = true;
+            card.GeneratedFilePath = string.IsNullOrWhiteSpace(payload.FilePath) ? card.GeneratedFilePath : payload.FilePath;
+            card.UpdatedAt = DateTime.UtcNow;
+
+            var deal = await DealRepository.Query()
+                .FirstOrDefaultAsync(d => d.DealId == card.DealId && d.TenantId == card.TenantId);
+            if (deal != null)
+            {
+                deal.DealStage = DealWorkflowStage.ProposalQuoteSent;
+                deal.LastStageUpdatedAt = DateTime.UtcNow;
+            }
+
+            await DbContext.SaveChangesAsync();
+            return Ok(new
+            {
+                message = "Brochure card closed and deal advanced to Proposal / Quote Sent.",
+                cardId = card.CardId,
+                dealStage = deal == null ? null : deal.DealStage.ToString()
+            });
+        }
+    }

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
-import {   Building2, Users, Briefcase, Home, Bell, ShieldCheck, Layers, BarChart2, Banknote, TrendingUp, PieChart as PieIcon, Award } from 'lucide-react';
+import {   Building2, Users, Briefcase, Home, Bell, ShieldCheck, Layers, BarChart2, Banknote, TrendingUp, PieChart as PieIcon, Award, AlertTriangle } from 'lucide-react';
+import LoadingOverlay from './LoadingOverlay.jsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { propertyService } from '../services/propertyService.js';
@@ -95,6 +96,7 @@ export default function RoleDashboard() {
   const [charts, setCharts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [pipelineSummary, setPipelineSummary] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     const load = async () => {
@@ -207,9 +209,10 @@ export default function RoleDashboard() {
             { title: 'Request status breakdown', icon: Bell, kind: 'pie', data: Object.entries(statusBuckets).map(([name, value]) => ({ name, value })), colors: STATUS_COLORS }
           ]);
         }
-      } catch {
-        setMetrics([]); setCharts([]);
-      } finally {
+       } catch (err) {
+         setErrorMessage(err?.message || 'Failed to load dashboard analytics. Please try again.');
+         setMetrics([]); setCharts([]);
+       } finally {
         setIsLoading(false);
       }
     };
@@ -223,6 +226,12 @@ export default function RoleDashboard() {
         <h3 className="text-2xl font-bold text-white">Welcome back, {profile?.name || 'User'}</h3>
         <p className="text-sm text-slate-400 mt-1">Your workspace only surfaces information appropriate to your role.</p>
       </div>
+
+      {errorMessage && (
+        <div className="p-4 bg-red-950/30 border border-red-900/60 text-red-400 rounded-2xl text-xs font-medium flex items-center gap-2">
+          <AlertTriangle size={14} /> {errorMessage}
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {metrics.map(({ label, value, icon: Icon }) => (
@@ -262,8 +271,8 @@ export default function RoleDashboard() {
        )}
 
        {isLoading ? (
-        <div className="py-16 text-center text-slate-500 text-sm">Loading role-specific analytics...</div>
-      ) : (
+         <LoadingOverlay label="Loading role-specific analytics…" subtitle="Aggregating platform-wide metrics" />
+       ) : (
         <div className="grid gap-4 grid-cols-2">
           {charts.map((c) => (
             <ChartCard key={c.title} title={c.title} icon={c.icon}>

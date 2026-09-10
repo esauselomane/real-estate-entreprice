@@ -37,12 +37,13 @@ public class LegalEntitiesController : CRMControllerBase
         IBrochureCardRepository brochureCardRepository,
         IRepository<BrochureCardLine> brochureCardLineRepository,
         IDealBrokerSplitRepository dealBrokerSplitRepository,
-        INotificationRepository notificationRepository)
+        INotificationRepository notificationRepository,
+        IRepository<BrokerMonthlyTarget> brokerTargetRepository)
         : base(dbContext, http, configuration, logger, permissionCheck,
                agencyRepository, brokerRepository, leadRepository, dealRepository,
                companyRepository, legalEntityRepository, contactRepository,
                geographyRepository, operationalRepository, brochureCardRepository,
-               brochureCardLineRepository, dealBrokerSplitRepository, notificationRepository)
+               brochureCardLineRepository, dealBrokerSplitRepository, notificationRepository, brokerTargetRepository)
     {
     }
 

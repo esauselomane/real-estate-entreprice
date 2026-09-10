@@ -244,7 +244,7 @@ export const timeline: { year: string; event: string }[] = [
 export const leadership: TeamMember[] = [
   {
     name: "Esau Selomane",
-    role: "Chief Technology Officer",
+    role: "Chief Nerd",
     image: "/images/team/amara.jpg",
     linkedin: "https://www.linkedin.com/in/esau-selomane-49a68b24/",
   },

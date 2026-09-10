@@ -34,6 +34,7 @@ public abstract class CRMControllerBase : ControllerBase
     protected readonly IRepository<BrochureCardLine> BrochureCardLineRepository;
     protected readonly IDealBrokerSplitRepository DealBrokerSplitRepository;
     protected readonly INotificationRepository NotificationRepository;
+    protected readonly IRepository<BrokerMonthlyTarget> BrokerTargetRepository;
     protected readonly PermissionCheckService PermissionCheck;
     protected readonly string GatewayUrl;
     protected readonly ILogger Logger;
@@ -58,7 +59,8 @@ public abstract class CRMControllerBase : ControllerBase
         IBrochureCardRepository brochureCardRepository,
         IRepository<BrochureCardLine> brochureCardLineRepository,
         IDealBrokerSplitRepository dealBrokerSplitRepository,
-        INotificationRepository notificationRepository)
+        INotificationRepository notificationRepository,
+        IRepository<BrokerMonthlyTarget> brokerTargetRepository)
     {
         DbContext = dbContext;
         HttpClient = http;
@@ -75,6 +77,7 @@ public abstract class CRMControllerBase : ControllerBase
         BrochureCardLineRepository = brochureCardLineRepository;
         DealBrokerSplitRepository = dealBrokerSplitRepository;
         NotificationRepository = notificationRepository;
+        BrokerTargetRepository = brokerTargetRepository;
         GatewayUrl = configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
         Logger = logger;
         PermissionCheck = permissionCheck;

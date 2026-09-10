@@ -34,12 +34,13 @@ namespace CRM.Microservice.Controllers
             IBrochureCardRepository brochureCardRepository,
             IRepository<BrochureCardLine> brochureCardLineRepository,
             IDealBrokerSplitRepository dealBrokerSplitRepository,
-            INotificationRepository notificationRepository)
+            INotificationRepository notificationRepository,
+            IRepository<BrokerMonthlyTarget> brokerTargetRepository)
             : base(dbContext, http, configuration, logger, permissionCheck,
                 agencyRepository, brokerRepository, leadRepository, dealRepository,
                 companyRepository, legalEntityRepository, contactRepository,
                 geographyRepository, operationalRepository, brochureCardRepository,
-                brochureCardLineRepository, dealBrokerSplitRepository, notificationRepository)
+                brochureCardLineRepository, dealBrokerSplitRepository, notificationRepository, brokerTargetRepository)
         {
         }
 
@@ -146,8 +147,18 @@ namespace CRM.Microservice.Controllers
                 .Include(c => c.LegalEntityDetails);
             if (visibleTenants.Count > 0)
                 query = query.Where(c => visibleTenants.Contains(c.TenantId));
-            if (!string.IsNullOrEmpty(contactType) && Enum.TryParse<ContactType>(contactType, true, out var typeFilter))
-                query = query.Where(c => c.ContactType == typeFilter);
+            if (!string.IsNullOrEmpty(contactType))
+            {
+                var typeParts = contactType.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                var parsedTypes = typeParts
+                    .Where(p => Enum.TryParse<ContactType>(p, true, out _))
+                    .Select(p => Enum.Parse<ContactType>(p, true))
+                    .ToList();
+                if (parsedTypes.Any())
+                {
+                    query = query.Where(c => parsedTypes.Any(t => c.ContactType.HasFlag(t)));
+                }
+            }
             if (budgetMin.HasValue)
                 query = query.Where(c => c.BudgetLimit >= budgetMin.Value);
             if (budgetMax.HasValue)
@@ -185,8 +196,16 @@ namespace CRM.Microservice.Controllers
                 .Include(c => c.LegalEntityDetails);
             if (visibleTenants.Count > 0)
                 query = query.Where(c => visibleTenants.Contains(c.TenantId));
-            if (!string.IsNullOrEmpty(request.ContactType) && Enum.TryParse<ContactType>(request.ContactType, true, out var typeFilter))
-                query = query.Where(c => c.ContactType == typeFilter);
+            if (!string.IsNullOrEmpty(request.ContactType))
+            {
+                var typeParts = request.ContactType.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                var parsedTypes = typeParts
+                    .Where(p => Enum.TryParse<ContactType>(p, true, out _))
+                    .Select(p => Enum.Parse<ContactType>(p, true))
+                    .ToList();
+                if (parsedTypes.Any())
+                    query = query.Where(c => parsedTypes.Any(t => c.ContactType.HasFlag(t)));
+            }
             if (request.BudgetMin.HasValue)
                 query = query.Where(c => c.BudgetLimit >= request.BudgetMin.Value);
             if (request.BudgetMax.HasValue)
@@ -975,225 +994,6 @@ namespace CRM.Microservice.Controllers
                 .ToList();
             return Ok(rows);
         }
-        [HttpGet("brochure-cards")]
-        public async Task<IActionResult> GetBrochureCardByDeal([FromQuery] int dealId, [FromQuery] string? tenantId = null)
-        {
-            if (!await PermissionCheck.HasPermissionAsync("billing:view"))
-            {
-                Logger.LogWarning("GetBrochureCardByDeal: forbidden — caller lacks billing:view permission");
-                return Forbid();
-            }
-
-            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
-            var isBroker = GetCurrentCanonicalRole() == "Broker";
-            var callerId = GetCurrentUserId();
-
-            IQueryable<BrochureCard> cardQuery = BrochureCardRepository.Query()
-                .Include(c => c.Lines)
-                .Where(c => c.DealId == dealId && !c.IsDeleted);
-            if (visibleTenants.Count > 0)
-                cardQuery = cardQuery.Where(c => visibleTenants.Contains(c.TenantId));
-
-            var card = await cardQuery.FirstOrDefaultAsync();
-            if (card == null) return NotFound(new { message = "No brochure card found for this deal." });
-            if (isBroker && card.BrokerAgentId != callerName) return Forbid();
-
-            return Ok(new
-            {
-                cardId = card.CardId,
-                dealId = card.DealId,
-                clientName = card.ClientName,
-                clientEmail = card.ClientEmail,
-                clientPhone = card.ClientPhone,
-                companyName = card.CompanyName,
-                companyLogoUrl = card.CompanyLogoUrl,
-                status = card.Status.ToString(),
-                generatedFilePath = card.GeneratedFilePath,
-                createdAt = card.CreatedAt,
-                lines = card.Lines
-                    .Where(l => !l.IsDeleted)
-                    .Select(l => new
-                    {
-                        lineId = l.LineId,
-                        propertyId = l.PropertyId,
-                        unitId = l.UnitId,
-                        unitNumber = l.UnitNumber,
-                        unitDescription = l.UnitDescription,
-                        propertyDescription = l.PropertyDescription,
-                        netRentableAreaSqM = l.NetRentableAreaSqM,
-                        selectedImageRefs = string.IsNullOrEmpty(l.SelectedImageRefs) 
-                            ? new List<string>() 
-                            : l.SelectedImageRefs.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList()
-                    })
-            });
-        }
-
-        // 🧾 Active brochure cards for the broker notification badge.
-        [HttpGet("brochure-cards/active")]
-        public async Task<IActionResult> GetActiveBrochureCards([FromQuery] string? tenantId = null)
-        {
-            if (!await PermissionCheck.HasPermissionAsync("billing:view"))
-            {
-                Logger.LogWarning("GetActiveBrochureCards: forbidden — caller lacks billing:view permission");
-                return Forbid();
-            }
-
-            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
-            var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
-            var isBroker = GetCurrentCanonicalRole() == "Broker";
-            var callerId = GetCurrentUserId();
-
-            IQueryable<BrochureCard> query = BrochureCardRepository.Query()
-                .Where(c => !c.IsDeleted &&
-                            (c.Status == BrochureCardStatus.Active || c.Status == BrochureCardStatus.Generating));
-            if (visibleTenants.Count > 0)
-                query = query.Where(c => visibleTenants.Contains(c.TenantId));
-            if (isBroker) query = query.Where(c => c.BrokerAgentId == callerName);
-
-            var cards = await query.Select(c => new
-            {
-                cardId = c.CardId,
-                dealId = c.DealId,
-                clientName = c.ClientName,
-                status = c.Status.ToString(),
-                createdAt = c.CreatedAt
-            }).ToListAsync();
-            return Ok(cards);
-        }
-
-        // 🧾 Upsert the broker's brochure card (client details + curated <=5 unit lines).
-        [HttpPut("brochure-cards")]
-        public async Task<IActionResult> UpsertBrochureCard([FromBody] BrochureCardUpsertRequest request)
-        {
-            if (!await PermissionCheck.HasPermissionAsync("billing:edit"))
-            {
-                Logger.LogWarning("UpsertBrochureCard: forbidden — caller lacks billing:edit permission");
-                return Forbid();
-            }
-
-            if (request == null || request.DealId <= 0)
-                return BadRequest(new { message = "DealId is required for a brochure card." });
-
-            var tenantId = GetCurrentTenant();
-            var brokerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
-            var brokerId = GetCurrentUserId();
-            var role = GetCurrentCanonicalRole();
-
-            if (role == "Broker")
-            {
-                // Check whether the broker is one of the ids in the deal's
-                // AllocatedBrokerIds CSV. Single-broker legacy deals still
-                // match the equality case.
-                var deal = await DealRepository.Query()
-                    .FirstOrDefaultAsync(d => d.DealId == request.DealId && d.TenantId == tenantId);
-                if (deal == null) return NotFound(new { message = "Target deal record not found." });
-                if (!CallerIsAssignedTo(deal.AllocatedBrokerIds, brokerId)) return Forbid();
-            }
-            else
-            {
-                var dealExists = await DealRepository.Query().AnyAsync(d => d.DealId == request.DealId && d.TenantId == tenantId);
-                if (!dealExists) return NotFound(new { message = "Target deal record not found." });
-            }
-
-            BrochureCard card;
-            if (request.CardId.HasValue && request.CardId > 0)
-            {
-                card = await BrochureCardRepository.Query()
-                    .Include(c => c.Lines)
-                    .FirstOrDefaultAsync(c => c.CardId == request.CardId.Value && c.TenantId == tenantId);
-                if (card == null) return NotFound(new { message = "Brochure card not found." });
-                foreach (var ln in card.Lines.Where(l => !l.IsDeleted)) ln.IsDeleted = true;
-            }
-            else
-            {
-                card = new BrochureCard { TenantId = tenantId, DealId = request.DealId, BrokerAgentId = brokerName, Status = BrochureCardStatus.Active };
-                BrochureCardRepository.Add(card);
-                await DbContext.SaveChangesAsync();
-            }
-
-            card.ClientName = request.ClientName;
-            card.ClientEmail = request.ClientEmail;
-            card.ClientPhone = request.ClientPhone;
-            card.CompanyName = request.CompanyName;
-            card.CompanyLogoUrl = request.CompanyLogoUrl;
-            card.UpdatedAt = DateTime.UtcNow;
-
-            foreach (var unit in request.Units.Take(5))
-            {
-                BrochureCardLineRepository.Add(new BrochureCardLine
-                {
-                    CardId = card.CardId,
-                    PropertyId = unit.PropertyId,
-                    UnitId = unit.UnitId,
-                    UnitNumber = unit.UnitNumber ?? string.Empty,
-                    UnitDescription = unit.UnitDescription ?? string.Empty,
-                    PropertyDescription = unit.PropertyDescription ?? string.Empty,
-                    NetRentableAreaSqM = unit.NetRentableAreaSqM,
-                    SelectedImageRefs = unit.SelectedImageRefs != null && unit.SelectedImageRefs.Any() 
-                        ? string.Join(",", unit.SelectedImageRefs) 
-                        : string.Empty
-                });
-            }
-
-            await DbContext.SaveChangesAsync();
-            return Ok(new { cardId = card.CardId });
-        }
-
-        // 🧾 Remove a single unit line from a broker's card.
-        [HttpDelete("brochure-cards/{cardId:int}/lines/{lineId:int}")]
-        public async Task<IActionResult> DeleteBrochureCardLine(int cardId, int lineId)
-        {
-            if (!await PermissionCheck.HasPermissionAsync("billing:delete"))
-            {
-                Logger.LogWarning("DeleteBrochureCardLine: forbidden — caller lacks billing:delete permission");
-                return Forbid();
-            }
-
-            var tenantId = GetCurrentTenant();
-            var line = await BrochureCardLineRepository.Query().FirstOrDefaultAsync(l => l.LineId == lineId && l.CardId == cardId);
-            if (line == null) return NotFound(new { message = "Brochure card line not found." });
-            var owned = await BrochureCardRepository.Query().AnyAsync(c => c.CardId == cardId && c.TenantId == tenantId);
-            if (!owned) return Forbid();
-            line.IsDeleted = true;
-            await DbContext.SaveChangesAsync();
-            return Ok(new { message = "Brochure card line removed." });
-        }
-
-        // 🧾 Worker callback (AllowAnonymous — the worker holds no bearer token):
-        // close the card + advance the deal once the PDF has been rendered to disk.
-        [AllowAnonymous]
-        [HttpPost("brochure-cards/{cardId:int}/generated")]
-        public async Task<IActionResult> CompleteBrochureCard(int cardId, [FromBody] BrochureCardGeneratedDto payload)
-        {
-            if (payload == null) return BadRequest(new { message = "Callback payload is required." });
-
-            var card = await BrochureCardRepository.Query()
-                .Include(c => c.Lines)
-                .FirstOrDefaultAsync(c => c.CardId == cardId);
-            if (card == null) return NotFound(new { message = "Brochure card not found." });
-
-            card.Status = BrochureCardStatus.Generated;
-            card.IsDeleted = true;
-            card.GeneratedFilePath = string.IsNullOrWhiteSpace(payload.FilePath) ? card.GeneratedFilePath : payload.FilePath;
-            card.UpdatedAt = DateTime.UtcNow;
-
-            var deal = await DealRepository.Query()
-                .FirstOrDefaultAsync(d => d.DealId == card.DealId && d.TenantId == card.TenantId);
-            if (deal != null)
-            {
-                deal.DealStage = DealWorkflowStage.ProposalQuoteSent;
-                deal.LastStageUpdatedAt = DateTime.UtcNow;
-            }
-
-            await DbContext.SaveChangesAsync();
-            return Ok(new
-            {
-                message = "Brochure card closed and deal advanced to Proposal / Quote Sent.",
-                cardId = card.CardId,
-                dealStage = deal == null ? null : deal.DealStage.ToString()
-            });
-        }
         [HttpGet("report/broker-metrics")]
         public async Task<IActionResult> GetBrokerMetrics([FromQuery] string? tenantId, [FromQuery] string? brokerId = null, [FromQuery] string? month = null)
         {
@@ -1308,6 +1108,53 @@ namespace CRM.Microservice.Controllers
             var lastMonthGci = trend.Count >= 2 ? trend[^2].Gci : 0m;
             var trendPct = lastMonthGci == 0m ? 0m : Math.Round((thisMonthGci - lastMonthGci) / lastMonthGci * 100m, 1);
 
+            // 📊 Monthly target + progress: fetch up to 6 months of target entries
+            // for the effective broker, then merge with trend GCI to compute
+            // progress percentage for the gauge chart.
+            int lookbackMonths = targetMonth.HasValue ? 0 : 5;
+            var targetStartMonth = DateTime.UtcNow.AddMonths(-lookbackMonths);
+            var targetYear = targetMonth?.Year ?? 0;
+            var targetMonthNum = targetMonth?.Month ?? 0;
+
+            IQueryable<BrokerMonthlyTarget> targetQuery = BrokerTargetRepository.Query();
+            if (effectiveBrokerId != null)
+                targetQuery = targetQuery.Where(t => t.BrokerId == effectiveBrokerId);
+            else
+                targetQuery = targetQuery.Where(t => t.BrokerId == callerId);
+
+            if (targetMonthNum > 0)
+            {
+                targetQuery = targetQuery.Where(t => t.Year == targetYear && t.Month == targetMonthNum);
+            }
+            else
+            {
+                var ym = new DateTime(targetStartMonth.Year, targetStartMonth.Month, 1);
+                targetQuery = targetQuery.Where(t => t.CreatedAt >= ym);
+            }
+
+            var targets = await targetQuery
+                .Select(t => new
+                {
+                    t.Year,
+                    t.Month,
+                    Target = t.TargetCommission
+                })
+                .ToListAsync();
+
+            var targetProgress = targets.Select(t => {
+                var monthTrend = trend.FirstOrDefault(mt => mt.Year == t.Year && mt.Month == t.Month);
+                var realised = monthTrend?.Gci ?? 0m;
+                return new
+                {
+                    year = t.Year,
+                    month = t.Month,
+                    period = $"{t.Year}-{t.Month:D2}",
+                    target = Math.Round(t.Target, 2),
+                    realised = Math.Round(realised, 2),
+                    progress = t.Target == 0m ? 0m : Math.Round(realised / t.Target * 100m, 1)
+                };
+            }).ToList();
+
             return Ok(new
             {
                 gci = Math.Round(gci, 2),
@@ -1317,8 +1164,97 @@ namespace CRM.Microservice.Controllers
                 monthlyTrend,
                 gciTrendPct = trendPct,
                 dealCount = await deals.CountAsync(),
-                closedWonCount = await deals.CountAsync(d => d.DealStage == DealWorkflowStage.ClosedWon)
+                closedWonCount = await deals.CountAsync(d => d.DealStage == DealWorkflowStage.ClosedWon),
+                monthlyTargets = targetProgress
             });
+        }
+
+        // 📊 GET broker monthly targets (historical entries). For brokers, returns
+        // only their own targets. For admins, can pass brokerId to filter.
+        [HttpGet("broker-targets")]
+        public async Task<IActionResult> GetBrokerTargets(
+            [FromQuery] string? brokerId = null,
+            [FromQuery] int? year = null,
+            [FromQuery] string? tenantId = null)
+        {
+            if (!await PermissionCheck.HasPermissionAsync("billing:view"))
+                return Forbid();
+
+            var role = GetCurrentCanonicalRole();
+            var callerId = GetCurrentUserId();
+            var effectiveBrokerId = brokerId;
+
+            if (role == "Broker")
+            {
+                effectiveBrokerId = callerId;
+            }
+
+            var query = BrokerTargetRepository.Query();
+            if (!string.IsNullOrEmpty(effectiveBrokerId))
+                query = query.Where(t => t.BrokerId == effectiveBrokerId);
+            if (year.HasValue)
+                query = query.Where(t => t.Year == year.Value);
+
+            var targets = await query
+                .Select(t => new
+                {
+                    id = t.Id,
+                    brokerId = t.BrokerId,
+                    year = t.Year,
+                    month = t.Month,
+                    targetCommission = t.TargetCommission,
+                    createdAt = t.CreatedAt,
+                    updatedAt = t.UpdatedAt
+                })
+                .OrderByDescending(t => t.year)
+                .ThenByDescending(t => t.month)
+                .ToListAsync();
+
+            return Ok(targets);
+        }
+
+        // 📊 POST set a broker's monthly target (upsert for a given year+month).
+        // Brokers can only set targets for themselves. Admins can set for any broker.
+        [HttpPost("broker-targets")]
+        public async Task<IActionResult> SetBrokerTarget([FromBody] SetBrokerMonthlyTargetRequest request)
+        {
+            if (!await PermissionCheck.HasPermissionAsync("billing:edit"))
+                return Forbid();
+
+            var role = GetCurrentCanonicalRole();
+            var callerId = GetCurrentUserId();
+            var tenantId = GetCurrentTenant();
+
+            string effectiveBrokerId = request.BrokerId ?? callerId;
+            if (role == "Broker" && effectiveBrokerId != callerId)
+                return Forbid();
+
+            if (request.TargetCommission < 0)
+                return BadRequest(new { message = "Target commission must be non-negative." });
+
+            var existing = await BrokerTargetRepository.Query()
+                .FirstOrDefaultAsync(t => t.BrokerId == effectiveBrokerId && t.Year == request.Year && t.Month == request.Month);
+
+            if (existing == null)
+            {
+                var target = new BrokerMonthlyTarget
+                {
+                    BrokerId = effectiveBrokerId,
+                    TenantId = tenantId,
+                    Year = request.Year,
+                    Month = request.Month,
+                    TargetCommission = request.TargetCommission
+                };
+                BrokerTargetRepository.Add(target);
+            }
+            else
+            {
+                existing.TargetCommission = request.TargetCommission;
+                existing.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await DbContext.SaveChangesAsync();
+            return Ok(new { message = "Broker target saved." });
         }
 
         // 📊 Activity log: recent deal stage changes for a specific broker.

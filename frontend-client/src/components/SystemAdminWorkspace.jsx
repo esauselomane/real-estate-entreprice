@@ -473,8 +473,18 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   </div>
                   <input value={agencyForm.companyLogoUrl} onChange={(e) => setAgencyForm({ ...agencyForm, companyLogoUrl: e.target.value })} placeholder="Logo URL" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
 
-                  <input value={agencyForm.contactEmail} onChange={(e) => setAgencyForm({ ...agencyForm, contactEmail: e.target.value })} type="email" placeholder="Contact email" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
-                  <input value={agencyForm.headquartersAddress} onChange={(e) => setAgencyForm({ ...agencyForm, headquartersAddress: e.target.value })} placeholder="Headquarters address" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                   <input value={agencyForm.contactEmail} onChange={(e) => setAgencyForm({ ...agencyForm, contactEmail: e.target.value })} type="email" placeholder="Contact email" className={`col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white ${editingAgency ? 'hidden' : ''}`} required={editingAgency ? false : true} />
+                   {editingAgency && (
+                     <div className="col-span-2 text-xs text-slate-500">
+                       Contact email is managed via the linked user record.
+                     </div>
+                   )}
+                   <input value={agencyForm.headquartersAddress} onChange={(e) => setAgencyForm({ ...agencyForm, headquartersAddress: e.target.value })} placeholder="Headquarters address" className={`col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white ${editingAgency ? 'hidden' : ''}`} />
+                   {editingAgency && (
+                     <div className="col-span-2 text-xs text-slate-500">
+                       Headquarters address is managed at the corporate entity level.
+                     </div>
+                   )}
 
                   {/* 🧬 PARENT AGENCY — PlatformAdmin may nest this agency under an existing parent to model a sub-brand / branch */}
                   <select value={agencyForm.parentAgencyId} onChange={(e) => setAgencyForm({ ...agencyForm, parentAgencyId: e.target.value })} className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">

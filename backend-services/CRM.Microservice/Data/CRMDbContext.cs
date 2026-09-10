@@ -6,8 +6,23 @@ using CRM.Microservice.Models;
 
 namespace CRM.Microservice.Data
 {
-    public class CRMDbContext : DbContext
+    public partial class CRMDbContext : DbContext
     {
+        private static ContactType ParseContactType(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return ContactType.None;
+
+            var parts = value                .Split(',', StringSplitOptions.RemoveEmptyEntries);
+            ContactType result = ContactType.None;
+            foreach (var part in parts)
+            {
+                if (Enum.TryParse<ContactType>(part, true, out var parsed))
+                    result |= parsed;
+            }
+            return result;
+        }
+
         public CRMDbContext(DbContextOptions<CRMDbContext> options) : base(options)
         {
         }
@@ -28,6 +43,7 @@ namespace CRM.Microservice.Data
         public DbSet<BrochureCardLine> BrochureCardLines { get; set; } = null!;
         public DbSet<DealBrokerSplit> DealBrokerSplits { get; set; } = null!;
         public DbSet<Notification> Notifications { get; set; } = null!;
+        public DbSet<BrokerMonthlyTarget> BrokerMonthlyTargets { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -61,7 +77,9 @@ namespace CRM.Microservice.Data
 
             modelBuilder.Entity<Contact>()
                 .Property(c => c.ContactType)
-                .HasConversion<string>();
+                .HasConversion(
+                    v => v.ToString(),
+                    v => ParseContactType(v));
 
             modelBuilder.Entity<Contact>()
                 .HasOne(c => c.CompanyDetails)

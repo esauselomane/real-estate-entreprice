@@ -3,15 +3,18 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace CRM.Microservice.Models
 {
+    [Flags]
     public enum ContactType
     {
-        Buyer,
-        Seller,
-        Broker,
-        Owner,
-        Tenant,
-        Staff,
-        Manager
+        None = 0,
+        Buyer = 1,
+        Seller = 2,
+        Broker = 4,
+        Owner = 8,
+        Tenant = 16,
+        Staff = 32,
+        Manager = 64,
+        All = Buyer | Seller | Broker | Owner | Tenant | Staff | Manager
     }
 
     public class Contact

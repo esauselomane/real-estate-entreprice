@@ -66,6 +66,7 @@ builder.Services.AddScoped<IBrochureCardRepository, BrochureCardRepository>();
 builder.Services.AddScoped<IRepository<BrochureCardLine>, BrochureCardLineRepository>();
 builder.Services.AddScoped<IDealBrokerSplitRepository, DealBrokerSplitRepository>();
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
+builder.Services.AddScoped<IRepository<BrokerMonthlyTarget>, BrokerMonthlyTargetRepository>();
 builder.Services.AddScoped<IContactPersonRepository, ContactPersonRepository>();
 builder.Services.AddScoped<IUserGrowthRepository, UserGrowthRepository>();
 builder.Services.AddScoped<IPropertyCountService, PropertyCountService>();

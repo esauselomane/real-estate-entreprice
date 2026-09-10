@@ -8,6 +8,12 @@ import SearchableSelect from '../components/SearchableSelect.jsx';
 export default function CRMWorkspace() {
   const { hasPermission } = usePermission();
 
+  const normalizeContactTypes = (contactType) => {
+    if (!contactType) return [];
+    if (Array.isArray(contactType)) return contactType;
+    return contactType.split(',').map(t => t.trim()).filter(Boolean);
+  };
+
   const [activeTab, setActiveTab] = useState('contacts');
 
   const [companies, setCompanies] = useState([]);
@@ -41,7 +47,7 @@ export default function CRMWorkspace() {
   });
   const [contactForm, setContactForm] = useState({
     fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
-    contactType: 'Buyer', associatedCompanyId: '',
+    contactType: ['Buyer'], associatedCompanyId: '',
     linkedDealIds: '', area: '', budget: ''
   });
 
@@ -77,7 +83,9 @@ export default function CRMWorkspace() {
 
       if (activeTab === 'contacts') {
         const res = await crmService.getContacts(ctPage);
-        setContacts((prev) => resetPages ? ((res || []).items || (res || [])) : [...prev, ...((res || []).items || (res || []))]);
+        const rawItems = (res || []).items || (res || []);
+        const normalized = rawItems.map(c => ({ ...c, contactType: normalizeContactTypes(c.contactType) }));
+        setContacts((prev) => resetPages ? normalized : [...prev, ...normalized]);
         setContactsTotalCount((res || []).totalCount || 0);
       }
     } catch (err) {
@@ -175,6 +183,9 @@ export default function CRMWorkspace() {
       const { associatedLegalEntityId, ...contactPayload } = editingContact;
       await crmService.updateContact({
         ...contactPayload,
+        contactType: Array.isArray(editingContact.contactType)
+          ? editingContact.contactType.join(',')
+          : editingContact.contactType,
         associatedLegalEntityId: '',
         linkedDealIds: editingContact.linkedDealIds || ''
       });
@@ -190,11 +201,12 @@ export default function CRMWorkspace() {
     try {
       await crmService.createContact({
         ...contactForm,
+        contactType: (contactForm.contactType || []).join(','),
         linkedDealIds: contactForm.linkedDealIds || ''
       });
       setContactForm({
         fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
-        contactType: 'Buyer', associatedCompanyId: '',
+        contactType: [], associatedCompanyId: '',
         linkedDealIds: '', area: '', budget: ''
       });
       setIsContactFormOpen(false);
@@ -374,7 +386,7 @@ export default function CRMWorkspace() {
                       if (!isContactFormOpen) {
             setContactForm({
                           fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '',
-                          contactType: 'Buyer', associatedCompanyId: '',
+                          contactType: [], associatedCompanyId: '',
                           linkedDealIds: '', area: '', budget: ''
                         });
                       }
@@ -447,7 +459,23 @@ export default function CRMWorkspace() {
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Email</label><input required type="email" value={contactForm.emailAddress} onChange={(e) => setContactForm({ ...contactForm, emailAddress: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Phone</label><input type="text" value={contactForm.phoneNumber} onChange={(e) => setContactForm({ ...contactForm, phoneNumber: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Job Title</label><input type="text" value={contactForm.positionJobTitle} onChange={(e) => setContactForm({ ...contactForm, positionJobTitle: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Contact Type</label><select value={contactForm.contactType} onChange={(e) => setContactForm({ ...contactForm, contactType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option>Buyer</option><option>Seller</option><option>Broker</option><option>Owner</option><option>Tenant</option><option>Staff</option><option>Manager</option></select></div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-[10px] text-slate-400 uppercase">Contact Type (select multiple)</label>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {['Buyer','Seller','Broker','Owner','Tenant','Staff','Manager'].map((type) => {
+                      const checked = (contactForm.contactType || []).includes(type);
+                      return (
+                        <label key={type} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                          <input type="checkbox" checked={checked} onChange={(e) => {
+                            const types = contactForm.contactType || [];
+                            setContactForm({ ...contactForm, contactType: e.target.checked ? [...types, type] : types.filter(t => t !== type) });
+                          }} className="rounded bg-slate-900 border border-slate-700" />
+                          {type}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Preferred Area</label><input type="text" placeholder="e.g. Sandton, Cape Town" value={contactForm.area} onChange={(e) => setContactForm({ ...contactForm, area: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Budget</label><input type="text" placeholder="e.g. R 1.5M - 2M" value={contactForm.budget} onChange={(e) => setContactForm({ ...contactForm, budget: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Linked Deal IDs (CSV)</label><input type="text" placeholder="e.g. 12,15" value={contactForm.linkedDealIds} onChange={(e) => setContactForm({ ...contactForm, linkedDealIds: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
@@ -497,7 +525,7 @@ export default function CRMWorkspace() {
             <div key={con.contactId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center hover:border-slate-700 transition-colors">
               <div>
                 <h4 className="text-white font-bold text-base tracking-tight">{con.fullName}</h4>
-                <p className="text-xs text-slate-400 mt-1">Type: <span className="text-purple-400 font-bold">{con.contactType}</span> ({con.positionJobTitle}) • Email: {con.emailAddress} • Phone: {con.phoneNumber}</p>
+                <p className="text-xs text-slate-400 mt-1">Type: <span className="text-purple-400 font-bold">{Array.isArray(con.contactType) ? con.contactType.join(', ') : con.contactType}</span> ({con.positionJobTitle}) • Email: {con.emailAddress} • Phone: {con.phoneNumber}</p>
                 {(con.area || con.budget) && (
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     Area: <span className="text-slate-400">{con.area || 'N/A'}</span> • Budget: <span className="text-slate-400">{con.budget || 'N/A'}</span>
@@ -513,7 +541,7 @@ export default function CRMWorkspace() {
                 )}
               </div>
               <Can permission="users:edit">
-                <button onClick={() => setEditingContact(con)} className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-800 transition-colors cursor-pointer"><Edit2 size={14} /></button>
+                <button onClick={() => setEditingContact({ ...con, contactType: normalizeContactTypes(con.contactType) })} className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl border border-slate-800 transition-colors cursor-pointer"><Edit2 size={14} /></button>
               </Can>
             </div>
           ))}
@@ -630,7 +658,35 @@ export default function CRMWorkspace() {
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Email</label><input required type="email" value={editingContact ? editingContact.emailAddress : contactForm.emailAddress} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, emailAddress: e.target.value }) : setContactForm({ ...contactForm, emailAddress: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Phone</label><input type="text" value={editingContact ? editingContact.phoneNumber : contactForm.phoneNumber} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, phoneNumber: e.target.value }) : setContactForm({ ...contactForm, phoneNumber: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Job Title</label><input type="text" value={editingContact ? editingContact.positionJobTitle : contactForm.positionJobTitle} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, positionJobTitle: e.target.value }) : setContactForm({ ...contactForm, positionJobTitle: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Contact Type</label><select value={editingContact ? editingContact.contactType : contactForm.contactType} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, contactType: e.target.value }) : setContactForm({ ...contactForm, contactType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"><option>Buyer</option><option>Seller</option><option>Broker</option><option>Owner</option><option>Tenant</option><option>Staff</option><option>Manager</option></select></div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-[10px] text-slate-400 uppercase">Contact Type (select multiple)</label>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {['Buyer','Seller','Broker','Owner','Tenant','Staff','Manager'].map((type) => {
+                      const types = editingContact
+                        ? (Array.isArray(editingContact.contactType)
+                            ? editingContact.contactType
+                            : (editingContact.contactType || '').split(',').map(t => t.trim()).filter(Boolean))
+                        : (contactForm.contactType || []);
+                      const checked = types.includes(type);
+                      return (
+                        <label key={type} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                          <input type="checkbox" checked={checked} onChange={(e) => {
+                            if (editingContact) {
+                              const existing = Array.isArray(editingContact.contactType)
+                                ? editingContact.contactType
+                                : (editingContact.contactType || '').split(',').map(t => t.trim()).filter(Boolean);
+                              setEditingContact({ ...editingContact, contactType: e.target.checked ? [...existing, type] : existing.filter(t => t !== type) });
+                            } else {
+                              const existing = contactForm.contactType || [];
+                              setContactForm({ ...contactForm, contactType: e.target.checked ? [...existing, type] : existing.filter(t => t !== type) });
+                            }
+                          }} className="rounded bg-slate-950 border border-slate-700" />
+                          {type}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Primary Location</label><input type="text" placeholder="e.g. Sandton" value={editingContact ? (editingContact.primaryLocation || '') : contactForm.area} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, primaryLocation: e.target.value }) : setContactForm({ ...contactForm, area: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Budget Limit</label><input type="number" placeholder="e.g. 1500000" value={editingContact ? (editingContact.budgetLimit || '') : contactForm.budget} onChange={(e) => editingContact ? setEditingContact({ ...editingContact, budgetLimit: parseFloat(e.target.value) || null }) : setContactForm({ ...contactForm, budget: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Company</label>

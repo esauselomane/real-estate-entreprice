@@ -10,6 +10,7 @@ import {
 import { crmService } from '../services/crmService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
+import LoadingOverlay from './LoadingOverlay.jsx';
 
 const fmtCurrency = (n) => {
   const num = Number(n || 0);
@@ -122,9 +123,7 @@ export default function AgencyGlance() {
 
   if (loading && !summary && !tabData) {
     return (
-      <div className="p-6 text-center text-slate-500">
-        Loading agency data…
-      </div>
+      <LoadingOverlay label="Loading agency data…" subtitle="Aggregating KPIs and growth metrics" />
     );
   }
 
