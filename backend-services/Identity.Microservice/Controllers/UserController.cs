@@ -54,19 +54,20 @@ namespace Identity.Microservice.Controllers
             if (user == null)
                 return NotFound(new { message = "User account not found." });
 
-            return Ok(new UserProfileResponse
-            {
-                UserId = user.UserId,
-                FullName = user.FullName,
-                Email = user.Email,
-                SystemRole = user.SystemRole,
-                TenantId = user.TenantId,
-                AvatarUrl = user.AvatarUrl,
-                LicenseNumber = user.LicenseNumber,
-                LicenseExpiry = user.LicenseExpiry,
-                OutOfOffice = user.OutOfOffice,
-                AccountStatus = user.AccountStatus
-            });
+             return Ok(new UserProfileResponse
+             {
+                 UserId = user.UserId,
+                 FullName = user.FullName,
+                 Email = user.Email,
+                 SystemRole = user.SystemRole,
+                 TenantId = user.TenantId,
+                 AvatarUrl = user.AvatarUrl,
+                 LicenseNumber = user.LicenseNumber,
+                 LicenseExpiry = user.LicenseExpiry,
+                 OutOfOffice = user.OutOfOffice,
+                 EpilepsySafeMode = user.EpilepsySafeMode,
+                 AccountStatus = user.AccountStatus
+             });
         }
 
         // --- ✏️ PUT update self-admin profile (OOO toggle, display name) ---
@@ -86,19 +87,23 @@ namespace Identity.Microservice.Controllers
             if (request.FullName != null)
                 user.FullName = request.FullName;
 
-            if (request.OutOfOffice.HasValue)
-                user.OutOfOffice = request.OutOfOffice.Value;
+             if (request.OutOfOffice.HasValue)
+                 user.OutOfOffice = request.OutOfOffice.Value;
+
+            if (request.EpilepsySafeMode.HasValue)
+                user.EpilepsySafeMode = request.EpilepsySafeMode.Value;
 
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Profile updated for UserId={UserId} OutOfOffice={OutOfOffice}",
-                userId, user.OutOfOffice);
+            _logger.LogInformation("Profile updated for UserId={UserId} OutOfOffice={OutOfOffice} EpilepsySafeMode={EpilepsySafeMode}",
+                userId, user.OutOfOffice, user.EpilepsySafeMode);
 
             return Ok(new
             {
                 message = "Profile updated successfully.",
                 fullName = user.FullName,
-                outOfOffice = user.OutOfOffice
+                outOfOffice = user.OutOfOffice,
+                epilepsySafeMode = user.EpilepsySafeMode
             });
         }
 

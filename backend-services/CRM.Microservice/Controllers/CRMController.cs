@@ -1195,7 +1195,7 @@ namespace CRM.Microservice.Controllers
             });
         }
         [HttpGet("report/broker-metrics")]
-        public async Task<IActionResult> GetBrokerMetrics([FromQuery] string? tenantId, [FromQuery] string? brokerId = null)
+        public async Task<IActionResult> GetBrokerMetrics([FromQuery] string? tenantId, [FromQuery] string? brokerId = null, [FromQuery] string? month = null)
         {
             if (!await PermissionCheck.HasPermissionAsync("billing:view"))
                 return Forbid();
@@ -1247,10 +1247,13 @@ namespace CRM.Microservice.Controllers
             {
                 var propertyBaseUrl = HttpContext.RequestServices
                     .GetRequiredService<IConfiguration>()["Services:PropertyBaseUrl"]
-                    ?? "http://localhost:5002";
+                    ?? "http://localhost:5000/gateway";
                 using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
+                var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
+                if (!string.IsNullOrEmpty(authHeader))
+                    http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authHeader.Replace("Bearer ", ""));
                 var tenantList = string.Join(',', tenantIds);
-                var resp = await http.GetAsync($"/api/properties/active-listings-count?tenantId={Uri.EscapeDataString(tenantList)}"
+                var resp = await http.GetAsync($"/properties/active-listings-count?tenantId={Uri.EscapeDataString(tenantList)}"
                     + (effectiveBrokerId != null ? $"&linkedBrokerId={Uri.EscapeDataString(effectiveBrokerId)}" : ""));
                 if (resp.IsSuccessStatusCode)
                 {
@@ -1265,10 +1268,15 @@ namespace CRM.Microservice.Controllers
                 Logger.LogWarning(ex, "GetBrokerMetrics: could not fetch active-listings count from property service");
             }
 
-            // Monthly trend (last 6 months) — GCI vs CompanyDollar per month.
-            var sixMonthsAgo = DateTime.UtcNow.AddMonths(-5);
+            // Monthly trend (last 6 months by default, or a specific month if provided).
+            DateTime? targetMonth = null;
+            if (!string.IsNullOrWhiteSpace(month) && DateTime.TryParseExact(month, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out var parsedMonth))
+                targetMonth = parsedMonth;
+
+            int monthsToLookBack = targetMonth.HasValue ? 0 : 5;
+            var startDate = DateTime.UtcNow.AddMonths(-monthsToLookBack);
             var trend = await deals
-                .Where(d => d.CreatedAt >= new DateTime(sixMonthsAgo.Year, sixMonthsAgo.Month, 1))
+                .Where(d => d.CreatedAt >= new DateTime(startDate.Year, startDate.Month, 1))
                 .GroupBy(d => new { d.CreatedAt.Year, d.CreatedAt.Month })
                 .Select(g => new
                 {
@@ -1281,6 +1289,12 @@ namespace CRM.Microservice.Controllers
                 })
                 .OrderBy(x => x.Year).ThenBy(x => x.Month)
                 .ToListAsync();
+
+            // If a specific month was requested, filter the trend to just that month.
+            if (targetMonth.HasValue)
+            {
+                trend = trend.Where(t => t.Year == targetMonth.Value.Year && t.Month == targetMonth.Value.Month).ToList();
+            }
             var monthlyTrend = trend.Select(t => new
             {
                 period = $"{t.Year}-{t.Month:D2}",
@@ -1305,6 +1319,71 @@ namespace CRM.Microservice.Controllers
                 dealCount = await deals.CountAsync(),
                 closedWonCount = await deals.CountAsync(d => d.DealStage == DealWorkflowStage.ClosedWon)
             });
+        }
+
+        // 📊 Activity log: recent deal stage changes for a specific broker.
+        // Returns the last {limit} entries (default 10). Each entry includes
+        // the deal stage transition timestamp so the frontend can poll
+        // "since" the last entry seen.
+        [HttpGet("broker-activity")]
+        public async Task<IActionResult> GetBrokerActivity(
+            [FromQuery] string? brokerId = null,
+            [FromQuery] string? tenantId = null,
+            [FromQuery] int limit = 10,
+            [FromQuery] DateTime? since = null)
+        {
+            if (!await PermissionCheck.HasPermissionAsync("deals:view"))
+                return Forbid();
+
+            var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            var role = GetCurrentCanonicalRole();
+
+            string? effectiveBrokerId = brokerId;
+            if (role == "Broker")
+            {
+                if (!string.IsNullOrWhiteSpace(brokerId) && brokerId != GetCurrentUserId())
+                    return Forbid();
+                effectiveBrokerId = GetCurrentUserId();
+            }
+
+            if (string.IsNullOrWhiteSpace(effectiveBrokerId))
+            {
+                Logger.LogWarning("GetBrokerActivity: no brokerId provided and caller is not a broker");
+                return BadRequest(new { message = "brokerId is required for non-broker callers." });
+            }
+
+            var bid = effectiveBrokerId;
+            IQueryable<DealRecord> query = DealRepository.Query()
+                .Where(d => d.TenantId == visibleTenants.FirstOrDefault()
+                    && (d.AllocatedBrokerIds == bid
+                        || d.AllocatedBrokerIds.StartsWith(bid + ",")
+                        || d.AllocatedBrokerIds.Contains("," + bid)));
+
+            if (since.HasValue)
+                query = query.Where(d => d.LastStageUpdatedAt > since.Value);
+
+            var activities = await query
+                .OrderByDescending(d => d.LastStageUpdatedAt)
+                .Take(limit)
+                .Select(d => new
+                {
+                    DealId = d.DealId,
+                    d.DealStage,
+                    PreviousStage = d.PreviousStage,
+                    NewStage = d.DealStage.ToString(),
+                    StageName = d.DealStage.ToString(),
+                    d.TransactionValue,
+                    d.RealisedCommission,
+                    BrokerId = bid,
+                    BrokerName = "Pending", // resolved below if available
+                    DealAddress = d.PropertyAddress.Length > 0 ? d.PropertyAddress : d.DealId.ToString(),
+                    d.LastStageUpdatedAt,
+                    d.CreatedAt
+                })
+                .ToListAsync();
+
+            HttpContext.Response.Headers["X-New-Activity-Count"] = activities.Count.ToString();
+            return Ok(activities);
         }
 
         // 📋 Agent performance leaderboard: list of every broker in the
@@ -1465,6 +1544,8 @@ namespace CRM.Microservice.Controllers
 
             return Ok(items.OrderBy(i => ((dynamic)i).severity == "critical" ? 0 : 1).ToList());
         }
+
+        [HttpGet("notifications")]
         public async Task<IActionResult> GetNotifications([FromQuery] string? tenantId, [FromQuery] bool unreadOnly = false, [FromQuery] int limit = 50)
         {
             var role = GetCurrentCanonicalRole();
@@ -1554,6 +1635,60 @@ namespace CRM.Microservice.Controllers
             NotificationRepository.Add(n);
             await DbContext.SaveChangesAsync();
             return Created($"/crm/notifications/{n.NotificationId}", n);
+        }
+
+        // 📢 Agency-wide messaging: admin broadcasts a message to all users
+        // in the current tenant, optionally filtered by role.
+        [Authorize]
+        [HttpPost("agency/message")]
+        public async Task<IActionResult> BroadcastAgencyMessage([FromBody] BroadcastMessagePayload payload)
+        {
+            if (!await PermissionCheck.HasPermissionAsync("billing:view"))
+                return Forbid();
+
+            if (payload == null || string.IsNullOrWhiteSpace(payload.Title))
+                return BadRequest(new { message = "Title is required." });
+
+            var tenantIds = await GetVisibleTenantIdsAsync(null);
+            if (tenantIds.Count == 0)
+                return BadRequest(new { message = "No visible tenant for the caller." });
+
+            var role = GetCurrentCanonicalRole();
+            var callerId = GetCurrentUserId();
+            var tenantId = tenantIds.FirstOrDefault();
+
+            // Resolve target role into notification category
+            var category = string.IsNullOrWhiteSpace(payload.RoleFilter)
+                ? "announcement"
+                : $"agency:{payload.RoleFilter.ToLower()}";
+
+            // Create a tenant-broadcast notification (UserId = null → visible to all in tenant)
+            var notification = new Notification
+            {
+                TenantId = tenantId,
+                UserId = string.Empty, // broadcast to everyone in the tenant
+                Category = category,
+                Title = payload.Title,
+                Body = payload.Body ?? string.Empty,
+                LinkType = payload.LinkType ?? string.Empty,
+                LinkId = payload.LinkId ?? string.Empty,
+                IsRead = false,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            NotificationRepository.Add(notification);
+            await DbContext.SaveChangesAsync();
+
+            Logger.LogInformation("BroadcastAgencyMessage: caller={Caller} tenant={Tenant} roleFilter={RoleFilter} title={Title}",
+                callerId, tenantId, payload.RoleFilter ?? "(all)", payload.Title);
+
+            return Created($"/crm/notifications/{notification.NotificationId}", new
+            {
+                message = "Agency message broadcast.",
+                notificationId = notification.NotificationId,
+                recipients = "all_users_in_tenant",
+                roleFilter = payload.RoleFilter ?? "(all)"
+            });
         }
 
     }

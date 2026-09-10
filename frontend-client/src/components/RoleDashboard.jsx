@@ -121,7 +121,7 @@ export default function RoleDashboard() {
               { title: 'Agency operational status', icon: ShieldCheck, kind: 'pie', data: Object.entries(statusBuckets).map(([name, value]) => ({ name, value })), colors: STATUS_COLORS },
             { title: 'Property type market share', icon: PieIcon, kind: 'pie', data: marketShare, colors: TYPE_COLORS, colorKey: true },
              { title: 'Monthly platform revenue', icon: TrendingUp, kind: 'bar', data: (overview.monthlyBreakdown || []).map((m) => ({ name: m.Period, value: Number(m.Revenue || 0) })), colors: { default: '#3b82f6' } },
-            { title: 'Commission realised by stage', icon: BarChart2, kind: 'bar', data: commissionStages, colors: DEAL_COLORS }
+            { title: 'Commission realised by stage', icon: BarChart2, kind: 'bar', data: (commissionStages || []).map((c) => ({ name: formatTitle(c.Period), value: Number(c.Revenue || 0) })), colors: DEAL_COLORS }
           ]);
          } else if (role === 'AgencyAdmin') {
           // 🎯 AgencyAdmin gets tenant-scoped pipeline summary, monthly trends, and commission data

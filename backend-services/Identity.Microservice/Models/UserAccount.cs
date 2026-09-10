@@ -47,6 +47,10 @@ namespace Identity.Microservice.Models
         // from the profile pop-out view.
         public bool OutOfOffice { get; set; } = false;
 
+        // Accessibility preference — disables celebratory animations, confetti, and rapid transitions
+        // to support users with epilepsy or photosensitive conditions.
+        public bool EpilepsySafeMode { get; set; } = false;
+
         // Dynamic relational reference linking back to our target onboarding agency profile records
         [ForeignKey("TenantId")]
         public TenantAgency? AgencyDetails { get; set; }

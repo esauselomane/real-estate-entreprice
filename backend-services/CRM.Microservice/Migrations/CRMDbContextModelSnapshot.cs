@@ -566,6 +566,14 @@ namespace CRM.Microservice.Migrations
                     b.Property<int?>("LinkedPropertyId")
                         .HasColumnType("int");
 
+                    b.Property<string>("PreviousStage")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PropertyAddress")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<decimal?>("RealisedCommission")
                         .HasColumnType("decimal(18,2)");
 

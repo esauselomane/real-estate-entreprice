@@ -5,6 +5,7 @@ import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { useAgency } from '../contexts/AgencyContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import UserSelfAdminPopout from './UserSelfAdminPopout.jsx';
+import AgencyGlance from './AgencyGlance.jsx';
 
 export default function LeftSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -31,6 +32,7 @@ export default function LeftSidebar() {
     { name: 'Clients (Tenants/Owners)', view: 'owners-tenants', icon: Users, permission: 'users:view' },
     { name: 'Performance Reports', view: 'reports', icon: BarChart3, permission: 'billing:view' },
     { name: 'System Admin', view: 'admin', icon: Shield, permission: 'agencies:view' },
+    { name: 'Agency at a Glance', view: 'agency-glance', icon: BarChart3, permission: 'billing:view' },
     { name: 'Roles & Permissions', view: 'roles', icon: Settings, permission: 'system:roles:manage' },
   ];
 

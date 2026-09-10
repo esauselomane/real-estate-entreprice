@@ -81,12 +81,12 @@ export const crmService = {
    // user's tenantId is only used as the fallback so backend filters are
    // driven by the visible "active tenant" in the UI rather than the JWT-bound
    // session tenant.
-   _tenantQueryParams: () => {
-     const override = resolveActiveTenantOverride();
-     if (override && override !== '__all__') return { tenantId: override };
-     const fallback = resolveLoggedInTenantId();
-     return fallback ? { tenantId: fallback } : {};
-   },
+    _tenantQueryParams: () => {
+      const override = resolveActiveTenantOverride();
+      if (override) return { tenantId: override };
+      const fallback = resolveLoggedInTenantId();
+      return fallback ? { tenantId: fallback } : {};
+    },
 
    // 🛰️ Resolves the tenant id a write should be stamped with: the active
    // override (when set to a specific agency) takes precedence; otherwise the
@@ -725,12 +725,14 @@ export const crmService = {
   // 🛎️ BROKER DASHBOARD + NOTIFICATIONS
   // ============================================================
 
-  // 📊 KPI metrics for the broker dashboard. Pass brokerId to filter
+   // 📊 KPI metrics for the broker dashboard. Pass brokerId to filter
   // to a single broker; omit to aggregate the whole tenant.
-  getBrokerMetrics: async (brokerId = null) => {
+  // monthParam: "yyyy-MM" string (e.g. "2025-03") or null for last 6 months.
+  getBrokerMetrics: async (brokerId = null, monthParam = null) => {
     try {
       const params = { ...crmService._tenantQueryParams() };
       if (brokerId) params.brokerId = brokerId;
+      if (monthParam) params.month = monthParam;
       const response = await apiClient.get('/crm/report/broker-metrics', { params });
       return response.data;
     } catch (error) {
@@ -790,7 +792,58 @@ export const crmService = {
      } catch (error) {
        throw normalizeError(error.response?.data?.message, 'Notification create failed.');
      }
-   },
+    },
+
+  // 📊 Activity log for a broker — recent deal stage changes.
+  // Pass lastTimestamp to get only entries after that point (polling).
+   getBrokerActivity: async (brokerId, lastTimestamp) => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      if (brokerId) params.brokerId = brokerId;
+      if (lastTimestamp) params.since = lastTimestamp;
+      const response = await apiClient.get('/crm/broker-activity', { params });
+      return {
+        items: response.data,
+        newCount: Number(response.headers['x-new-activity-count'] || 0),
+      };
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Activity log sync failed.');
+    }
+  },
+
+  // 📢 Broadcast a message to agency users (optionally filtered by role)
+  broadcastAgencyMessage: async ({ title, body, roleFilter, linkType, linkId }) => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      const response = await apiClient.post('/crm/agency/message', { title, body, roleFilter, linkType, linkId }, { params });
+      return response.data;
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Messaging failed.');
+    }
+  },
+
+
+  // 📊 Agency Glance: KPI summary counts
+  getAgencyGlanceSummary: async () => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      const response = await apiClient.get('/crm/agency/glance/summary', { params });
+      return response.data || {};
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Agency glance summary failed.');
+    }
+  },
+
+  // 📋 Agency Glance: tab data (agency details, contacts, subscriptions, charts)
+  getAgencyGlanceTabs: async () => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      const response = await apiClient.get('/crm/agency/glance/tabs', { params });
+      return response.data || {};
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Agency glance tabs failed.');
+    }
+  },
 
     // 📥 Import data: download Excel template
     downloadImportTemplate: async () => {

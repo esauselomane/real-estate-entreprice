@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
-  Briefcase, Banknote, Home, Clock,   TrendingUp, TrendingDown,
-  AlertTriangle, Bell, ChevronRight, Send,
-  Users, CheckCircle2, ArrowUp, ArrowDown
+   Briefcase, Banknote, Home, Clock,   TrendingUp, TrendingDown,
+   AlertTriangle, Bell, ChevronRight, Send,
+   Users, CheckCircle2, ArrowUp, ArrowDown, Calendar
 } from 'lucide-react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -12,7 +12,24 @@ import { crmService } from '../services/crmService.js';
 import { authService } from '../services/authService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
+import { useCelebration } from './CelebrationOverlay.jsx';
+import { useEpilepsySafeMode } from './EpilepsySafeMode.jsx';
 import BrokerPicker from './BrokerPicker.jsx';
+
+const formatRelativeTime = (date) => {
+  const now = new Date();
+  const diffMs = now - new Date(date);
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin} min ago`;
+  if (diffHr < 24) return `${diffHr} hr ago`;
+  if (diffDay === 1) return 'yesterday';
+  if (diffDay < 7) return `${diffDay} days ago`;
+  if (diffDay < 30) return `${Math.floor(diffDay / 7)} wk ago`;
+  return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
 
 const fmtCurrency = (n) => {
   const num = Number(n || 0);
@@ -36,9 +53,26 @@ const monthLabel = (yyyymm) => {
   return new Date(y, m - 1, 1).toLocaleDateString('en-ZA', { month: 'short' });
 };
 
+const generateMonthOptions = () => {
+  const options = [];
+  const now = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const yyyymm = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    options.push({
+      value: yyyymm,
+      label: d.toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' })
+    });
+  }
+  return options;
+};
+const MONTH_OPTIONS = generateMonthOptions();
+
 export default function BrokerDashboard() {
   const { userRole, activeProfile } = useAuth();
   const { navigateTo, setBrochureDealTarget } = useAppUi();
+  const { triggerCelebration } = useCelebration();
+  const { epilepsySafeMode } = useEpilepsySafeMode();
 
   const isBroker = (userRole === 'Broker');
   const isAdmin = (userRole === 'AgencyAdmin' || userRole === 'PlatformAdmin');
@@ -51,13 +85,19 @@ export default function BrokerDashboard() {
 
   const [metrics, setMetrics] = useState(null);
    const [leaderboard, setLeaderboard] = useState([]);
-  const [sortKey, setSortKey] = useState('totalGci');
+   const [selectedMonth, setSelectedMonth] = useState('');
+   const [sortKey, setSortKey] = useState('totalGci');
   const [sortDir, setSortDir] = useState('desc');
   const [compliance, setCompliance] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [busyRemind, setBusyRemind] = useState(null);
-  const [userIndex, setUserIndex] = useState({});
+   const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [busyRemind, setBusyRemind] = useState(null);
+    const [userIndex, setUserIndex] = useState({});
+
+    // Activity log state — only populated when a broker is selected.
+    const [activityLog, setActivityLog] = useState([]);
+    const [lastActivityTimestamp, setLastActivityTimestamp] = useState(null);
+    const activityLogRef = useRef(null);
 
   // Build a broker-email → userId (USR-xxx) map so the "Remind Agent"
   // action can target the right user's bell. Brokers in the CRM are
@@ -79,7 +119,7 @@ export default function BrokerDashboard() {
     setError('');
     try {
       const [m, lb, ci] = await Promise.all([
-        crmService.getBrokerMetrics(effectiveBrokerId),
+        crmService.getBrokerMetrics(effectiveBrokerId, selectedMonth || null),
         crmService.getBrokerLeaderboard(effectiveBrokerId),
         crmService.getComplianceInbox(effectiveBrokerId),
       ]);
@@ -91,13 +131,51 @@ export default function BrokerDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [effectiveBrokerId]);
+  }, [effectiveBrokerId, selectedMonth]);
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh(); }, [refresh]);
 
+  // 📊 Activity log polling — only when a broker is active.
+  const fetchActivityLog = useCallback(async () => {
+    if (!effectiveBrokerId) return;
+    try {
+      const result = await crmService.getBrokerActivity(effectiveBrokerId, lastActivityTimestamp || null);
+      const newItems = result.items || [];
+      if (newItems.length > 0) {
+        setActivityLog((prev) => [...newItems, ...prev]);
+        const latestTs = newItems.reduce((max, item) => {
+          const ts = new Date(item.LastStageUpdatedAt || item.CreatedAt);
+          return ts > max ? ts : max;
+        }, new Date(0));
+        setLastActivityTimestamp(latestTs.toISOString());
+
+        // 🎉 Celebrate deal closings — skip in epilepsy-safe mode.
+        if (!epilepsySafeMode && result.newCount > 0) {
+          const closingItem = newItems.find((item) => {
+            const newStage = (item.NewStage || item.newStage || '').toLowerCase();
+            return newStage.includes('close') || newStage.includes('sold');
+          });
+          if (closingItem) {
+            triggerCelebration({
+              brokerName: closingItem.brokerName || closingItem.BrokerName || 'Broker',
+              dealAddress: closingItem.dealAddress || closingItem.DealAddress || '',
+            });
+          }
+        }
+      }
+    } catch (err) {
+      // soft-fail — the activity log is supplementary
+    }
+  }, [effectiveBrokerId, lastActivityTimestamp, triggerCelebration, epilepsySafeMode]);
+
+   useEffect(() => {
+     fetchActivityLog();
+     const handle = setInterval(fetchActivityLog, 30000);
+     return () => clearInterval(handle);
+   }, [fetchActivityLog]);
+
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (isAdmin) loadUsers();
   }, [isAdmin, loadUsers]);
 
@@ -215,6 +293,22 @@ export default function BrokerDashboard() {
             />
           </div>
         )}
+        <div className="w-full md:w-56">
+          <label className="block text-[10px] uppercase tracking-widest text-slate-500 mb-1 font-bold flex items-center gap-1">
+            <Calendar size={12} /> Report Month
+          </label>
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+            title="Filter the revenue trend and pipeline by month"
+          >
+            <option value="">Current (last 6 months)</option>
+            {MONTH_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {error && (
@@ -303,39 +397,75 @@ export default function BrokerDashboard() {
         </div>
       </div>
 
-      {/* ROW 3: leaderboard + compliance inbox */}
+      {/* ROW 3: leaderboard + activity log (when broker selected) or compliance inbox */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-          <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
-            <Users size={16} className="text-emerald-400" /> Agent Performance
-          </h3>
-          <p className="text-xs text-slate-500 mb-4">Sortable leaderboard for the active tenant</p>
-          {leaderboard.length === 0 ? (
-            <EmptyState label="No agents on the roster yet." />
-          ) : (
-            <div className="overflow-auto max-h-80 rounded-xl border border-slate-800">
-              <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-slate-900 z-10">
-                  <tr className="text-left text-slate-500 border-b border-slate-800">
-                    <SortHeader label="Agent" field="name" active={sortKey === 'name'} dir={sortDir === 'asc'} onRequest={requestSort} right={false} />
-                    <SortHeader label="Active Listings" field="activeListings" active={sortKey === 'activeListings'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />
-                    <SortHeader label="Deals Closed" field="dealsClosed" active={sortKey === 'dealsClosed'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />
-                    <SortHeader label="GCI Generated" field="totalGci" active={sortKey === 'totalGci'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortableRows.map((row) => (
-                    <tr key={row.brokerId} className={`border-b border-slate-800/50 ${pickedBroker?.brokerId === row.brokerId ? 'bg-blue-950/30' : 'hover:bg-slate-800/30'}`}>
-                      <td className="py-2.5 px-3 text-white font-medium">{row.name}</td>
-                      <td className="py-2.5 px-3 text-right text-slate-300">{fmtNumber(row.activeListings)}</td>
-                      <td className="py-2.5 px-3 text-right text-slate-300">{fmtNumber(row.dealsClosed)}</td>
-                      <td className="py-2.5 px-3 text-right font-semibold text-emerald-400">{fmtCurrency(row.totalGci)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+           <h3 className="text-sm font-semibold text-white mb-1 flex items-center gap-2">
+             <Users size={16} className="text-emerald-400" /> {effectiveBrokerId ? 'Broker Activity Log' : 'Agent Performance'}
+           </h3>
+           <p className="text-xs text-slate-500 mb-4">
+             {effectiveBrokerId ? 'Recent deal stage changes (polling every 30s)' : 'Sortable leaderboard for the active tenant'}
+           </p>
+           {effectiveBrokerId ? (
+             activityLog.length === 0 ? (
+               <EmptyState label="No recent activity." />
+             ) : (
+               <div className="overflow-auto max-h-80 rounded-xl border border-slate-800">
+                 <table className="w-full text-xs">
+                   <thead className="sticky top-0 bg-slate-900 z-10 border-b border-slate-800">
+                     <tr className="text-left text-slate-500">
+                       <th className="py-2 px-3 font-semibold">Broker</th>
+                       <th className="py-2 px-3 font-semibold">Deal</th>
+                       <th className="py-2 px-3 font-semibold">Stage Change</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                      {activityLog.map((entry, idx) => {
+                        const rawDate = entry.LastStageUpdatedAt || entry.CreatedAt;
+                        const ts = rawDate ? new Date(rawDate) : new Date(0);
+                        const safeKey = ts.getTime() > 0 ? ts.toISOString() : `item-${idx}`;
+                        return (
+                          <tr key={`${entry.dealId}-${entry.BrokerId || entry.brokerId}-${safeKey}`} className="border-b border-slate-800/50">
+                            <td className="py-2.5 px-3 text-white font-medium">{entry.brokerName || entry.BrokerName || 'Unknown'}</td>
+                            <td className="py-2.5 px-3 text-slate-300 truncate">{entry.dealAddress || entry.DealAddress || entry.dealId}</td>
+                            <td className="py-2.5 px-3 text-slate-400">
+                              {entry.PreviousStage !== undefined && entry.NewStage !== undefined
+                                ? `${entry.PreviousStage || entry.previousStage} → ${entry.NewStage || entry.newStage}`
+                                : <span className="text-slate-500">Updated {ts.getTime() > 0 ? formatRelativeTime(ts) : 'recently'}</span>}
+                           </td>
+                         </tr>
+                       );
+                     })}
+                   </tbody>
+                 </table>
+               </div>
+             )
+           ) : leaderboard.length === 0 ? (
+             <EmptyState label="No agents on the roster yet." />
+           ) : (
+             <div className="overflow-auto max-h-80 rounded-xl border border-slate-800">
+               <table className="w-full text-xs">
+                 <thead className="sticky top-0 bg-slate-900 z-10">
+                   <tr className="text-left text-slate-500 border-b border-slate-800">
+                     <SortHeader label="Agent" field="name" active={sortKey === 'name'} dir={sortDir === 'asc'} onRequest={requestSort} right={false} />
+                     <SortHeader label="Active Listings" field="activeListings" active={sortKey === 'activeListings'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />
+                     <SortHeader label="Deals Closed" field="dealsClosed" active={sortKey === 'dealsClosed'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />
+                     <SortHeader label="GCI Generated" field="totalGci" active={sortKey === 'totalGci'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />
+                   </tr>
+                 </thead>
+                 <tbody>
+                   {sortableRows.map((row) => (
+                     <tr key={row.brokerId} className={`border-b border-slate-800/50 ${pickedBroker?.brokerId === row.brokerId ? 'bg-blue-950/30' : 'hover:bg-slate-800/30'}`}>
+                       <td className="py-2.5 px-3 text-white font-medium">{row.name}</td>
+                       <td className="py-2.5 px-3 text-right text-slate-300">{fmtNumber(row.activeListings)}</td>
+                       <td className="py-2.5 px-3 text-right text-slate-300">{fmtNumber(row.dealsClosed)}</td>
+                       <td className="py-2.5 px-3 text-right font-semibold text-emerald-400">{fmtCurrency(row.totalGci)}</td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+             </div>
+           )}
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">

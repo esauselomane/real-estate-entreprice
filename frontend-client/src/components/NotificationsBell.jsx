@@ -16,12 +16,23 @@ export default function NotificationsBell() {
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const wrapperRef = useRef(null);
+  const seenIdsRef = useRef(new Set());
 
   const load = async () => {
     setIsLoading(true);
     try {
       const data = await crmService.getNotifications({ limit: 25 });
-      setItems(data.items || []);
+      const newItems = data.items || [];
+
+      // Cache seen IDs so notifications that were just shown (but not yet
+      // explicitly dismissed) are not re-flashed on the next poll cycle.
+      newItems.forEach((n) => {
+        if (n.IsRead) {
+          seenIdsRef.current.add(n.NotificationId);
+        }
+      });
+
+      setItems(newItems);
       setUnreadCount(data.unreadCount || 0);
     } catch {
       // soft-fail — bell badge is non-critical
@@ -51,7 +62,12 @@ export default function NotificationsBell() {
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
-  const handleClick = async (n) => {
+   const handleClick = async (n) => {
+    // Optimistically mark as seen/ read locally to avoid re-flash on next poll.
+    seenIdsRef.current.add(n.NotificationId);
+    setItems((prev) => prev.map((x) => x.NotificationId === n.NotificationId ? { ...x, IsRead: true } : x));
+    setUnreadCount((prev) => Math.max(0, prev - 1));
+
     if (!n.IsRead) {
       try {
         await crmService.markNotificationRead(n.NotificationId);

@@ -48,5 +48,12 @@ namespace CRM.Microservice.Models
         public bool RealisedCommissionIsAuto { get; set; } = false;
 
         public ICollection<DealBrokerSplit> BrokerSplits { get; set; } = new List<DealBrokerSplit>();
+
+        // 🔄 Stage transition tracking — used by the broker activity log.
+        // Stored as the previous DealStage enum name when LastStageUpdatedAt fires.
+        public string PreviousStage { get; set; } = string.Empty;
+
+        // Property address for display in the activity log.
+        public string PropertyAddress { get; set; } = string.Empty;
     }
 }

@@ -679,17 +679,84 @@ public class PropertyAssetsController : PropertyControllerBase
         [FromQuery] string? tenantId = null,
         [FromQuery] string? linkedBrokerId = null)
     {
-        var tenantIds = (tenantId ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
-        if (tenantIds.Count == 0) return Ok(new { activeListings = 0, averageDom = 0 });
-
-        var q = PropertyRepository.Query()
-            .Where(p => tenantIds.Contains(p.TenantId) && (p.IsForSale || p.IsForRent));
+        var tenantIds = ParseTenantList(tenantId);
+        IQueryable<PropertyAsset> q;
+        if (tenantIds.Count == 0)
+        {
+            q = PropertyRepository.Query().Where(p => p.IsForSale || p.IsForRent);
+        }
+        else
+        {
+            q = PropertyRepository.Query().Where(p => tenantIds.Contains(p.TenantId) && (p.IsForSale || p.IsForRent));
+        }
         var count = await q.CountAsync();
         if (count == 0) return Ok(new { activeListings = 0, averageDom = 0 });
         var avg = await q.Select(p => (double)EF.Functions.DateDiffDay(p.CreatedAt, DateTime.UtcNow)).AverageAsync();
         return Ok(new { activeListings = count, averageDom = (int)Math.Round(avg) });
+    }
+
+    // 📊 Sole mandate count for the AgencyGlance KPIs.
+    // Accepts either comma-separated `tenantId=TEN-1,TEN-2` or repeated
+    // `tenantId=TEN-1&tenantId=TEN-2` query parameters.
+    [HttpGet("stats/sole-mandates")]
+    public async Task<IActionResult> GetSoleMandatesCount([FromQuery] string? tenantId = null)
+    {
+        var tenantIds = ParseTenantList(tenantId);
+        IQueryable<PropertyAsset> query = PropertyRepository.Query()
+            .Where(p => p.SoleMandates.Any(sm => sm.IsActive));
+
+        if (tenantIds.Count > 0)
+        {
+            query = query.Where(p => tenantIds.Contains(p.TenantId));
+        }
+
+        var count = await query.CountAsync();
+        return Ok(new { totalSoleMandates = count });
+    }
+
+    // 📈 Property growth over the last N months for the AgencyGlance charts.
+    // Accepts the same tenantId formats as sole-mandates.
+    [HttpGet("stats/growth")]
+    public async Task<IActionResult> GetPropertiesGrowth(
+        [FromQuery] string? tenantId = null,
+        [FromQuery] int months = 6)
+    {
+        var tenantIds = ParseTenantList(tenantId);
+        var cutoff = DateTime.UtcNow.AddMonths(-months).Date;
+
+        IQueryable<PropertyAsset> query = PropertyRepository.Query()
+            .Where(p => p.CreatedAt >= cutoff);
+
+        if (tenantIds.Count > 0)
+        {
+            query = query.Where(p => tenantIds.Contains(p.TenantId));
+        }
+
+        var monthly = await query
+            .GroupBy(p => new { Year = p.CreatedAt.Year, Month = p.CreatedAt.Month })
+            .Select(g => new
+            {
+                Year = g.Key.Year,
+                Month = g.Key.Month,
+                PropertyCount = g.Count()
+            })
+            .OrderBy(x => x.Year)
+            .ThenBy(x => x.Month)
+            .ToListAsync();
+
+        return Ok(monthly);
+    }
+
+    private static List<string> ParseTenantList(string? tenantId)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+            return new List<string>();
+
+        return tenantId
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct()
+            .ToList();
     }
     // 📦 List every amenity (both scopes) for a property, decorated with the
     // type metadata the frontend uses to render toggles/numbers.

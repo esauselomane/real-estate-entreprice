@@ -8,6 +8,7 @@ import PropertyMapWorkspace from './components/PropertyMapWorkspace.jsx';
 import OwnersTenantsWorkspace from './components/OwnersTenantsWorkspace.jsx';
 import ReportsWorkspace from './components/ReportsWorkspace.jsx';
 import SystemAdminWorkspace from './components/SystemAdminWorkspace.jsx';
+import AgencyGlance from './components/AgencyGlance.jsx';
 import BrochureBuilderWorkspace from './components/BrochureBuilderWorkspace.jsx';
 import RoleDashboard from './components/RoleDashboard.jsx';
 import RolePermissionsPage from './components/RolePermissionsPage.jsx';
@@ -242,6 +243,7 @@ export default function App() {
               {currentView === 'reports' && "Performance Reports"}
               {currentView === 'map' && "Property Map"}
               {currentView === 'admin' && "SuperAdmin Control Board"}
+              {currentView === 'agency-glance' && "Agency at a Glance"}
               {currentView === 'roles' && "Role & Permission Management"}
             </h2>
             <p className="text-slate-400 text-sm">
@@ -333,6 +335,9 @@ export default function App() {
           />
         )}
 
+        {currentView === 'agency-glance' && hasPermission('billing:view') && (
+          <AgencyGlance />
+        )}
         {currentView === 'admin' && hasPermission('agencies:view') && (
           <SystemAdminWorkspace />
         )}

@@ -11,6 +11,7 @@ namespace Identity.Microservice.DTOs
         public string LicenseNumber { get; init; } = string.Empty;
         public DateTime? LicenseExpiry { get; init; }
         public bool OutOfOffice { get; init; }
+        public bool EpilepsySafeMode { get; init; }
         public string AccountStatus { get; init; } = string.Empty;
     }
 
@@ -18,5 +19,6 @@ namespace Identity.Microservice.DTOs
     {
         public string? FullName { get; init; }
         public bool? OutOfOffice { get; init; }
+        public bool? EpilepsySafeMode { get; init; }
     }
 }

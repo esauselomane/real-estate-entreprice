@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
-import { User, LogOut, Key, Upload, Camera, CheckCircle, X } from 'lucide-react';
+import { User, LogOut, Key, Upload, Camera, CheckCircle, X, Shield, Zap } from 'lucide-react';
 import { authService } from '../services/authService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { useEpilepsySafeMode } from './EpilepsySafeMode.jsx';
 
 const DEFAULT_AVATAR = 'https://api.dicebear.com/7.x/initials/svg?background=random';
 
 export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
   const { activeProfile, logout } = useAuth();
+  const { epilepsySafeMode, toggleEpilepsySafeMode } = useEpilepsySafeMode();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -119,12 +121,23 @@ export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
     : {};
 
   return (
-    <div className="fixed inset-0 z-50" onClick={onClose}>
+    <>
       <div
-        className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-80 max-w-sm mx-4 mt-2"
-        onClick={(e) => e.stopPropagation()}
-        style={position}
+        className="fixed inset-0 z-40"
+        onClick={onClose}
+      />
+      <div
+        className="fixed z-50 bg-transparent"
+        style={{
+          top: anchorRect ? Math.min(anchorRect.bottom + 8, window.innerHeight - 200) : 8,
+          right: anchorRect ? Math.max(8, window.innerWidth - anchorRect.right - popoutWidth) : 8,
+        }}
       >
+        <div
+          className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-80 max-w-sm"
+          onClick={(e) => e.stopPropagation()}
+          style={{ maxHeight: popoutMaxHeight, overflow: 'auto' }}
+        >
         <div className="p-4 border-b border-slate-800 flex items-center gap-3">
           <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-slate-700">
             <img
@@ -177,6 +190,19 @@ export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
           >
             <CheckCircle size={14} className={profile?.outOfOffice ? 'text-amber-400' : ''} />
             <span>Out of office {profile?.outOfOffice && '(on)'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => toggleEpilepsySafeMode()}
+            className={`w-full flex items-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors ${
+              epilepsySafeMode
+                ? 'bg-indigo-950/30 text-indigo-300 hover:bg-indigo-950/50'
+                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+            } cursor-pointer`}
+          >
+            <Shield size={14} className={epilepsySafeMode ? 'text-indigo-400' : ''} />
+            <span>Epilepsy-safe mode {epilepsySafeMode && '(on)'}</span>
           </button>
 
           <button
@@ -237,5 +263,6 @@ export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
         </div>
       </div>
     </div>
+    </>
   );
 }

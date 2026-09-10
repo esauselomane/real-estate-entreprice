@@ -8,6 +8,8 @@ import { AppUiProvider } from './contexts/AppUiContext.jsx'
 import { AgencyProvider } from './contexts/AgencyContext.jsx'
 import { PermissionProvider } from './contexts/PermissionContext.jsx'
 import { TenantProvider } from './contexts/TenantContext.jsx'
+import { CelebrationProvider } from './components/CelebrationOverlay.jsx';
+import { EpilepsySafeModeProvider } from './components/EpilepsySafeMode.jsx';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -16,7 +18,11 @@ createRoot(document.getElementById('root')).render(
         <TenantProvider>
           <PermissionProvider>
             <AgencyProvider>
-              <App />
+              <EpilepsySafeModeProvider>
+                <CelebrationProvider>
+                  <App />
+                </CelebrationProvider>
+              </EpilepsySafeModeProvider>
             </AgencyProvider>
           </PermissionProvider>
         </TenantProvider>
