@@ -34,8 +34,8 @@ public class PropertyCountService : IPropertyCountService
         if (tenantIds == null || tenantIds.Count == 0)
             return 0;
 
-        var propertyBaseUrl = _configuration["Services:PropertyBaseUrl"]
-            ?? "http://localhost:5000/gateway/properties";
+        var propertyBaseUrl = _configuration["Gateway:BaseUrl"]
+            ?? throw new InvalidOperationException("Gateway:BaseUrl is not configured in appsettings.json.");
 
         using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
         var authHeader = httpContext.Request.Headers["Authorization"].FirstOrDefault();
@@ -73,8 +73,8 @@ public class PropertyCountService : IPropertyCountService
         if (tenantIds == null || tenantIds.Count == 0)
             return Array.Empty<PropertyGrowthPoint>();
 
-        var propertyBaseUrl = _configuration["Services:PropertyBaseUrl"]
-            ?? "http://localhost:5000/gateway/properties";
+        var propertyBaseUrl = _configuration["Gateway:BaseUrl"]
+            ?? throw new InvalidOperationException("Gateway:BaseUrl is not configured in appsettings.json.");
 
         using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
         var authHeader = httpContext.Request.Headers["Authorization"].FirstOrDefault();

@@ -1046,8 +1046,8 @@ namespace CRM.Microservice.Controllers
             try
             {
                 var propertyBaseUrl = HttpContext.RequestServices
-                    .GetRequiredService<IConfiguration>()["Services:PropertyBaseUrl"]
-                    ?? "http://localhost:5000/gateway";
+                    .GetRequiredService<IConfiguration>()["Gateway:BaseUrl"]
+                    ?? throw new InvalidOperationException("Gateway:BaseUrl is not configured in appsettings.json.");
                 using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
                 var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
                 if (!string.IsNullOrEmpty(authHeader))

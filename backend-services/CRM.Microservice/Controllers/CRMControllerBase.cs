@@ -78,7 +78,8 @@ public abstract class CRMControllerBase : ControllerBase
         DealBrokerSplitRepository = dealBrokerSplitRepository;
         NotificationRepository = notificationRepository;
         BrokerTargetRepository = brokerTargetRepository;
-        GatewayUrl = configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
+        GatewayUrl = configuration["Gateway:BaseUrl"]
+            ?? throw new InvalidOperationException("Gateway:BaseUrl is not configured in appsettings.json.");
         Logger = logger;
         PermissionCheck = permissionCheck;
     }
@@ -319,13 +320,14 @@ public abstract class CRMControllerBase : ControllerBase
     /// returns { bucket → count }.
     /// </summary>
     protected static async Task<Dictionary<string, int>> AggregateStringAsync<T>(
-        IQueryable<T> query,
+        IEnumerable<T> source,
         System.Linq.Expressions.Expression<Func<T, string?>> selector)
     {
-        var rows = await query
-            .GroupBy(selector)
+        var compiled = selector.Compile();
+        var rows = source
+            .GroupBy(compiled)
             .Select(g => new { Key = g.Key ?? "(Unset)", Count = g.Count() })
-            .ToListAsync();
+            .ToList();
         var dict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows) dict[row.Key] = row.Count;
         return dict;
@@ -336,13 +338,14 @@ public abstract class CRMControllerBase : ControllerBase
     /// returns { true/false → count }.
     /// </summary>
     protected static async Task<Dictionary<string, int>> AggregateBoolAsync<T>(
-        IQueryable<T> query,
+        IEnumerable<T> source,
         System.Linq.Expressions.Expression<Func<T, bool>> selector)
     {
-        var rows = await query
-            .GroupBy(selector)
+        var compiled = selector.Compile();
+        var rows = source
+            .GroupBy(compiled)
             .Select(g => new { Key = g.Key ? "true" : "false", Count = g.Count() })
-            .ToListAsync();
+            .ToList();
         var dict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows) dict[row.Key] = row.Count;
         return dict;
