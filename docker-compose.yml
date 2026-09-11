@@ -29,6 +29,25 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     networks:
       - realestate-mesh-network
+
+    # 📊 2.1. KAFKA MANAGEMENT CONSOLE: Kafka UI (AKHQ / provectus)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: realestate-kafka-ui
+    depends_on:
+      - kafka
+      - zookeeper
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: realestate-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    volumes:
+      - ./monitoring/kafka-ui/locals.yml:/etc/kafka-ui/locals.yml
+    networks:
+      - realestate-mesh-network
+
   # 🗄️ 3. ISOLATED DATABASE INSTANCE: Microsoft SQL Server 2022 Express Edition
   sqlserver:
     image: mcr.microsoft.com/mssql/server

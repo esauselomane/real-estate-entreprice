@@ -60,14 +60,20 @@ builder.Services.AddScoped<IDealRepository, DealRepository>();
 builder.Services.AddScoped<ICompanyRepository, CompanyRepository>();
 builder.Services.AddScoped<ILegalEntityRepository, LegalEntityRepository>();
 builder.Services.AddScoped<IContactRepository, ContactRepository>();
-builder.Services.AddScoped<IOwnerTenantRepository, OwnerTenantRepository>();
 builder.Services.AddScoped<IGeographyRepository, GeographyRepository>();
 builder.Services.AddScoped<IOperationalRecordRepository, OperationalRecordRepository>();
-builder.Services.AddScoped<IContactPersonRepository, ContactPersonRepository>();
 builder.Services.AddScoped<IBrochureCardRepository, BrochureCardRepository>();
 builder.Services.AddScoped<IRepository<BrochureCardLine>, BrochureCardLineRepository>();
 builder.Services.AddScoped<IDealBrokerSplitRepository, DealBrokerSplitRepository>();
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
+builder.Services.AddScoped<IRepository<BrokerMonthlyTarget>, BrokerMonthlyTargetRepository>();
+builder.Services.AddScoped<IBrokerPerformanceMetricsRepository, BrokerPerformanceMetricsRepository>();
+builder.Services.AddScoped<IBrokerScoreService, BrokerScoreService>();
+builder.Services.AddScoped<IContactPersonRepository, ContactPersonRepository>();
+builder.Services.AddScoped<IUserGrowthRepository, UserGrowthRepository>();
+builder.Services.AddScoped<IPropertyCountService, PropertyCountService>();
+
+builder.Services.AddHostedService<BrokerMetricsBackgroundJob>();
 
 // 🔄 Kafka consumers for cross-service events
 builder.Services.AddHostedService<CRM.Microservice.Consumers.NotificationConsumer>();
@@ -81,6 +87,29 @@ using (var serviceScope = app.Services.CreateScope())
 {
     var databaseContext = serviceScope.ServiceProvider.GetRequiredService<CRMDbContext>();
     databaseContext.Database.EnsureCreated();
+
+    // 🎯 Fix: If the __EFMigrationsHistory table exists from EnsureCreated() but lacks
+    // the ProductVersion column (pre-EF-Core-10 schema), or if it doesn't exist at all,
+    // seed the migration history so Migrate() doesn't try to re-create tables.
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NULL
+        BEGIN
+            CREATE TABLE [__EFMigrationsHistory] (
+                [MigrationId] nvarchar(150) NOT NULL,
+                [ProductVersion] nvarchar(32) NOT NULL,
+                CONSTRAINT [PK___EFMigrationsHistory] PRIMARY KEY ([MigrationId])
+            );
+        END
+        ELSE IF COL_LENGTH(N'[__EFMigrationsHistory]', N'ProductVersion') IS NULL
+        BEGIN
+            ALTER TABLE [__EFMigrationsHistory] ADD [ProductVersion] nvarchar(32) NOT NULL CONSTRAINT DF_EFH_History_ProductVersion DEFAULT N'';
+        END
+        IF NOT EXISTS (SELECT 1 FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260909224814_InitialCreate')
+            INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+            VALUES (N'20260909224814_InitialCreate', N'10.0.0');
+    ");
+    // 🎯 Apply any future migrations added via `dotnet ef migrations add`
+    databaseContext.Database.Migrate();
 
     // 🛠️ EnsureCreated() is a no-op once the database has any table, so tables that are
     // ever DROPPED (or created first on a fresh DB) must be recreated here — mirroring the
@@ -157,11 +186,47 @@ using (var serviceScope = app.Services.CreateScope())
                 FOREIGN KEY ([AssociatedCompanyId]) REFERENCES [CRMCompanies] ([CompanyId]);
             ALTER TABLE [CRMContacts] ADD CONSTRAINT [FK_CRMContacts_LegalEntities_AssociatedLegalEntityId]
                 FOREIGN KEY ([AssociatedLegalEntityId]) REFERENCES [CRMLegalEntities] ([LegalEntityId]);
-            CREATE INDEX [IX_CRMContacts_TenantId] ON [CRMContacts] ([TenantId]);
+             CREATE INDEX [IX_CRMContacts_TenantId] ON [CRMContacts] ([TenantId]);
+         END
+     ");
+
+    // 🛠️ Unified Contacts table — consolidates CRMContact, ContactPerson, and OwnerTenantRecord
+    // into a single entity distinguished by ContactType (Buyer/Seller/Broker/Owner/Tenant/Staff/Manager).
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[Contacts]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [Contacts] (
+                [ContactId]              nvarchar(450) NOT NULL CONSTRAINT PK_Contacts PRIMARY KEY,
+                [TenantId]               nvarchar(50)  NOT NULL,
+                [ContactType]            nvarchar(50)  NOT NULL CONSTRAINT DF_Contacts_ContactType DEFAULT N'Buyer',
+                [FullName]               nvarchar(256) NOT NULL,
+                [CompanyName]            nvarchar(256) NULL,
+                [EmailAddress]           nvarchar(256) NOT NULL,
+                [PhoneNumber]            nvarchar(64)  NULL,
+                [PositionJobTitle]       nvarchar(128) NULL,
+                [PrimaryLocation]        nvarchar(256) NULL,
+                [BudgetLimit]            decimal(18,2) NULL,
+                [PropertyTypeInterests]  nvarchar(max) NULL,
+                [AreaInterestIds]        nvarchar(max) NULL,
+                [Notes]                  nvarchar(max) NULL,
+                [AssociatedCompanyId]    nvarchar(450) NULL,
+                [AssociatedLegalEntityId] nvarchar(450) NULL,
+                [LinkedDealIds]          nvarchar(max) NULL,
+                [AgencyId]               nvarchar(64)  NULL,
+                [IsAgencyAdmin]          bit           NOT NULL CONSTRAINT DF_Contacts_IsAgencyAdmin DEFAULT 0,
+                [CreatedAt]              datetime2     NOT NULL CONSTRAINT DF_Contacts_CreatedAt DEFAULT GETUTCDATE()
+            );
+            CREATE INDEX [IX_Contacts_TenantId] ON [Contacts] ([TenantId]);
+            CREATE INDEX [IX_Contacts_ContactType] ON [Contacts] ([ContactType]);
+            CREATE INDEX [IX_Contacts_AgencyId] ON [Contacts] ([AgencyId]) WHERE [AgencyId] IS NOT NULL;
+            ALTER TABLE [Contacts] ADD CONSTRAINT [FK_Contacts_CRMCompanies_AssociatedCompanyId]
+                FOREIGN KEY ([AssociatedCompanyId]) REFERENCES [CRMCompanies] ([CompanyId]);
+            ALTER TABLE [Contacts] ADD CONSTRAINT [FK_Contacts_LegalEntities_AssociatedLegalEntityId]
+                FOREIGN KEY ([AssociatedLegalEntityId]) REFERENCES [CRMLegalEntities] ([LegalEntityId]);
+            ALTER TABLE [Contacts] ADD CONSTRAINT [FK_Contacts_AgencyRecords_AgencyId]
+                FOREIGN KEY ([AgencyId]) REFERENCES [AgencyRecords] ([AgencyId]);
         END
     ");
-
-    // 🛠️ Idempotent migration: company → legal entity association.
     // A company MAY belong to a legal entity (AssociatedLegalEntityId).
     // Nullable so existing companies with no entity are unaffected.
     // On fresh DBs EF Core creates this column + FK from the CRMCompany model;
@@ -248,6 +313,9 @@ using (var serviceScope = app.Services.CreateScope())
             ALTER TABLE [AgencyRecords] ADD [RegistrationNumber] nvarchar(128) NOT NULL CONSTRAINT DF_Agency_RegNo DEFAULT N'';
         IF COL_LENGTH(N'[AgencyRecords]', 'CompanyLogoUrl') IS NULL
             ALTER TABLE [AgencyRecords] ADD [CompanyLogoUrl] nvarchar(512) NOT NULL CONSTRAINT DF_Agency_Logo DEFAULT N'';
+        -- 🏢 Agency brokerage license column
+        IF COL_LENGTH(N'[AgencyRecords]', 'BrokerageLicense') IS NULL
+            ALTER TABLE [AgencyRecords] ADD [BrokerageLicense] nvarchar(256) NOT NULL CONSTRAINT DF_Agency_BrokerageLicense DEFAULT N'';
     ");
 
     // Batch 2: filtered index referencing [PropertyId]. Issued in its OWN batch so it
@@ -372,10 +440,55 @@ using (var serviceScope = app.Services.CreateScope())
                 [IsRead]          bit            NOT NULL CONSTRAINT DF_Notif_IsRead DEFAULT 0,
                 [CreatedAt]       datetime2      NOT NULL CONSTRAINT DF_Notif_CreatedAt DEFAULT SYSUTCDATETIME()
             );
-            CREATE INDEX [IX_Notifications_UserId_IsRead_CreatedAt] ON [Notifications] ([UserId], [IsRead], [CreatedAt] DESC);
+    CREATE INDEX [IX_Notifications_UserId_IsRead_CreatedAt] ON [Notifications] ([UserId], [IsRead], [CreatedAt] DESC);
             CREATE INDEX [IX_Notifications_TenantId_CreatedAt] ON [Notifications] ([TenantId], [CreatedAt] DESC);
+         END
+     ");
+
+     databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[BrokerPerformanceMetrics]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [BrokerPerformanceMetrics] (
+                [Id]                            int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [TenantId]                      nvarchar(50)      NOT NULL,
+                [BrokerId]                      nvarchar(256)     NOT NULL,
+                [MetricDate]                    datetime2         NOT NULL,
+                [LeadToDealConversionRate]      decimal(7,2)      NOT NULL CONSTRAINT DF_BPM_ConvRate DEFAULT 0,
+                [AvgDaysToClose]                decimal(7,1)      NOT NULL CONSTRAINT DF_BPM_Days DEFAULT 0,
+                [AvgDealValue]                  decimal(18,2)     NOT NULL CONSTRAINT DF_BPM_DealValue DEFAULT 0,
+                [AvgCommissionGenerated]        decimal(18,2)     NOT NULL CONSTRAINT DF_BPM_Comm DEFAULT 0,
+                [StageVelocityScore]            decimal(7,2)      NOT NULL CONSTRAINT DF_BPM_Velocity DEFAULT 0,
+                [GeoSpecializationScore]        decimal(7,2)      NOT NULL CONSTRAINT DF_BPM_Geo DEFAULT 0,
+                [PropertyTypeConversionScore]   nvarchar(max)     NOT NULL CONSTRAINT DF_BPM_PropType DEFAULT N'{{}}',
+                [PriceBandScore]                nvarchar(max)     NOT NULL CONSTRAINT DF_BPM_PriceBand DEFAULT N'{{}}',
+                [CrmHygieneScore]               decimal(7,2)      NOT NULL CONSTRAINT DF_BPM_Hygiene DEFAULT 0,
+                [OverallScore]                  decimal(7,2)      NOT NULL CONSTRAINT DF_BPM_Overall DEFAULT 0,
+                [TotalLeadsAssigned]            int               NOT NULL CONSTRAINT DF_BPM_Leads DEFAULT 0,
+                [TotalDealsWon]                 int               NOT NULL CONSTRAINT DF_BPM_DealsWon DEFAULT 0,
+                [ComputedAt]                    datetime2         NOT NULL CONSTRAINT DF_BPM_ComputedAt DEFAULT GETUTCDATE()
+            );
+            CREATE INDEX [IX_BrokerPerfMetrics_Tenant_Date] ON [BrokerPerformanceMetrics] ([TenantId], [MetricDate]);
+            CREATE INDEX [IX_BrokerPerfMetrics_Broker] ON [BrokerPerformanceMetrics] ([TenantId], [BrokerId], [MetricDate] DESC);
+         END
+     ");
+
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF OBJECT_ID(N'[BrokerMonthlyTargets]', N'U') IS NULL
+        BEGIN
+            CREATE TABLE [BrokerMonthlyTargets] (
+                [Id]                int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [TenantId]          nvarchar(50)      NOT NULL,
+                [BrokerId]          nvarchar(256)     NOT NULL,
+                [Year]              int               NOT NULL,
+                [Month]             int               NOT NULL,
+                [TargetCommission]  decimal(18,2)     NOT NULL CONSTRAINT DF_BMT_Target DEFAULT 0,
+                [CreatedAt]         datetime2         NOT NULL CONSTRAINT DF_BMT_CreatedAt DEFAULT GETUTCDATE(),
+                [UpdatedAt]         datetime2         NOT NULL CONSTRAINT DF_BMT_UpdatedAt DEFAULT GETUTCDATE()
+            );
+            CREATE INDEX [IX_BrokerMonthlyTargets_Tenant_Broker] ON [BrokerMonthlyTargets] ([TenantId], [BrokerId]);
+            CREATE INDEX [IX_BrokerMonthlyTargets_YearMonth] ON [BrokerMonthlyTargets] ([TenantId], [BrokerId], [Year], [Month]);
         END
-    ");
+     ");
 
     var agencyRepository = serviceScope.ServiceProvider.GetRequiredService<IAgencyRepository>();
             var brokerRepository = serviceScope.ServiceProvider.GetRequiredService<IBrokerRepository>();
@@ -384,16 +497,14 @@ using (var serviceScope = app.Services.CreateScope())
             var companyRepository = serviceScope.ServiceProvider.GetRequiredService<ICompanyRepository>();
             var legalEntityRepository = serviceScope.ServiceProvider.GetRequiredService<ILegalEntityRepository>();
             var contactRepository = serviceScope.ServiceProvider.GetRequiredService<IContactRepository>();
-            var ownerTenantRepository = serviceScope.ServiceProvider.GetRequiredService<IOwnerTenantRepository>();
             var geographyRepository = serviceScope.ServiceProvider.GetRequiredService<IGeographyRepository>();
             var operationalRepository = serviceScope.ServiceProvider.GetRequiredService<IOperationalRecordRepository>();
-            var contactPersonRepository = serviceScope.ServiceProvider.GetRequiredService<IContactPersonRepository>();
             var brochureCardRepository = serviceScope.ServiceProvider.GetRequiredService<IBrochureCardRepository>();
             var brochureCardLineRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<BrochureCardLine>>();
             var dealBrokerSplitRepository = serviceScope.ServiceProvider.GetRequiredService<IDealBrokerSplitRepository>();
             var notificationRepository = serviceScope.ServiceProvider.GetRequiredService<INotificationRepository>();
 
-            CRMSeedData.EnsureSeeded(databaseContext, agencyRepository, brokerRepository, leadRepository, dealRepository, companyRepository, legalEntityRepository, contactRepository, ownerTenantRepository, geographyRepository, contactPersonRepository, brochureCardRepository, dealBrokerSplitRepository, notificationRepository);
+            CRMSeedData.EnsureSeeded(databaseContext, agencyRepository, brokerRepository, leadRepository, dealRepository, companyRepository, legalEntityRepository, contactRepository, geographyRepository, brochureCardRepository, dealBrokerSplitRepository, notificationRepository);
 }
 
 // 5. Inject Pipeline Middleware routing and authorization components

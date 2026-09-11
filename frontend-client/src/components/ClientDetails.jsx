@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, User, Phone, Mail, Banknote, MapPin, Pencil, Save, Loader2, AlertCircle } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
 
-const emptyRecord = { recordType: 'Owner', fullName: '', companyName: '', emailAddress: '', phoneNumber: '', primaryLocation: '', budgetLimit: 0, notes: '' };
+const emptyRecord = { contactType: 'Owner', fullName: '', companyName: '', emailAddress: '', phoneNumber: '', primaryLocation: '', budgetLimit: 0, notes: '' };
 
 export default function ClientDetails({ clientId, onBack }) {
   const [record, setRecord] = useState(null);
@@ -16,9 +16,7 @@ export default function ClientDetails({ clientId, onBack }) {
     const load = async () => {
       setLoading(true); setError('');
       try {
-        const id = Number(String(clientId || '').replace(/\D/g, ''));
-        if (!id) throw new Error('This link does not reference an owner or tenant record.');
-        const data = await crmService.getOwnerTenantRecord(id);
+        const data = await crmService.getContact(clientId);
         setRecord(data); setForm(data);
       } catch (err) { setError(err || 'Client record could not be loaded.'); }
       finally { setLoading(false); }
@@ -29,7 +27,7 @@ export default function ClientDetails({ clientId, onBack }) {
   const save = async (event) => {
     event.preventDefault(); setSaving(true); setError('');
     try {
-      const saved = await crmService.updateOwnerTenantRecord({ ...record, ...form, budgetLimit: Number(form.budgetLimit || 0) });
+      const saved = await crmService.updateContact({ ...record, ...form, budgetLimit: Number(form.budgetLimit || 0) });
       setRecord(saved); setForm(saved); setEditing(false);
     } catch (err) { setError(err || 'Client changes could not be saved.'); }
     finally { setSaving(false); }
@@ -45,7 +43,7 @@ export default function ClientDetails({ clientId, onBack }) {
     {error && <div className="p-3 rounded-xl bg-red-950/40 border border-red-900 text-red-300 text-xs flex gap-2"><AlertCircle size={15} />{error}</div>}
     {!record ? <div className="p-8 bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-sm">No saved owner or tenant profile is linked to this property.</div> : editing ? (
       <form onSubmit={save} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-        <h3 className="text-white font-bold">Edit {record.recordType} profile</h3>
+        <h3 className="text-white font-bold">Edit {record.contactType} profile</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <input required value={form.fullName || ''} onChange={e => setForm({ ...form, fullName: e.target.value })} placeholder="Full name" className="field" />
           <input value={form.companyName || ''} onChange={e => setForm({ ...form, companyName: e.target.value })} placeholder="Company name" className="field" />
@@ -58,7 +56,7 @@ export default function ClientDetails({ clientId, onBack }) {
         <div className="flex gap-3"><button type="button" onClick={() => { setForm(record); setEditing(false); }} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Cancel</button><button disabled={saving} className="flex-1 py-2 bg-blue-600 rounded-xl text-xs font-bold text-white">{saving ? 'Saving…' : <><Save size={13} className="inline mr-1" />Save changes</>}</button></div>
       </form>
     ) : <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
-      <div className="flex items-center gap-4"><div className="w-14 h-14 rounded-full bg-blue-600 flex items-center justify-center"><User /></div><div><h3 className="text-xl font-bold text-white">{record.fullName}</h3><span className="text-[10px] uppercase text-blue-300">{record.recordType}</span></div></div>
+      <div className="flex items-center gap-4"><div className="w-14 h-14 rounded-full bg-blue-600 flex items-center justify-center"><User /></div><div><h3 className="text-xl font-bold text-white">{record.fullName}</h3><span className="text-[10px] uppercase text-blue-300">{record.contactType}</span></div></div>
       <div className="grid md:grid-cols-2 gap-5 text-sm text-slate-300 border-t border-slate-800 pt-5"><p><Mail size={14} className="inline mr-2 text-slate-500" />{record.emailAddress || 'No email saved'}</p><p><Phone size={14} className="inline mr-2 text-slate-500" />{record.phoneNumber || 'No phone saved'}</p><p><MapPin size={14} className="inline mr-2 text-slate-500" />{record.primaryLocation || 'No location saved'}</p><p><Banknote size={14} className="inline mr-2 text-emerald-500" />R {Number(record.budgetLimit || 0).toLocaleString()}</p></div>
       {record.notes && <p className="text-xs text-slate-400 bg-slate-950 p-3 rounded-xl">{record.notes}</p>}
     </div>}

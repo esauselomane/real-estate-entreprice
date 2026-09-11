@@ -29,3 +29,20 @@
     @apply inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition-all duration-200 ease-in-out hover:scale-105 hover:bg-emerald-500 hover:shadow-lg hover:shadow-emerald-600/20 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
   }
 }
+
+/* 🚨 Epilepsy-safe mode — disable all animations and transitions */
+.epilepsy-safe *,
+.epilepsy-safe ::before,
+.epilepsy-safe ::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* Disable flashing / blinking animations */
+.epilepsy-safe .animate-spin,
+.epilepsy-safe .animate-pulse,
+.epilepsy-safe .animate-bounce,
+.epilepsy-safe .animate-ping {
+  animation: none !important;
+}

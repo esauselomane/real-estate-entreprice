@@ -22,6 +22,7 @@ namespace CRM.Microservice.Models
         public string HeadquartersAddress { get; set; } = string.Empty;
         public string OperationalStatus { get; set; } = "Active"; // Active, TrialPending, TrialExpired, De-registered
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public string BrokerageLicense { get; set; } = string.Empty;
 
         // 🧬 HIERARCHICAL AGENCY TREE — null for root agencies; otherwise the parent AgencyId
         public string? ParentAgencyId { get; set; }
@@ -40,5 +41,8 @@ namespace CRM.Microservice.Models
 
         [JsonIgnore]
         public ICollection<ContactPerson> ContactPersons { get; set; } = new List<ContactPerson>();
+
+        [JsonIgnore]
+        public ICollection<Contact> Contacts { get; set; } = new List<Contact>();
     }
 }

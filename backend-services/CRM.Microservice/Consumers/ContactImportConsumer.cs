@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using CRM.Microservice.Models;
 using Shared.Kafka.Events;
 using Shared.Kafka.Topics;
 
@@ -16,14 +17,14 @@ public class ContactImportConsumer : CrmKafkaConsumer<ContactImportedEvent>
     {
         var dbContext = serviceProvider.GetRequiredService<Data.CRMDbContext>();
 
-        var contact = new Models.OwnerTenantRecord
+        var contact = new Models.Contact
         {
             TenantId = evt.TenantId,
             FullName = evt.FullName,
             EmailAddress = evt.Email,
             PhoneNumber = evt.Phone,
             CompanyName = evt.CompanyName,
-            RecordType = evt.RecordType,
+            ContactType = Enum.TryParse<ContactType>(evt.RecordType, true, out var parsed) ? parsed : ContactType.Buyer,
             PrimaryLocation = evt.PrimaryLocation,
             BudgetLimit = evt.BudgetLimit,
             PropertyTypeInterests = evt.PropertyTypeInterests,
@@ -31,8 +32,7 @@ public class ContactImportConsumer : CrmKafkaConsumer<ContactImportedEvent>
             Notes = evt.Notes,
             CreatedAt = DateTime.UtcNow
         };
-
-        dbContext.OwnerTenantRecords.Add(contact);
+        dbContext.Contacts.Add(contact);
         await dbContext.SaveChangesAsync(ct);
 
         Logger.LogInformation("[CONTACT IMPORT CONSUMER]: Created contact '{FullName}' for tenant {TenantId}",

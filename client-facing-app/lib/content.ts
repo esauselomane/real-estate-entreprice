@@ -51,7 +51,7 @@ export const heroSlides: HeroSlide[] = [
     description: "",
   },
   {
-    image: "/pleasing.png",
+    image: "/pleasing.jpg",
     description: "Never let a lead slip through the cracks. Our intelligent CRM transforms unverified leads into a structured, visual sales pipeline."
   },
   {
@@ -189,27 +189,33 @@ export const pricing: {
     features: [
       "Up to 20 users",
       "Unlimited listings",
-      "Advanced client pitch packs",
+      "Custom client pitch packs",
       "Priority support",
-      "Market syndication",
+      "Market syndication<sup>*</sup>",
       "Custom branding",
+      "Import properties and contact"
     ],
   },
   {
     code: "ENTERPRISE",
     name: "Enterprise",
     description: "Full-scale platform access for large organizations with custom needs.",
-    monthlyPrice: 1999,
-    annualPrice: 19990,
+    monthlyPrice: 60000,
+    annualPrice: 500000,
     features: [
       "Unlimited users",
       "Unlimited listings",
+      "Custom client pitch packs",
+      "Priority support",
+      "Market syndication<sup>*</sup>",
+      "24/7 support",
+      "Import all your existing data - dedicated resource to onboard you!",
       "Dedicated account manager",
-      "API access",
+      "Developer API access",
       "Custom integrations",
-      "On-premise option",
       "SLA guarantee",
       "Advanced analytics",
+      "Intelligent Broker to Lead matching algorithm"
     ],
   },
 ];
@@ -230,31 +236,30 @@ export const testimonials: { quote: string; name: string; role: string; logo: st
 ];
 
 export const timeline: { year: string; event: string }[] = [
-  { year: "2022", event: "Founded to solve deal-closing fragmentation for brokers." },
-  { year: "2023", event: "Launched the CRM pipeline and property catalogue." },
-  { year: "2024", event: "Introduced background Workers for brochure + image processing." },
-  { year: "2025", event: "Added market syndication and multi-tenant isolation." },
+  { year: "2015", event: "Founded to solve deal-closing fragmentation for brokers." },
+  { year: "2024", event: "Started developing system architecture." },
+  { year: "2026", event: "Goes live." },
 ];
 
 export const leadership: TeamMember[] = [
   {
-    name: "Amara Okafor",
-    role: "Chief Executive Officer",
+    name: "Esau Selomane",
+    role: "Chief Nerd",
     image: "/images/team/amara.jpg",
-    linkedin: "#",
+    linkedin: "https://www.linkedin.com/in/esau-selomane-49a68b24/",
   },
   {
-    name: "Derek Liu",
-    role: "Chief Technology Officer",
+    name: "Ntuthuko Sokutu",
+    role: "https://www.linkedin.com/in/ntuthuko-sokutu-449a44273/",
     image: "/images/team/derek.jpg",
-    linkedin: "#",
+    linkedin: "https://www.linkedin.com/in/ntuthuko-sokutu-449a44273/",
   },
-  {
+  /*{
     name: "Siyabonga Dlamini",
     role: "Head of Product",
     image: "/images/team/siyabonga.jpg",
     linkedin: "#",
-  },
+  },*/
 ];
 
 export type IconMap = {

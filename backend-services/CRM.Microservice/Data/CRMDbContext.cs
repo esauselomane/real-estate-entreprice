@@ -6,10 +6,33 @@ using CRM.Microservice.Models;
 
 namespace CRM.Microservice.Data
 {
-    public class CRMDbContext : DbContext
+    public partial class CRMDbContext : DbContext
     {
+        private static ContactType ParseContactType(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return ContactType.None;
+
+            var parts = value.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            ContactType result = ContactType.None;
+            foreach (var part in parts)
+            {
+                if (Enum.TryParse<ContactType>(part, true, out var parsed))
+                    result |= parsed;
+            }
+            return result;
+        }
+
         public CRMDbContext(DbContextOptions<CRMDbContext> options) : base(options)
         {
+        }
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            // Tables are managed via raw SQL in Program.cs (EnsureCreated + idempotent ALTERs),
+            // so suppress the pending-model-changes warning that Migrate() raises for entities
+            // whose schema is created outside of EF migrations.
+            optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
         }
 
         public DbSet<CRMCompany> CRMCompanies { get; set; }
@@ -18,6 +41,7 @@ namespace CRM.Microservice.Data
         public DbSet<OwnerTenantRecord> OwnerTenantRecords { get; set; }
         public DbSet<CRMLegalEntity> CRMLegalEntities { get; set; }
         public DbSet<CRMContact> CRMContacts { get; set; }
+        public DbSet<Contact> Contacts { get; set; }
         public DbSet<LeadRecord> LeadRecords { get; set; }
         public DbSet<DealRecord> DealRecords { get; set; }
         public DbSet<OperationalRecord> OperationalRecords { get; set; }
@@ -27,6 +51,8 @@ namespace CRM.Microservice.Data
         public DbSet<BrochureCardLine> BrochureCardLines { get; set; } = null!;
         public DbSet<DealBrokerSplit> DealBrokerSplits { get; set; } = null!;
         public DbSet<Notification> Notifications { get; set; } = null!;
+        public DbSet<BrokerMonthlyTarget> BrokerMonthlyTargets { get; set; } = null!;
+    public DbSet<BrokerPerformanceMetrics> BrokerPerformanceMetrics { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -56,6 +82,30 @@ namespace CRM.Microservice.Data
                 .HasOne(l => l.CompanyDetails)
                 .WithMany()
                 .HasForeignKey(l => l.AssociatedCompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Contact>()
+                .Property(c => c.ContactType)
+                .HasConversion(
+                    v => v.ToString(),
+                    v => ParseContactType(v));
+
+            modelBuilder.Entity<Contact>()
+                .HasOne(c => c.CompanyDetails)
+                .WithMany()
+                .HasForeignKey(c => c.AssociatedCompanyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Contact>()
+                .HasOne(c => c.LegalEntityDetails)
+                .WithMany()
+                .HasForeignKey(c => c.AssociatedLegalEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Contact>()
+                .HasOne(c => c.Agency)
+                .WithMany(a => a.Contacts)
+                .HasForeignKey(c => c.AgencyId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<ContactPerson>()

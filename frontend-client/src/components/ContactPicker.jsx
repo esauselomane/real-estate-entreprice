@@ -18,7 +18,7 @@ import { crmService } from '../services/crmService.js';
  *   - allowCreate     : show the "Create new" affordance (single only — inline create in multi is out of scope)
  *   - multi           : enable multi-select mode
  *   - disabled        : lock the picker
- *   - defaultRole     : contactRoleType for inline-created contacts (single mode)
+   *   - defaultRole     : contactType for inline-created contacts (single mode)
  */
 export default function ContactPicker({
   value = null,
@@ -135,7 +135,7 @@ export default function ContactPicker({
         fullName: newContact.fullName.trim(),
         emailAddress: newContact.emailAddress.trim(),
         phoneNumber: newContact.phoneNumber.trim(),
-        contactRoleType: defaultRole
+        contactType: defaultRole
       });
       pick(created);
       setNewContact({ fullName: '', emailAddress: '', phoneNumber: '' });

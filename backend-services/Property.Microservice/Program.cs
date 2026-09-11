@@ -296,8 +296,6 @@ using (var serviceScope = app.Services.CreateScope())
     var unitLeaseRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<UnitLease>>();
     var maintenanceCallRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<MaintenanceCall>>();
 
-    PropertySeedData.EnsureSeeded(databaseContext, propertyTypeRepository, amenityTypeRepository, externalPlatformRepository, propertyRepository, propertyUnitRepository, propertyPlatformSyndicationRepository, unitLeaseRepository, maintenanceCallRepository);
-
     // 📸 Add GalleryImageJson column for property image gallery (separate from verification docs)
     databaseContext.Database.ExecuteSqlRaw(@"
         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'[PropertyAssets]') AND name = N'GalleryImageJson')
@@ -305,6 +303,8 @@ using (var serviceScope = app.Services.CreateScope())
             ALTER TABLE [PropertyAssets] ADD [GalleryImageJson] nvarchar(MAX) NOT NULL CONSTRAINT DF_PropertyAssets_GalleryImageJson DEFAULT N'[]';
         END
     ");
+
+    PropertySeedData.EnsureSeeded(databaseContext, propertyTypeRepository, amenityTypeRepository, externalPlatformRepository, propertyRepository, propertyUnitRepository, propertyPlatformSyndicationRepository, unitLeaseRepository, maintenanceCallRepository);
 
     // 🚫 Prevent duplicate syndication records at the database level.
     databaseContext.Database.ExecuteSqlRaw(@"
@@ -346,7 +346,7 @@ app.UseAuthorization();
 
 // 7. MAP TARGET REST API ENDPOINT CONTROLLERS
 app.MapControllers();
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "property" }));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "property" })).AllowAnonymous();
 
 // 8. START THE MICROSERVICE WORKSPACE ENGINE LISTENER
 app.Run();

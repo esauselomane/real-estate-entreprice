@@ -31,12 +31,25 @@ namespace Identity.Microservice.Models
         
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        // 🪪 Brokerage licensing fields (required when SystemRole is Broker)
+        public string LicenseNumber { get; set; } = string.Empty;
+        public DateTime? LicenseExpiry { get; set; }
+
         // 🎯 TRIAL ONBOARDING FIELDS
         public string ActivationToken { get; set; } = string.Empty;
         public DateTime? ActivationTokenExpiry { get; set; }
         public bool IsTrial { get; set; } = false;
         public DateTime? TrialStartDate { get; set; }
         public DateTime? TrialEndDate { get; set; }
+
+        // 🚫 Out-of-office status — when true the user will not receive
+        // email notifications (feature wired up later). Self-toggled
+        // from the profile pop-out view.
+        public bool OutOfOffice { get; set; } = false;
+
+        // Accessibility preference — disables celebratory animations, confetti, and rapid transitions
+        // to support users with epilepsy or photosensitive conditions.
+        public bool EpilepsySafeMode { get; set; } = false;
 
         // Dynamic relational reference linking back to our target onboarding agency profile records
         [ForeignKey("TenantId")]

@@ -21,6 +21,8 @@ namespace Identity.Microservice.Models
         
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        public string BrokerageLicense { get; set; } = string.Empty;
+
         // 🎯 TRIAL ONBOARDING FIELDS
         public bool IsTrial { get; set; } = false;
         public DateTime? TrialStartDate { get; set; }

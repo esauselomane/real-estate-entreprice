@@ -1,0 +1,6 @@
+clusters:
+  - name: realestate-local
+    bootstrapServers: kafka:29092
+    zookeeper:
+      host: zookeeper
+      port: 2181

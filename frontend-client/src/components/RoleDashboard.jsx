@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
-import {   Building2, Users, Briefcase, Home, Bell, ShieldCheck, Layers, BarChart2, Banknote, TrendingUp, PieChart as PieIcon, Award } from 'lucide-react';
+import {   Building2, Users, Briefcase, Home, Bell, ShieldCheck, Layers, BarChart2, Banknote, TrendingUp, PieChart as PieIcon, Award, AlertTriangle } from 'lucide-react';
+import LoadingOverlay from './LoadingOverlay.jsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { propertyService } from '../services/propertyService.js';
@@ -12,7 +13,7 @@ const STATUS_COLORS = { Active: '#22c55e', Review: '#f59e0b', Inactive: '#ef4444
 const ROLE_COLORS = { PlatformAdmin: '#7c3aed', AgencyAdmin: '#3b82f6', Broker: '#14b8a4', Owner: '#f97316', Tenant: '#0ea5e9' };
 const DEAL_COLORS = { DiscoveryNeedsAnalysis: '#0ea5e9', Presentation: '#3b82f6', ProposalQuoteSent: '#a78bfa', Negotiation: '#f59e0b', ClosedWon: '#22c55e', ClosedLost: '#ef4444' };
 const TYPE_COLORS = { Residential: '#22c55e', Commercial: '#3b82f6', Retail: '#f97316', Industrial: '#6b7280' };
-const next = (role) => role === 'Tenant' ? 'operations' : role === 'Owner' ? 'owners-tenants' : role === 'Broker' ? 'crm' : 'admin';
+const next = (role) => role === 'Tenant' ? 'operations' : role === 'Owner' ? 'crm' : role === 'Broker' ? 'crm' : 'admin';
 
 const formatTitle = (raw) => {
   if (!raw) return '';
@@ -95,6 +96,7 @@ export default function RoleDashboard() {
   const [charts, setCharts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [pipelineSummary, setPipelineSummary] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     const load = async () => {
@@ -121,7 +123,7 @@ export default function RoleDashboard() {
               { title: 'Agency operational status', icon: ShieldCheck, kind: 'pie', data: Object.entries(statusBuckets).map(([name, value]) => ({ name, value })), colors: STATUS_COLORS },
             { title: 'Property type market share', icon: PieIcon, kind: 'pie', data: marketShare, colors: TYPE_COLORS, colorKey: true },
              { title: 'Monthly platform revenue', icon: TrendingUp, kind: 'bar', data: (overview.monthlyBreakdown || []).map((m) => ({ name: m.Period, value: Number(m.Revenue || 0) })), colors: { default: '#3b82f6' } },
-            { title: 'Commission realised by stage', icon: BarChart2, kind: 'bar', data: commissionStages, colors: DEAL_COLORS }
+            { title: 'Commission realised by stage', icon: BarChart2, kind: 'bar', data: (commissionStages || []).map((c) => ({ name: formatTitle(c.Period), value: Number(c.Revenue || 0) })), colors: DEAL_COLORS }
           ]);
          } else if (role === 'AgencyAdmin') {
           // 🎯 AgencyAdmin gets tenant-scoped pipeline summary, monthly trends, and commission data
@@ -185,15 +187,15 @@ export default function RoleDashboard() {
           ]);
         } else if (role === 'Owner') {
           const ots = await crmService.getOwnerTenantRecords();
-          // 📊 Server-side aggregates (recordType, primaryLocation) reflect every
+          // 📊 Server-side aggregates (contactType, primaryLocation) reflect every
           // record in the active tenant scope, not just the 20 returned for the
           // current page — keeps the chart consistent with the rest of the app.
           const otsAggregates = ots.aggregates || {};
-          const recordTypeBuckets = otsAggregates.recordType || {};
+          const recordTypeBuckets = otsAggregates.contactType || {};
           const locationBuckets = otsAggregates.primaryLocation || {};
           setMetrics([{ label: 'Interested parties', value: ots.totalCount || ots.length, icon: Users }, { label: 'Property operations', value: 'Active', icon: Home }]);
           setCharts([
-            { title: 'Record type distribution', icon: Users, kind: 'pie', data: Object.entries(recordTypeBuckets).map(([name, value]) => ({ name, value })), colors: TYPE_COLORS },
+            { title: 'Contact type distribution', icon: Users, kind: 'pie', data: Object.entries(recordTypeBuckets).map(([name, value]) => ({ name, value })), colors: TYPE_COLORS },
             { title: 'Primary location breakdown', icon: Home, kind: 'bar', data: Object.entries(locationBuckets).map(([name, value]) => ({ name, value })), colors: { default: '#3b82f6' } }
           ]);
         } else {
@@ -207,9 +209,10 @@ export default function RoleDashboard() {
             { title: 'Request status breakdown', icon: Bell, kind: 'pie', data: Object.entries(statusBuckets).map(([name, value]) => ({ name, value })), colors: STATUS_COLORS }
           ]);
         }
-      } catch {
-        setMetrics([]); setCharts([]);
-      } finally {
+       } catch (err) {
+         setErrorMessage(err?.message || 'Failed to load dashboard analytics. Please try again.');
+         setMetrics([]); setCharts([]);
+       } finally {
         setIsLoading(false);
       }
     };
@@ -223,6 +226,12 @@ export default function RoleDashboard() {
         <h3 className="text-2xl font-bold text-white">Welcome back, {profile?.name || 'User'}</h3>
         <p className="text-sm text-slate-400 mt-1">Your workspace only surfaces information appropriate to your role.</p>
       </div>
+
+      {errorMessage && (
+        <div className="p-4 bg-red-950/30 border border-red-900/60 text-red-400 rounded-2xl text-xs font-medium flex items-center gap-2">
+          <AlertTriangle size={14} /> {errorMessage}
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {metrics.map(({ label, value, icon: Icon }) => (
@@ -262,8 +271,8 @@ export default function RoleDashboard() {
        )}
 
        {isLoading ? (
-        <div className="py-16 text-center text-slate-500 text-sm">Loading role-specific analytics...</div>
-      ) : (
+         <LoadingOverlay label="Loading role-specific analytics…" subtitle="Aggregating platform-wide metrics" />
+       ) : (
         <div className="grid gap-4 grid-cols-2">
           {charts.map((c) => (
             <ChartCard key={c.title} title={c.title} icon={c.icon}>

@@ -20,11 +20,13 @@ BEGIN
     INSERT INTO [TenantAgencies] (
         [TenantId], [AgencyName], [LogoInitials], [ContactEmail],
         [HeadquartersAddress], [OperationalStatus], [CreatedAt],
-        [IsTrial], [TrialStartDate], [TrialEndDate], [ParentTenantId]
+        [IsTrial], [TrialStartDate], [TrialEndDate], [ParentTenantId],
+        [BrokerageLicense]
     ) VALUES
     (N'TEN-001', N'Agency 1', N'A1', N'ops1@agency1.local',
      N'1 Commercial Avenue, Cape Town, South Africa', N'TrialPending', GETUTCDATE(),
-     1, GETUTCDATE(), DATEADD(DAY, 14, GETUTCDATE()), NULL);
+     1, GETUTCDATE(), DATEADD(DAY, 14, GETUTCDATE()), NULL,
+     N'BL-TRIAL-001');
 END
 GO
 
@@ -33,11 +35,13 @@ BEGIN
     INSERT INTO [TenantAgencies] (
         [TenantId], [AgencyName], [LogoInitials], [ContactEmail],
         [HeadquartersAddress], [OperationalStatus], [CreatedAt],
-        [IsTrial], [TrialStartDate], [TrialEndDate], [ParentTenantId]
+        [IsTrial], [TrialStartDate], [TrialEndDate], [ParentTenantId],
+        [BrokerageLicense]
     ) VALUES
     (N'TEN-002', N'Agency 2', N'A2', N'ops2@agency2.local',
      N'2 Commercial Avenue, Cape Town, South Africa', N'Active', GETUTCDATE(),
-     0, NULL, NULL, NULL);
+     0, NULL, NULL, NULL,
+     N'BL-ACTIVE-002');
 END
 GO
 

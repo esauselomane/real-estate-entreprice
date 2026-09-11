@@ -81,12 +81,12 @@ export const crmService = {
    // user's tenantId is only used as the fallback so backend filters are
    // driven by the visible "active tenant" in the UI rather than the JWT-bound
    // session tenant.
-   _tenantQueryParams: () => {
-     const override = resolveActiveTenantOverride();
-     if (override && override !== '__all__') return { tenantId: override };
-     const fallback = resolveLoggedInTenantId();
-     return fallback ? { tenantId: fallback } : {};
-   },
+    _tenantQueryParams: () => {
+      const override = resolveActiveTenantOverride();
+      if (override) return { tenantId: override };
+      const fallback = resolveLoggedInTenantId();
+      return fallback ? { tenantId: fallback } : {};
+    },
 
    // 🛰️ Resolves the tenant id a write should be stamped with: the active
    // override (when set to a specific agency) takes precedence; otherwise the
@@ -138,25 +138,44 @@ export const crmService = {
     }
   },
 
-  getOwnerTenantRecords: async (page = 1) => {
-    try {
-      const response = await apiClient.get('/crm/owners-tenants', { params: { page, ...crmService._tenantQueryParams() } });
-      const data = Array.isArray(response.data) ? response.data : [];
-      return Object.assign(data, {
-        totalCount: Number(response.headers['x-total-count'] || 0),
-        aggregates: parseAggregatesHeader(response.headers)
-      });
-    } catch (error) {
-      throw normalizeError(error.response?.data?.message, 'Owner/tenant registry sync failed.');
-    }
-  },
+   getOwnerTenantRecords: async (page = 1) => {
+     try {
+       const response = await apiClient.get('/crm/contacts', { params: { page, ...crmService._tenantQueryParams() } });
+       const data = Array.isArray(response.data) ? response.data : [];
+       return Object.assign(data, {
+         totalCount: Number(response.headers['x-total-count'] || 0),
+         aggregates: parseAggregatesHeader(response.headers)
+       });
+     } catch (error) {
+       throw normalizeError(error.response?.data?.message, 'Contact registry sync failed.');
+     }
+    },
 
-  getOwnerTenantRecord: async (ownerTenantId) => {
+    postOwnerTenantRecordsFiltered: async (filters = {}) => {
+      try {
+        const body = { page: 1, ...crmService._tenantQueryParams() };
+        if (filters.contactType && filters.contactType !== 'Any') body.contactType = filters.contactType;
+        if (filters.budgetMin && filters.budgetMin.trim() !== '') body.budgetMin = Number(filters.budgetMin);
+        if (filters.budgetMax && filters.budgetMax.trim() !== '') body.budgetMax = Number(filters.budgetMax);
+        if (filters.areaIds?.length) body.areaIds = filters.areaIds;
+        if (filters.area) body.area = filters.area;
+       const response = await apiClient.post('/crm/contacts/search', body);
+       const data = Array.isArray(response.data) ? response.data : [];
+       return Object.assign(data, {
+         totalCount: Number(response.headers['x-total-count'] || 0),
+         aggregates: parseAggregatesHeader(response.headers)
+       });
+     } catch (error) {
+       throw normalizeError(error.response?.data?.message, 'Filtered contact search failed.');
+     }
+   },
+
+  getOwnerTenantRecord: async (contactId) => {
     try {
-      const response = await apiClient.get(`/crm/owners-tenants/${ownerTenantId}`, { params: crmService._tenantQueryParams() });
+      const response = await apiClient.get(`/crm/contacts/${encodeURIComponent(contactId)}`, { params: crmService._tenantQueryParams() });
       return response.data;
     } catch (error) {
-      throw normalizeError(error.response?.data?.message, 'Owner/tenant record could not be loaded.');
+      throw normalizeError(error.response?.data?.message, 'Contact record could not be loaded.');
     }
   },
 
@@ -183,22 +202,22 @@ export const crmService = {
 
   createOwnerTenantRecord: async (payload) => {
     try {
-      const response = await apiClient.post('/crm/owners-tenants', {
+      const response = await apiClient.post('/crm/contacts', {
         ...(crmService._normalizeOwnerInterests(payload)),
         tenantId: crmService._resolveWriteTenantId() || payload.tenantId
       });
       return response.data;
     } catch (error) {
-      throw normalizeError(error.response?.data?.message, 'Owner/tenant record creation failed.');
+      throw normalizeError(error.response?.data?.message, 'Contact creation failed.');
     }
   },
 
   updateOwnerTenantRecord: async (payload) => {
     try {
-      const response = await apiClient.put('/crm/owners-tenants', crmService._normalizeOwnerInterests(payload));
+      const response = await apiClient.put(`/crm/contacts/${encodeURIComponent(payload.contactId)}`, crmService._normalizeOwnerInterests(payload));
       return response.data;
     } catch (error) {
-      throw normalizeError(error.response?.data?.message, 'Owner/tenant record update failed.');
+      throw normalizeError(error.response?.data?.message, 'Contact update failed.');
     }
   },
 
@@ -273,7 +292,7 @@ export const crmService = {
     }
   },
 
-  // 📇 Contact persons bound to an agency (promotable into a broker / AgencyAdmin).
+  // 📇 Agency-scoped contacts (staff contacts bound to an agency).
   getAgencyContacts: async (agencyId) => {
     try {
       const response = await apiClient.get(`/crm/agencies/${agencyId}/contacts`, { params: crmService._tenantQueryParams() });
@@ -288,31 +307,31 @@ export const crmService = {
       const response = await apiClient.post(`/crm/agencies/${agencyId}/contacts`, payload);
       return response.data;
     } catch (error) {
-      throw normalizeError(error.response?.data?.message, 'Contact person creation failed.');
+      throw normalizeError(error.response?.data?.message, 'Contact creation failed.');
     }
   },
 
   updateContactPerson: async (contactId, payload) => {
     try {
-      const response = await apiClient.put(`/crm/contact-persons/${contactId}`, payload);
+      const response = await apiClient.put(`/crm/contacts/${encodeURIComponent(contactId)}`, payload);
       return response.data;
     } catch (error) {
-      throw normalizeError(error.response?.data?.message, 'Contact person update failed.');
+      throw normalizeError(error.response?.data?.message, 'Contact update failed.');
     }
   },
 
   deleteContactPerson: async (contactId) => {
     try {
-      const response = await apiClient.delete(`/crm/contact-persons/${contactId}`);
+      const response = await apiClient.delete(`/crm/contacts/${encodeURIComponent(contactId)}`);
       return response.data;
     } catch (error) {
-      throw normalizeError(error.response?.data?.message, 'Contact person removal failed.');
+      throw normalizeError(error.response?.data?.message, 'Contact removal failed.');
     }
   },
 
   promoteContactToBroker: async (contactId) => {
     try {
-      const response = await apiClient.post(`/crm/contact-persons/${contactId}/promote-to-broker`);
+      const response = await apiClient.post(`/crm/contacts/${encodeURIComponent(contactId)}/promote-to-broker`);
       return response.data;
     } catch (error) {
       throw normalizeError(error.response?.data?.message, 'Promotion to broker failed.');
@@ -329,6 +348,24 @@ export const crmService = {
       });
     } catch (error) {
       throw normalizeError(error.response?.data?.message, 'Broker list sync failed.');
+    }
+  },
+
+  getSuggestedBrokers: async (filters = {}) => {
+    try {
+      const response = await apiClient.get('/crm/brokers/suggested', {
+        params: {
+          area: filters.area,
+          budgetMin: filters.budgetMin,
+          budgetMax: filters.budgetMax,
+          propertyType: filters.propertyType,
+          limit: filters.limit || 3,
+          ...crmService._tenantQueryParams()
+        }
+      });
+      return response.data.brokers || [];
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Broker recommendation fetch failed.');
     }
   },
 
@@ -646,15 +683,14 @@ export const crmService = {
   },
 
   // 🆕 Inline "create new contact" used by the lease ContactPicker when the
-  // tenant/lessee doesn't exist yet. POSTs to the flat /crm/contact/create
-  // endpoint and returns the new CRMContact (with ContactId) on success.
+  // tenant/lessee doesn't exist yet. POSTs to /crm/contacts and returns
+  // the new Contact (with ContactId) on success.
   createContact: async (payload) => {
     try {
-      // The model has [Required] on TenantId (used by reads); the controller
-      // overwrites it with the JWT tenant on insert, so we send a non-null
-      // placeholder to satisfy model validation. The server is the source of
-      // truth for TenantId.
-      const response = await apiClient.post('/crm/contact/create', { tenantId: '__pending__', ...payload });
+      const response = await apiClient.post('/crm/contacts', {
+        ...crmService._normalizeOwnerInterests(payload),
+        tenantId: crmService._resolveWriteTenantId() || payload.tenantId || '__pending__'
+      });
       return response.data;
     } catch (error) {
       throw normalizeError(error.response?.data?.message, 'Contact creation failed.');
@@ -662,7 +698,7 @@ export const crmService = {
   },
 
   updateContact: async (contactPayload) => {
-    const response = await apiClient.put('/crm/contact/update', contactPayload);
+    const response = await apiClient.put(`/crm/contacts/${encodeURIComponent(contactPayload.contactId)}`, crmService._normalizeOwnerInterests(contactPayload));
     return response.data;
   },
 
@@ -694,7 +730,7 @@ export const crmService = {
   },
 
   upsertDealBrokerSplits: async (dealId, splits) => {
-    const response = await apiClient.put(`/crm/deals/${dealId}/broker-splits`, { dealId, splits });
+    const response = await apiClient.put(`/crm/deals/${dealId}/broker-splits`, { dealId, splits }, { params: crmService._tenantQueryParams() });
     return response.data;
   },
 
@@ -707,12 +743,14 @@ export const crmService = {
   // 🛎️ BROKER DASHBOARD + NOTIFICATIONS
   // ============================================================
 
-  // 📊 KPI metrics for the broker dashboard. Pass brokerId to filter
+   // 📊 KPI metrics for the broker dashboard. Pass brokerId to filter
   // to a single broker; omit to aggregate the whole tenant.
-  getBrokerMetrics: async (brokerId = null) => {
+  // monthParam: "yyyy-MM" string (e.g. "2025-03") or null for last 6 months.
+  getBrokerMetrics: async (brokerId = null, monthParam = null) => {
     try {
       const params = { ...crmService._tenantQueryParams() };
       if (brokerId) params.brokerId = brokerId;
+      if (monthParam) params.month = monthParam;
       const response = await apiClient.get('/crm/report/broker-metrics', { params });
       return response.data;
     } catch (error) {
@@ -729,6 +767,28 @@ export const crmService = {
       return response.data || [];
     } catch (error) {
       throw normalizeError(error.response?.data?.message, 'Leaderboard sync failed.');
+    }
+  },
+
+  // 🎯 Broker monthly target management
+  getBrokerTargets: async (brokerId = null, year = null) => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      if (brokerId) params.brokerId = brokerId;
+      if (year) params.year = year;
+      const response = await apiClient.get('/crm/broker-targets', { params });
+      return response.data || [];
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Targets sync failed.');
+    }
+  },
+
+  setBrokerTarget: async (payload) => {
+    try {
+      const response = await apiClient.post('/crm/broker-targets', payload);
+      return response.data;
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Failed to set broker target.');
     }
   },
 
@@ -772,7 +832,58 @@ export const crmService = {
      } catch (error) {
        throw normalizeError(error.response?.data?.message, 'Notification create failed.');
      }
-   },
+    },
+
+  // 📊 Activity log for a broker — recent deal stage changes.
+  // Pass lastTimestamp to get only entries after that point (polling).
+   getBrokerActivity: async (brokerId, lastTimestamp) => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      if (brokerId) params.brokerId = brokerId;
+      if (lastTimestamp) params.since = lastTimestamp;
+      const response = await apiClient.get('/crm/broker-activity', { params });
+      return {
+        items: response.data,
+        newCount: Number(response.headers['x-new-activity-count'] || 0),
+      };
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Activity log sync failed.');
+    }
+  },
+
+  // 📢 Broadcast a message to agency users (optionally filtered by role)
+  broadcastAgencyMessage: async ({ title, body, roleFilter, linkType, linkId }) => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      const response = await apiClient.post('/crm/agency/message', { title, body, roleFilter, linkType, linkId }, { params });
+      return response.data;
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Messaging failed.');
+    }
+  },
+
+
+  // 📊 Agency Glance: KPI summary counts
+  getAgencyGlanceSummary: async () => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      const response = await apiClient.get('/crm/agency/glance/summary', { params });
+      return response.data || {};
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Agency glance summary failed.');
+    }
+  },
+
+  // 📋 Agency Glance: tab data (agency details, contacts, subscriptions, charts)
+  getAgencyGlanceTabs: async () => {
+    try {
+      const params = { ...crmService._tenantQueryParams() };
+      const response = await apiClient.get('/crm/agency/glance/tabs', { params });
+      return response.data || {};
+    } catch (error) {
+      throw normalizeError(error.response?.data?.message, 'Agency glance tabs failed.');
+    }
+  },
 
     // 📥 Import data: download Excel template
     downloadImportTemplate: async () => {

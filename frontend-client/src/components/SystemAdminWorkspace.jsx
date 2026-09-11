@@ -30,11 +30,12 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     name: '', tradingName: '', registrationNumber: '', companyLogoUrl: '',
     contactEmail: '', headquartersAddress: '',
     adminFullName: '', adminEmail: '', adminPassword: '',
-    parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: ''
+    parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: '',
+    brokerageLicense: ''
   });
-  const [userForm, setUserForm] = useState({ fullName: '', email: '', password: '', systemRole: 'Broker' });
+  const [userForm, setUserForm] = useState({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '', monthlyTargetCommission: '' });
   const [editingUser, setEditingUser] = useState(null);
-  const [contactForm, setContactForm] = useState({ fullName: '', email: '', phone: '', position: '', role: 'Owner', isAgencyAdmin: false });
+  const [contactForm, setContactForm] = useState({ fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '', contactType: 'Staff', isAgencyAdmin: false });
   const [error, setError] = useState('');
   const [editingAgency, setEditingAgency] = useState(null);
   const [editingContact, setEditingContact] = useState(null);
@@ -157,19 +158,20 @@ export default function SystemAdminWorkspace({ defaultTab }) {
         // same tenant, so the new agency has an accountable administrator login.
         if (agencyForm.adminEmail) {
           try {
-            await authService.registerUser({
+             await authService.registerUser({
               fullName: agencyForm.adminFullName || agencyForm.contactEmail,
               email: agencyForm.adminEmail,
               systemRole: 'AgencyAdmin',
               tenantId: created?.tenantId || created?.TenantId,
-              passwordHash: agencyForm.adminPassword || 'ChangeMeNow!'
+              passwordHash: agencyForm.adminPassword || 'ChangeMeNow!',
+              licenseNumber: agencyForm.brokerageLicense || ''
             });
           } catch {
             alert(`Agency created, but the linked admin user could not be provisioned: registration failed`);
           }
         }
       }
-      setAgencyForm({ name: '', tradingName: '', registrationNumber: '', companyLogoUrl: '', contactEmail: '', headquartersAddress: '', adminFullName: '', adminEmail: '', adminPassword: '', parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: '' });
+      setAgencyForm({ name: '', tradingName: '', registrationNumber: '', companyLogoUrl: '', contactEmail: '', headquartersAddress: '', adminFullName: '', adminEmail: '', adminPassword: '', parentAgencyId: '', isTrial: false, trialStartDate: '', trialEndDate: '', brokerageLicense: '' });
       setEditingAgency(null);
       await loadAgencies();
     } catch (err) { alert(err || 'Agency creation failed.'); }
@@ -179,9 +181,9 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     e.preventDefault();
     const targetAgency = editingContact ? editingContact.agencyId : expandedAgency;
     try {
-      if (editingContact) await crmService.updateContactPerson(editingContact.contactPersonId, contactForm);
+       if (editingContact) await crmService.updateContact(editingContact.contactId, contactForm);
       else await crmService.createContactPerson(targetAgency, contactForm);
-      setContactForm({ fullName: '', email: '', phone: '', position: '', role: 'Owner', isAgencyAdmin: false });
+      setContactForm({ fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '', contactType: 'Staff', isAgencyAdmin: false });
       setEditingContact(null);
       await loadContacts(targetAgency);
     } catch (err) { alert(err || 'Contact person save failed.'); }
@@ -196,7 +198,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
       parentAgencyId: agency.parentAgencyId || '',
       isTrial: !!agency.isTrial,
       trialStartDate: agency.trialStartDate || '',
-      trialEndDate: agency.trialEndDate || ''
+      trialEndDate: agency.trialEndDate || '',
+      brokerageLicense: agency.brokerageLicense || ''
     });
   };
 
@@ -457,6 +460,9 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   <input value={agencyForm.tradingName} onChange={(e) => setAgencyForm({ ...agencyForm, tradingName: e.target.value })} placeholder="Trading name" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
                   <input value={agencyForm.registrationNumber} onChange={(e) => setAgencyForm({ ...agencyForm, registrationNumber: e.target.value })} placeholder="Registration number" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
 
+                  {/* 🪪 Brokerage License — required for agency operation */}
+                  <input value={agencyForm.brokerageLicense} onChange={(e) => setAgencyForm({ ...agencyForm, brokerageLicense: e.target.value })} placeholder="Brokerage license #" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
+
                   {/* 🖼️ LOGO: either paste a URL or upload a file (stored as a data-URI on the agency record) */}
                   <div className="flex items-center gap-1">
                     <label className="text-[10px] text-slate-400">Logo</label>
@@ -467,8 +473,18 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   </div>
                   <input value={agencyForm.companyLogoUrl} onChange={(e) => setAgencyForm({ ...agencyForm, companyLogoUrl: e.target.value })} placeholder="Logo URL" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
 
-                  <input value={agencyForm.contactEmail} onChange={(e) => setAgencyForm({ ...agencyForm, contactEmail: e.target.value })} type="email" placeholder="Contact email" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
-                  <input value={agencyForm.headquartersAddress} onChange={(e) => setAgencyForm({ ...agencyForm, headquartersAddress: e.target.value })} placeholder="Headquarters address" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                   <input value={agencyForm.contactEmail} onChange={(e) => setAgencyForm({ ...agencyForm, contactEmail: e.target.value })} type="email" placeholder="Contact email" className={`col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white ${editingAgency ? 'hidden' : ''}`} required={editingAgency ? false : true} />
+                   {editingAgency && (
+                     <div className="col-span-2 text-xs text-slate-500">
+                       Contact email is managed via the linked user record.
+                     </div>
+                   )}
+                   <input value={agencyForm.headquartersAddress} onChange={(e) => setAgencyForm({ ...agencyForm, headquartersAddress: e.target.value })} placeholder="Headquarters address" className={`col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white ${editingAgency ? 'hidden' : ''}`} />
+                   {editingAgency && (
+                     <div className="col-span-2 text-xs text-slate-500">
+                       Headquarters address is managed at the corporate entity level.
+                     </div>
+                   )}
 
                   {/* 🧬 PARENT AGENCY — PlatformAdmin may nest this agency under an existing parent to model a sub-brand / branch */}
                   <select value={agencyForm.parentAgencyId} onChange={(e) => setAgencyForm({ ...agencyForm, parentAgencyId: e.target.value })} className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
@@ -518,14 +534,14 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px]">
                     <UserPlus size={14} className="text-emerald-500" /> {editingContact ? 'Edit Contact' : 'Add Contact'}
                   </div>
-                  <button type="button" onClick={() => { setExpandedAgency(null); setEditingContact(null); setContactForm({ fullName: '', email: '', phone: '', position: '', role: 'Owner', isAgencyAdmin: false }); }} className="text-slate-400 hover:text-white"><X size={14} /></button>
+                  <button type="button" onClick={() => { setExpandedAgency(null); setEditingContact(null); setContactForm({ fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '', contactType: 'Staff', isAgencyAdmin: false }); }} className="text-slate-400 hover:text-white"><X size={14} /></button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <input value={contactForm.fullName} onChange={(e) => setContactForm({ ...contactForm, fullName: e.target.value })} placeholder="Full name" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
-                  <input value={contactForm.email} onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })} type="email" placeholder="Email" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
-                  <input value={contactForm.phone} onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })} placeholder="Phone" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
-                  <input value={contactForm.position} onChange={(e) => setContactForm({ ...contactForm, position: e.target.value })} placeholder="Position" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
-                  <select value={contactForm.role} onChange={(e) => setContactForm({ ...contactForm, role: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"><option>Owner</option><option>Tenant</option><option>Manager</option></select>
+                  <input value={contactForm.emailAddress} onChange={(e) => setContactForm({ ...contactForm, emailAddress: e.target.value })} type="email" placeholder="Email" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                  <input value={contactForm.phoneNumber} onChange={(e) => setContactForm({ ...contactForm, phoneNumber: e.target.value })} placeholder="Phone" className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                  <input value={contactForm.positionJobTitle} onChange={(e) => setContactForm({ ...contactForm, positionJobTitle: e.target.value })} placeholder="Position" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                  <select value={contactForm.contactType} onChange={(e) => setContactForm({ ...contactForm, contactType: e.target.value })} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"><option>Owner</option><option>Tenant</option><option>Staff</option><option>Manager</option><option>Broker</option></select>
                   <label className="col-span-2 flex items-center gap-2 text-[10px] text-slate-400"><input type="checkbox" checked={contactForm.isAgencyAdmin} onChange={(e) => setContactForm({ ...contactForm, isAgencyAdmin: e.target.checked })} /> Promote to AgencyAdmin on save</label>
                 </div>
                 <Can permission={editingContact ? 'users:edit' : 'users:create'}>
@@ -568,18 +584,18 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   {/* Expanded contact persons */}
                   {expandedAgency === agency.agencyId && (
                     <div className="px-4 pb-3 border-t border-slate-800 pt-2 space-y-2">
-                      <div className="text-[10px] text-slate-400 font-bold uppercase">Contact persons — promote to broker/AgencyAdmin</div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase">Agency contacts — promote to broker</div>
                       {(agencyContacts[agency.agencyId] || []).map((c) => (
-                        <div key={c.contactPersonId} className="flex justify-between items-center rounded-lg border border-slate-800 bg-slate-950/40 p-2.5">
+                        <div key={c.contactId} className="flex justify-between items-center rounded-lg border border-slate-800 bg-slate-950/40 p-2.5">
                           <div className="flex-1 truncate">
                             <div className="text-slate-200 text-xs font-semibold">{c.fullName}</div>
-                            <div className="text-[10px] text-slate-500">{c.email} • {c.position || '—'}{c.isAgencyAdmin && <Tag size={10} className="ml-1 text-violet-400" />}</div>
+                            <div className="text-[10px] text-slate-500">{c.emailAddress} • {c.positionJobTitle || '—'}{c.isAgencyAdmin && <Tag size={10} className="ml-1 text-violet-400" />}</div>
                           </div>
                           <div className="flex gap-1.5">
                             <Can permission="users:edit">
                               <button type="button" onClick={async () => {
-                                if (window.confirm(`Promote R{c.fullName} to a broker profile?`)) {
-                                  try { await crmService.promoteContactToBroker(c.contactPersonId); await loadBrokers(); await loadAgencies(); await loadContacts(agency.agencyId); }
+                                if (window.confirm(`Promote ${c.fullName} to a broker profile?`)) {
+                                  try { await crmService.promoteContactToBroker(c.contactId); await loadBrokers(); await loadAgencies(); await loadContacts(agency.agencyId); }
                                   catch (err) { alert(err || 'Promotion failed.'); }
                                 }
                               }} className="p-1 rounded bg-violet-950 text-violet-300 border border-violet-900 hover:text-white" title="Promote to broker">
@@ -588,8 +604,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                             </Can>
                             <Can permission="users:delete">
                               <button type="button" onClick={async () => {
-                                if (window.confirm('Remove this contact person?')) {
-                                  try { await crmService.deleteContactPerson(c.contactPersonId); await loadContacts(agency.agencyId); await loadAgencies(); }
+                                if (window.confirm('Remove this contact?')) {
+                                  try { await crmService.deleteContactPerson(c.contactId); await loadContacts(agency.agencyId); await loadAgencies(); }
                                   catch (err) { alert(err || 'Removal failed.'); }
                                 }
                               }} className="p-1 rounded bg-red-950/30 text-red-300 border border-red-900 hover:text-white" title="Delete">
@@ -614,19 +630,30 @@ export default function SystemAdminWorkspace({ defaultTab }) {
           {/* 👤 USER FORM — SuperAdmin and AgencyAdmin can create/edit users with assignable roles */}
           {(isSuperAdmin || currentUserRole === 'AgencyAdmin') && (
           <form onSubmit={async (e) => {
-            e.preventDefault();
-            try {
-              if (editingUser && editingUser.userId) {
-                await authService.updateUserRole(editingUser.userId, userForm.systemRole);
-              } else {
-                await authService.registerUser({
-                  fullName: userForm.fullName,
-                  email: userForm.email,
-                  systemRole: userForm.systemRole,
-                  passwordHash: userForm.password || 'ChangeMeNow!'
-                });
-              }
-              setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker' });
+             e.preventDefault();
+             try {
+               if (editingUser && editingUser.userId) {
+                 await authService.updateUserRole(editingUser.userId, userForm.systemRole);
+               } else {
+                  await authService.registerUser({
+                   fullName: userForm.fullName,
+                   email: userForm.email,
+                   systemRole: userForm.systemRole,
+                   passwordHash: userForm.password || 'ChangeMeNow!',
+                   licenseNumber: userForm.licenseNumber || ''
+                 });
+                }
+                // 🎯 If this is a Broker, upsert the current month's target.
+                if (userForm.systemRole === 'Broker' && userForm.monthlyTargetCommission) {
+                  const now = new Date();
+                  await crmService.setBrokerTarget({
+                    brokerId: editingUser?.userId || undefined,
+                    year: now.getFullYear(),
+                    month: now.getMonth() + 1,
+                    targetCommission: Number(userForm.monthlyTargetCommission)
+                  });
+                }
+                setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '', monthlyTargetCommission: '' });
               setEditingUser(null);
               await loadUsers();
             } catch (err) { alert(err || 'User save failed.'); }
@@ -637,14 +664,22 @@ export default function SystemAdminWorkspace({ defaultTab }) {
               <input value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} type="email" placeholder="Email" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
               <input value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} type="text" placeholder={editingUser ? 'Leave blank to keep' : 'Password'} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
             </div>
-            <select value={userForm.systemRole} onChange={(e) => setUserForm({ ...userForm, systemRole: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
-              {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
+                <select value={userForm.systemRole} onChange={(e) => setUserForm({ ...userForm, systemRole: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+                  {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+                {/* 🪪 License number — required for brokers, optional for AgencyAdmin (brokerage license) */}
+                {(userForm.systemRole === 'Broker' || userForm.systemRole === 'AgencyAdmin') && (
+                  <input value={userForm.licenseNumber} onChange={(e) => setUserForm({ ...userForm, licenseNumber: e.target.value })} placeholder={userForm.systemRole === 'Broker' ? 'Broker License #' : 'Brokerage License #'} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
+                )}
+                {/* 🎯 Monthly target commission — only for Brokers */}
+                {userForm.systemRole === 'Broker' && (
+                  <input value={userForm.monthlyTargetCommission} onChange={(e) => setUserForm({ ...userForm, monthlyTargetCommission: e.target.value })} type="number" placeholder="Monthly Target Commission (R)" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+                )}
             <div className="flex gap-2">
               <Can permission={editingUser ? 'users:edit' : 'users:create'}>
                 <button type="submit" className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold">{editingUser ? 'Save user' : 'Create user'}</button>
               </Can>
-              {editingUser && <button type="button" onClick={() => { setEditingUser(null); setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker' }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
+              {editingUser && <button type="button" onClick={() => { setEditingUser(null); setUserForm({ fullName: '', email: '', password: '', systemRole: 'Broker', licenseNumber: '', monthlyTargetCommission: '' }); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300"><CircleX size={12} className="inline mr-1" /> Cancel</button>}
             </div>
           </form>
           )}
@@ -664,9 +699,22 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                     <span className="text-[10px] px-2 py-1 rounded-md bg-violet-950 text-violet-300 border border-violet-900">{u.systemRole}</span>
                       {(isSuperAdmin || currentUserRole === 'AgencyAdmin') && u.systemRole !== 'PlatformAdmin' && (
                         <>
-                          <Can permission="users:edit">
-                            <button type="button" onClick={() => { setEditingUser(u); setUserForm({ fullName: u.fullName || '', email: u.email || '', password: '', systemRole: u.systemRole || 'Broker' }); }} className="p-2 text-slate-400 hover:text-white"><Pencil size={13} /></button>
-                          </Can>
+                           <Can permission="users:edit">
+                             <button type="button" onClick={async () => {
+                               setEditingUser(u);
+                               setUserForm({ fullName: u.fullName || '', email: u.email || '', password: '', systemRole: u.systemRole || 'Broker', licenseNumber: u.licenseNumber || '', monthlyTargetCommission: '' });
+                               if (u.systemRole === 'Broker') {
+                                 try {
+                                   const now = new Date();
+                                   const targets = await crmService.getBrokerTargets(u.userId, now.getFullYear());
+                                   const currentTarget = targets.find(t => t.month === now.getMonth() + 1 && t.year === now.getFullYear());
+                                   if (currentTarget) {
+                                     setUserForm((prev) => ({ ...prev, monthlyTargetCommission: currentTarget.targetCommission }));
+                                   }
+                                 } catch { /* non-fatal */ }
+                               }
+                             }} className="p-2 text-slate-400 hover:text-white"><Pencil size={13} /></button>
+                           </Can>
                           {u.accountStatus !== 'Disabled' && (
                             <Can permission="users:edit">
                               <button type="button" onClick={async () => {

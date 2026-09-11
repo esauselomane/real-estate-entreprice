@@ -10,7 +10,8 @@ namespace Property.Microservice.Services
         public PermissionCheckService(IHttpClientFactory httpFactory, IConfiguration configuration, IHttpContextAccessor httpContextAccessor)
         {
             _httpFactory = httpFactory;
-            _identityBaseUrl = configuration["Identity:BaseUrl"] ?? "http://localhost:5001";
+            _identityBaseUrl = configuration["Identity:BaseUrl"]
+                ?? throw new InvalidOperationException("Identity:BaseUrl is not configured. This service requires the Identity microservice URL.");
             _httpContextAccessor = httpContextAccessor;
         }
         public async Task<bool> HasPermissionAsync(string permission, CancellationToken cancellationToken = default)
