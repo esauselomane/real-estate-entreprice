@@ -70,15 +70,15 @@ services:
       - "${IDENTITY_PORT:-5001}:5001"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Server=172.18.0.3,1433;Database=${IDENTITY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
+      - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=${IDENTITY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
       - Jwt__Secret=${JWT_SECRET}
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
       - Cors__AllowedOrigins=${CORS_ORIGINS}
       - Email__SupportAddress=${SUPPORT_EMAIL}
-      - Email__AdminEmail=admin@agency.local
-      - Email__PlatformAdminEmail=platform.admin@agency.local
-      - Email__AgencyAdminEmail=agency.admin@agency.local
+      - Email__AdminEmail=${ADMIN_EMAIL}
+      - Email__PlatformAdminEmail=${PLATFORM_ADMIN_EMAIL}
+      - Email__AgencyAdminEmail=${AGENCY_ADMIN_EMAIL}
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -101,7 +101,7 @@ services:
       - "${PROPERTY_PORT:-5002}:5002"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Server=172.18.0.3,1433;Database=${PROPERTY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
+      - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=${PROPERTY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
       - Jwt__Secret=${JWT_SECRET}
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
@@ -130,7 +130,7 @@ services:
       - "${CRM_PORT:-5003}:5003"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DefaultConnection=Server=172.18.0.3,1433;Database=${CRM_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
+      - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=${CRM_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
       - Jwt__Secret=${JWT_SECRET}
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
@@ -162,8 +162,8 @@ services:
       - "${DEVELOPER_PORT:-5006}:5006"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - ConnectionStrings__DeveloperConnection=Server=172.18.0.3,1433;Database=${DEVELOPER_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
-      - ConnectionStrings__PropertyConnection=Server=172.18.0.3,1433;Database=${PROPERTY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
+      - ConnectionStrings__DeveloperConnection=Server=sqlserver,1433;Database=${DEVELOPER_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
+      - ConnectionStrings__PropertyConnection=Server=sqlserver,1433;Database=${PROPERTY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
       - Jwt__Secret=${JWT_SECRET}
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
@@ -260,6 +260,11 @@ services:
     build:
       context: .
       dockerfile: client-facing-app/Dockerfile
+      args:
+        - NEXT_PUBLIC_GATEWAY_URL=${NEXT_PUBLIC_GATEWAY_URL}
+        - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+        - NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
+        - LEAD_API_URL=${LEAD_API_URL}
     container_name: realestate-client-facing
     ports:
       - "${CLIENT_FACING_PORT:-80}:80"
@@ -286,6 +291,8 @@ services:
     build:
       context: .
       dockerfile: frontend-client/Dockerfile
+      args:
+        - VITE_API_BASE_URL=${NEXT_PUBLIC_GATEWAY_URL}
     container_name: realestate-frontend-client
     ports:
       - "${FRONTEND_CLIENT_PORT:-80}:80"
@@ -337,7 +344,7 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost:3001
     networks:
