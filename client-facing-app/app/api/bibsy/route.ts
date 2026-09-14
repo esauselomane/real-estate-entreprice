@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL || "http://localhost:5000";
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "https://api.realestate.example";
 
 async function proxy(path: string) {
   const url = `${GATEWAY}${path}`;

@@ -43,7 +43,27 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
   };
 
   const allUnits = properties.flatMap(p =>
-    (p.subUnits || []).map(u => ({ ...u, propertyId: p.propertyId, propertyDescription: p.propertyDescription, propertyAddress: p.completeAddress, propertyLatitude: p.latitude, propertyLongitude: p.longitude, marketClass: p.marketClass, salePrice: p.salePrice, rentalRate: u.rentalRate, rentEscalationPercentage: u.rentEscalationPercentage, leaseTermMonths: u.leaseTermMonths }))
+    (p.subUnits || []).map(u => ({
+      ...u,
+      propertyId: p.propertyId,
+      propertyDescription: p.propertyDescription,
+      propertyAddress: p.completeAddress,
+      propertyLatitude: p.latitude,
+      propertyLongitude: p.longitude,
+      marketClass: p.marketClass,
+      salePrice: p.salePrice,
+      rentalRate: u.rentalRate,
+      rentEscalationPercentage: u.rentEscalationPercentage,
+      leaseTermMonths: u.leaseTermMonths,
+      isCurrentlyVacant: u.isCurrentlyVacant,
+      propertyType: p.propertyTypeDetails?.name || '',
+      valuationPrice: p.valuationPrice,
+      erfSpatialSize: p.erfSpatialSize,
+      titleDeedType: p.titleDeedType,
+      portfolioZoning: p.portfolioZoning,
+      isForSale: p.isForSale,
+      isForRent: p.isForRent
+    }))
   );
 
   const loadProperty = async (propertyId) => {
@@ -217,6 +237,17 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
       const marketClasses = [...new Set(selectedUnits.map(u => u.marketClass))];
       const primaryMarketClass = marketClasses.includes('Rental') ? 'Rental' : 'Sale';
 
+      const uniquePropertyIds = [...new Set(selectedUnits.map(u => u.propertyId))];
+      const amenitiesByProperty = {};
+      await Promise.all(uniquePropertyIds.map(async (pid) => {
+        try {
+          const data = await propertyService.getPropertyAmenities(pid);
+          amenitiesByProperty[pid] = data.items || [];
+        } catch {
+          amenitiesByProperty[pid] = [];
+        }
+      }));
+
       const payloadEnvelope = {
         DealId: dealData.dealId || 0,
         BrokerName: brokerProfile.fullName,
@@ -241,7 +272,21 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
           RentEscalationPercentage: u.rentEscalationPercentage,
           LeaseTermMonths: u.leaseTermMonths,
           SalePrice: u.salePrice,
-          SelectedImageRefs: unitImageMap[u.propertyUnitId] || []
+          SelectedImageRefs: unitImageMap[u.propertyUnitId] || [],
+          PropertyType: u.propertyType || '',
+          ValuationPrice: u.valuationPrice || null,
+          ErfSpatialSize: u.erfSpatialSize || '',
+          TitleDeedType: u.titleDeedType || '',
+          PortfolioZoning: u.portfolioZoning || '',
+          IsForSale: u.isForSale || false,
+          IsForRent: u.isForRent || false,
+          IsCurrentlyVacant: u.isCurrentlyVacant || false,
+          Amenities: (amenitiesByProperty[u.propertyId] || []).map(a => ({
+            Name: a.AmenityName || a.name || '',
+            Label: a.Label || a.label || '',
+            BooleanValue: !!a.BooleanValue,
+            NumberValue: a.NumberValue ?? null
+          }))
         })),
         BrochureCardId: newCardId
       };

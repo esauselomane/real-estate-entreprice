@@ -22,6 +22,10 @@ namespace Identity.Microservice.Data
         public DbSet<LeadCaptureRequest> LeadCaptureRequests { get; set; }
         public DbSet<LeadWorkflow> LeadWorkflows { get; set; }
         public DbSet<PricingPackage> PricingPackages { get; set; }
+        public DbSet<PeachCustomer> PeachCustomers { get; set; }
+        public DbSet<Subscription> Subscriptions { get; set; }
+        public DbSet<PaymentIntent> PaymentIntents { get; set; }
+        public DbSet<WebhookEvent> WebhookEvents { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -49,6 +53,34 @@ namespace Identity.Microservice.Data
 
             modelBuilder.Entity<Permission>()
                 .HasIndex(p => p.Key)
+                .IsUnique();
+
+            // 💳 Payment entities configuration
+            modelBuilder.Entity<PeachCustomer>()
+                .HasIndex(pc => pc.TenantId)
+                .IsUnique();
+
+            modelBuilder.Entity<PeachCustomer>()
+                .HasIndex(pc => pc.PeachCustomerId)
+                .IsUnique();
+
+            modelBuilder.Entity<Subscription>()
+                .HasIndex(s => s.TenantId)
+                .IsUnique();
+
+            modelBuilder.Entity<Subscription>()
+                .HasIndex(s => s.PeachSubscriptionId)
+                .IsUnique();
+
+            modelBuilder.Entity<PaymentIntent>()
+                .HasIndex(pi => pi.IdempotencyKey)
+                .IsUnique();
+
+            modelBuilder.Entity<PaymentIntent>()
+                .HasIndex(pi => pi.PeachPaymentId);
+
+            modelBuilder.Entity<WebhookEvent>()
+                .HasIndex(w => w.PeachEventId)
                 .IsUnique();
         }
     }

@@ -1461,7 +1461,8 @@ namespace CRM.Microservice.Controllers
             {
                 var propertyBaseUrl = HttpContext.RequestServices
                     .GetRequiredService<IConfiguration>()["Services:PropertyBaseUrl"]
-                    ?? "http://localhost:5002";
+                    ?? Environment.GetEnvironmentVariable("PROPERTY_BASE_URL")
+                    ?? "http://property:5002";
                 using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
                 var tenantList = string.Join(',', tenantIds);
                 var url = $"/api/properties/expiring-mandates?tenantId={Uri.EscapeDataString(tenantList)}"
@@ -1687,7 +1688,7 @@ namespace CRM.Microservice.Controllers
                 ClientPhone: payload.ClientPhone,
                 MarketClass: payload.MarketClass,
                 TenantInstallationAllowance: payload.TenantInstallationAllowance,
-                SubUnits: payload.SubUnits.Select(u => new BrochureSubUnitJob
+                 SubUnits: payload.SubUnits.Select(u => new BrochureSubUnitJob
                 {
                     PropertyId = u.PropertyId,
                     PropertyDescription = u.PropertyDescription,
@@ -1700,7 +1701,16 @@ namespace CRM.Microservice.Controllers
                     RentEscalationPercentage = u.RentEscalationPercentage,
                     LeaseTermMonths = u.LeaseTermMonths,
                     SalePrice = u.SalePrice,
-                    SelectedImageRefs = u.SelectedImageRefs
+                    SelectedImageRefs = u.SelectedImageRefs,
+                    PropertyType = u.PropertyType,
+                    ValuationPrice = u.ValuationPrice,
+                    ErfSpatialSize = u.ErfSpatialSize,
+                    TitleDeedType = u.TitleDeedType,
+                    PortfolioZoning = u.PortfolioZoning,
+                    IsForSale = u.IsForSale,
+                    IsForRent = u.IsForRent,
+                    IsCurrentlyVacant = u.IsCurrentlyVacant,
+                    Amenities = u.Amenities.Select(a => new CRM.Microservice.Services.BackgroundJobs.AmenityInfo { Name = a.Name, Label = a.Label, BooleanValue = a.BooleanValue, NumberValue = a.NumberValue }).ToList()
                 }).ToList()
             );
 

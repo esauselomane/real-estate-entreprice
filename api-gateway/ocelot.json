@@ -5,7 +5,7 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "localhost",
+          "Host": "identity",
           "Port": 5001
         }
       ],
@@ -17,7 +17,7 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "localhost",
+          "Host": "property",
           "Port": 5002
         }
       ],
@@ -29,7 +29,7 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "localhost",
+          "Host": "crm",
           "Port": 5003
         }
       ],
@@ -41,7 +41,7 @@
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "localhost",
+          "Host": "identity",
           "Port": 5001
         }
       ],
@@ -49,11 +49,23 @@
       "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
     },
     {
+      "DownstreamPathTemplate": "/api/payments/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity",
+          "Port": 5001
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/payments/{everything}",
+      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+    },
+    {
       "DownstreamPathTemplate": "/api/developer/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [
         {
-          "Host": "localhost",
+          "Host": "developer-api",
           "Port": 5006
         }
       ],
@@ -62,6 +74,6 @@
     }
   ],
   "GlobalConfiguration": {
-    "BaseUrl": "http://localhost:5000"
+    "BaseUrl": "http://gateway:5000"
   }
 }

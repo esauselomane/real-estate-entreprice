@@ -314,6 +314,26 @@ using (var serviceScope = app.Services.CreateScope())
 
     PropertySeedData.EnsureSeeded(databaseContext, propertyTypeRepository, amenityTypeRepository, externalPlatformRepository, propertyRepository, propertyUnitRepository, propertyPlatformSyndicationRepository, unitLeaseRepository, maintenanceCallRepository);
 
+    // 🚫 Remove duplicate ExternalPlatform entries (seed data without guard
+    // could accumulate on repeated restarts — keep lowest PlatformId per name).
+    databaseContext.Database.ExecuteSqlRaw(@"
+        DELETE FROM [ExternalPlatforms]
+        WHERE [PlatformId] NOT IN (
+            SELECT MIN([PlatformId])
+            FROM [ExternalPlatforms]
+            GROUP BY [PlatformName], [BaseUrlAddress]
+        )");
+
+    // 🚫 Remove duplicate PropertyPlatformSyndication rows (keep lowest SyndicationId
+    // per PropertyId+PlatformId combo — needed if rows existed before unique index).
+    databaseContext.Database.ExecuteSqlRaw(@"
+        DELETE FROM [PropertyPlatformSyndications]
+        WHERE [SyndicationId] NOT IN (
+            SELECT MIN([SyndicationId])
+            FROM [PropertyPlatformSyndications]
+            GROUP BY [PropertyId], [PlatformId]
+        )");
+
     // 🚫 Prevent duplicate syndication records at the database level.
     databaseContext.Database.ExecuteSqlRaw(@"
         IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'[PropertyPlatformSyndications]') AND name = N'UX_PropertyPlatformSyndication_Property_Platform')

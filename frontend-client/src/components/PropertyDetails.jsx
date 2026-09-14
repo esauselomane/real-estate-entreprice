@@ -156,47 +156,47 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     setErrorMessage('');
     try {
        const data = await propertyService.getPropertyById(propertyId);
-      setProperty(data);
-      setSubUnits(data.subUnits || []);
+       setProperty(data);
+       setSubUnits(data.subUnits || []);
 
-      // Load the property-level operations ledger (all modules bound to this property)
-      try {
-        setPropertyOpsLoading(true);
-        const ops = await crmService.getOperationalRecordsForUnit('', propertyId, null);
-        setPropertyOps(ops || []);
-      } catch (err) {
-        setPropertyOpsError((err && err.message) || 'Could not load property operations.');
-        setPropertyOps([]);
-      } finally {
-        setPropertyOpsLoading(false);
-      }
+       // Load the property-level operations ledger (all modules bound to this property)
+       try {
+         setPropertyOpsLoading(true);
+         const ops = await crmService.getOperationalRecordsForUnit('', propertyId, null);
+         setPropertyOps(ops || []);
+       } catch (err) {
+         setPropertyOpsError((err && err.message) || 'Could not load property operations.');
+         setPropertyOps([]);
+       } finally {
+         setPropertyOpsLoading(false);
+       }
 
-      // Load platforms lookup
-      try {
-        const platList = await propertyService.getPlatforms();
-        setPlatforms(platList || []);
-      } catch (platformError) {
-        setPlatforms([]);
-        setErrorMessage((platformError && platformError.message) || 'Failed to load syndication platforms.');
-      }
+       // Load platforms lookup
+       try {
+         const platList = await propertyService.getPlatforms();
+         setPlatforms(platList || []);
+       } catch (platformError) {
+         setPlatforms([]);
+         setErrorMessage((platformError && platformError.message) || 'Failed to load syndication platforms.');
+       }
 
-      // Load amenities (both scopes) + whether unit-level add is permitted.
-      try {
-        setAmenitiesLoading(true);
-        const amen = await propertyService.getAmenities(propertyId);
-        setAmenitiesData(amen || { items: [] });
-      } catch (err) {
-        setAmenityError((err && err.message) || 'Failed to load amenities.');
-        setAmenitiesData({ isResidential: false, canAddUnitAmenities: true, items: [] });
-      } finally {
-        setAmenitiesLoading(false);
-      }
-    } catch (err) {
-      setErrorMessage(typeof err === 'string' ? err : 'Failed to load property details from database.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+       // Load amenities (both scopes) + whether unit-level add is permitted.
+       try {
+         setAmenitiesLoading(true);
+         const amen = await propertyService.getAmenities(propertyId);
+         setAmenitiesData(amen || { items: [] });
+       } catch (err) {
+         setAmenityError((err && err.message) || 'Failed to load amenities.');
+         setAmenitiesData({ isResidential: false, canAddUnitAmenities: true, items: [] });
+       } finally {
+         setAmenitiesLoading(false);
+       }
+     } catch (err) {
+       setErrorMessage(typeof err === 'string' ? err : 'Failed to load property details from database.');
+     } finally {
+       setIsLoading(false);
+     }
+   };
 
   useEffect(() => {
     if (propertyId) {

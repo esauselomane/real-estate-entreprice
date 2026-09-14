@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 const IDENTITY_API = process.env.LEAD_API_URL
   ? process.env.LEAD_API_URL.replace("/api/system/lead-requests", "/api/auth")
-  : "http://localhost:5001/api/auth";
+  : "https://api.biscovetech.com/gateway/auth";
 
 export async function POST(request: Request) {
   try {

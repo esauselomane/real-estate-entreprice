@@ -127,7 +127,9 @@ namespace Property.Microservice.Controllers
             var tenantId = GetCurrentTenant();
 
             // Call CRM microservice via gateway to queue data import
-            var gatewayUrl = _configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
+            var gatewayUrl = _configuration["Gateway:BaseUrl"]
+                ?? Environment.GetEnvironmentVariable("GATEWAY_BASE_URL")
+                ?? "http://gateway:5000/gateway";
             using var httpClient = new HttpClient { BaseAddress = new Uri(gatewayUrl) };
             var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
             if (!string.IsNullOrEmpty(authHeader))

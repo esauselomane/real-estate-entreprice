@@ -147,7 +147,16 @@ namespace CRM.Microservice.Services.BackgroundJobs
                     RentEscalationPercentage = u.RentEscalationPercentage,
                     LeaseTermMonths = u.LeaseTermMonths,
                     SalePrice = u.SalePrice,
-                    SelectedImageRefs = u.SelectedImageRefs
+                    SelectedImageRefs = u.SelectedImageRefs,
+                    PropertyType = u.PropertyType ?? string.Empty,
+                    ValuationPrice = u.ValuationPrice,
+                    ErfSpatialSize = u.ErfSpatialSize ?? string.Empty,
+                    TitleDeedType = u.TitleDeedType ?? string.Empty,
+                    PortfolioZoning = u.PortfolioZoning ?? string.Empty,
+                    IsForSale = u.IsForSale,
+                    IsForRent = u.IsForRent,
+                    IsCurrentlyVacant = u.IsCurrentlyVacant,
+                    Amenities = u.Amenities ?? new List<AmenityInfo>()
                 }).ToList();
 
                 var logoBytes = !string.IsNullOrEmpty(job.CompanyLogoUrl) ? await DownloadImageBytesAsync(job.CompanyLogoUrl) : null;
@@ -340,6 +349,15 @@ namespace CRM.Microservice.Services.BackgroundJobs
             public int? LeaseTermMonths { get; set; }
             public decimal? SalePrice { get; set; }
             public List<string> SelectedImageRefs { get; set; } = new();
+            public string PropertyType { get; set; } = string.Empty;
+            public decimal? ValuationPrice { get; set; }
+            public string? ErfSpatialSize { get; set; }
+            public string? TitleDeedType { get; set; }
+            public string? PortfolioZoning { get; set; }
+            public bool IsForSale { get; set; }
+            public bool IsForRent { get; set; }
+            public bool IsCurrentlyVacant { get; set; }
+            public List<AmenityInfo> Amenities { get; set; } = new();
         }
     }
 }

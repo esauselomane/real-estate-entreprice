@@ -627,42 +627,53 @@ public class PropertyAssetsController : PropertyControllerBase
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             var tenantId = User.FindFirst("TenantId")?.Value ?? string.Empty;
 
-            var crmPayload = new
-            {
-                dealId = payload.DealId,
-                brochureCardId = payload.BrochureCardId,
-                propertyId = payload.SubUnits.FirstOrDefault()?.PropertyId ?? 0,
-                tenantId = tenantId,
-                requestedBy = caller,
-                brokerName = payload.BrokerName,
-                brokerEmail = payload.BrokerEmail,
-                brokerPhone = payload.BrokerPhone,
-                companyName = payload.CompanyName,
-                companyLogoUrl = payload.CompanyLogoUrl,
-                clientName = payload.ClientName,
-                clientEmail = payload.ClientEmail,
-                clientPhone = payload.ClientPhone,
-                marketClass = payload.MarketClass,
-                tenantInstallationAllowance = payload.TenantInstallationAllowance,
-                subUnits = payload.SubUnits.Select(u => new
-                {
-                    propertyId = u.PropertyId,
-                    propertyDescription = u.PropertyDescription,
-                    latitude = u.Latitude,
-                    longitude = u.Longitude,
-                    unitNumber = u.UnitNumber,
-                    unitDescription = u.UnitDescription,
-                    netRentableAreaSqM = u.NetRentableAreaSqM,
-                    rentalRate = u.RentalRate,
-                    rentEscalationPercentage = u.RentEscalationPercentage,
-                    leaseTermMonths = u.LeaseTermMonths,
-                    salePrice = u.SalePrice,
-                    selectedImageRefs = u.SelectedImageRefs
-                }).ToList()
-            };
+             var crmPayload = new
+             {
+                 dealId = payload.DealId,
+                 brochureCardId = payload.BrochureCardId,
+                 propertyId = payload.SubUnits.FirstOrDefault()?.PropertyId ?? 0,
+                 tenantId = tenantId,
+                 requestedBy = caller,
+                 brokerName = payload.BrokerName,
+                 brokerEmail = payload.BrokerEmail,
+                 brokerPhone = payload.BrokerPhone,
+                 companyName = payload.CompanyName,
+                 companyLogoUrl = payload.CompanyLogoUrl,
+                 clientName = payload.ClientName,
+                 clientEmail = payload.ClientEmail,
+                 clientPhone = payload.ClientPhone,
+                 marketClass = payload.MarketClass,
+                 tenantInstallationAllowance = payload.TenantInstallationAllowance,
+                 subUnits = payload.SubUnits.Select(u => new
+                 {
+                     propertyId = u.PropertyId,
+                     propertyDescription = u.PropertyDescription,
+                     latitude = u.Latitude,
+                     longitude = u.Longitude,
+                     unitNumber = u.UnitNumber,
+                     unitDescription = u.UnitDescription,
+                     netRentableAreaSqM = u.NetRentableAreaSqM,
+                     rentalRate = u.RentalRate,
+                     rentEscalationPercentage = u.RentEscalationPercentage,
+                     leaseTermMonths = u.LeaseTermMonths,
+                     salePrice = u.SalePrice,
+                     selectedImageRefs = u.SelectedImageRefs,
+                     propertyType = u.PropertyType,
+                     valuationPrice = u.ValuationPrice,
+                     erfSpatialSize = u.ErfSpatialSize,
+                     titleDeedType = u.TitleDeedType,
+                     portfolioZoning = u.PortfolioZoning,
+                     isForSale = u.IsForSale,
+                     isForRent = u.IsForRent,
+                     isCurrentlyVacant = u.IsCurrentlyVacant,
+                     amenities = u.Amenities
+                 }).ToList()
+             };
 
             // Call CRM microservice via gateway to queue brochure generation
-            var gatewayUrl = _configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
+            var gatewayUrl = _configuration["Gateway:BaseUrl"]
+                ?? Environment.GetEnvironmentVariable("GATEWAY_BASE_URL")
+                ?? "http://gateway:5000/gateway";
             using var httpClient = new HttpClient { BaseAddress = new Uri(gatewayUrl) };
             var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
             if (!string.IsNullOrEmpty(authHeader))

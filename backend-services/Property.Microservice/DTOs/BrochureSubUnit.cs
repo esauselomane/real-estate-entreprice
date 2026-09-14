@@ -16,5 +16,23 @@ namespace Property.Microservice.DTOs
         public int? LeaseTermMonths { get; set; }
         public decimal? SalePrice { get; set; }
         public List<string> SelectedImageRefs { get; set; } = new();
+
+        public string? PropertyType { get; set; }
+        public decimal? ValuationPrice { get; set; }
+        public string? ErfSpatialSize { get; set; }
+        public string? TitleDeedType { get; set; }
+        public string? PortfolioZoning { get; set; }
+        public bool IsForSale { get; set; }
+        public bool IsForRent { get; set; }
+        public bool IsCurrentlyVacant { get; set; }
+        public List<AmenityInfo> Amenities { get; set; } = new();
+    }
+
+    public record class AmenityInfo
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public bool BooleanValue { get; set; }
+        public int? NumberValue { get; set; }
     }
 }

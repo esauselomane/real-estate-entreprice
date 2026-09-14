@@ -17,21 +17,30 @@ builder.Services.AddControllers();
 builder.Services.AddDbContext<CRMDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "SuperSecretRealEstateEnterpriseCryptographicSigningKey123!";
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "Identity.Microservice";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "RealEstateApp.Client";
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        options.Authority = builder.Configuration["Identity:BaseUrl"];
-        options.Audience = "RealEstateApp.Client";
+        options.RequireHttpsMetadata = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateLifetime = true,
-            ValidateIssuerSigningKey = true
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
         };
     });
 
 builder.Services.AddAuthorization();
+
+builder.Services.AddHttpClient();
+builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddSwaggerGen(c =>
 {

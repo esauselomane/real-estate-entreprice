@@ -2,9 +2,12 @@ using Identity.Microservice.Data;
 using Identity.Microservice.DTOs;
 using Identity.Microservice.Models;
 using Identity.Microservice.Services.Abstractions;
+using Identity.Microservice.Services.Abstractions.Payments;
 using Identity.Microservice.Services.Implementation;
+using Identity.Microservice.Services.Implementation.Payments;
 using Identity.Microservice.Services;
 using Identity.Microservice.Authorization;
+using Identity.Microservice.Configuration;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -32,8 +35,30 @@ builder.Services.AddScoped<IUserAccessClaimRepository, UserAccessClaimRepository
 builder.Services.AddScoped<IRepository<LeadCaptureRequest>, LeadCaptureRequestRepository>();
 builder.Services.AddScoped<ILeadWorkflowRepository, LeadWorkflowRepository>();
 builder.Services.AddScoped<IPricingPackageRepository, PricingPackageRepository>();
+builder.Services.AddScoped<IPeachCustomerRepository, PeachCustomerRepository>();
+builder.Services.AddScoped<ISubscriptionRepository, SubscriptionRepository>();
+builder.Services.AddScoped<IPaymentIntentRepository, PaymentIntentRepository>();
+builder.Services.AddScoped<IWebhookEventRepository, WebhookEventRepository>();
+
+// Payment Gateway HTTP Clients
+builder.Services.AddHttpClient<PeachPaymentsGateway>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+builder.Services.AddHttpClient<PayFastGateway>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+// Payment Services
+builder.Services.AddScoped<IPaymentGateway, PeachPaymentsGateway>();
+builder.Services.AddScoped<IPaymentGateway, PayFastGateway>();
+builder.Services.AddScoped<IPaymentGatewayFactory, PaymentGatewayFactory>();
+builder.Services.AddScoped<PaymentOrchestrationService>();
+
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Permission", policy =>
@@ -41,6 +66,8 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
+builder.Services.Configure<PeachPaymentsSettings>(builder.Configuration.GetSection(PeachPaymentsSettings.SectionName));
+builder.Services.Configure<PayFastSettings>(builder.Configuration.GetSection(PayFastSettings.SectionName));
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.AddHttpContextAccessor();
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "SuperSecretRealEstateEnterpriseCryptographicSigningKey123!";
@@ -110,7 +137,7 @@ using (var scope = app.Services.CreateScope())
     var rolePermissionRepository = scope.ServiceProvider.GetRequiredService<IRolePermissionRepository>();
     var pricingPackageRepository = scope.ServiceProvider.GetRequiredService<IPricingPackageRepository>();
 
-    IdentitySeedData.EnsureSeeded(db, config, tenantRepository, userRepository, userAccessClaimRepository, permissionRepository, systemRoleRepository, rolePermissionRepository, pricingPackageRepository);
+    await IdentitySeedData.EnsureSeededAsync(db, config, tenantRepository, userRepository, userAccessClaimRepository, permissionRepository, systemRoleRepository, rolePermissionRepository, pricingPackageRepository);
 }
 app.UseStaticFiles();
 app.UseRouting();

@@ -38,6 +38,24 @@ namespace CRM.Microservice.Services.BackgroundJobs
         public int? LeaseTermMonths { get; init; }
         public decimal? SalePrice { get; init; }
         public List<string> SelectedImageRefs { get; init; } = new();
+
+        public string? PropertyType { get; init; }
+        public decimal? ValuationPrice { get; init; }
+        public string? ErfSpatialSize { get; init; }
+        public string? TitleDeedType { get; init; }
+        public string? PortfolioZoning { get; init; }
+        public bool IsForSale { get; init; }
+        public bool IsForRent { get; init; }
+        public bool IsCurrentlyVacant { get; init; }
+        public List<AmenityInfo> Amenities { get; init; } = new();
+    }
+
+    public record AmenityInfo
+    {
+        public string Name { get; init; } = string.Empty;
+        public string Label { get; init; } = string.Empty;
+        public bool BooleanValue { get; init; }
+        public int? NumberValue { get; init; }
     }
 
     /// <summary>

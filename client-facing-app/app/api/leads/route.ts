@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const LEAD_API = process.env.LEAD_API_URL || "http://localhost:5001/api/system/lead-requests";
+const LEAD_API = process.env.LEAD_API_URL ?? "https://api.realestate.example/gateway/system/lead-requests";
 
 export async function POST(request: Request) {
   try {

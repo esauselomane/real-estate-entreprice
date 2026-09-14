@@ -17,6 +17,7 @@ public class Repository<T> : IRepository<T> where T : class
 {
     private readonly IdentityDbContext _dbContext;
     protected readonly DbSet<T> _dbSet;
+    protected readonly IdentityDbContext _dbContextProtected;
     private readonly ILogger<Repository<T>> _logger;
 
     /// <summary>
@@ -25,6 +26,7 @@ public class Repository<T> : IRepository<T> where T : class
     public Repository(IdentityDbContext dbContext, ILogger<Repository<T>> logger)
     {
         _dbContext = dbContext;
+        _dbContextProtected = dbContext;
         _dbSet = dbContext.Set<T>();
         _logger = logger;
     }
