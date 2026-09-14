@@ -63,4 +63,9 @@ export const paymentService = {
     });
     return response.data;
   },
+
+  createPortalSession: async (returnUrl = '') => {
+    const response = await apiClient.post('/payments/portal', { returnUrl });
+    return response.data || {};
+  },
 };

@@ -97,6 +97,7 @@ export default function AgencyGlance() {
   const [statusBanner, setStatusBanner] = useState(null);
   const [checkoutState, setCheckoutState] = useState({ loading: false, packageCode: null });
   const [activeTab, setActiveTab] = useState('overview');
+  const [isTrialExpired, setIsTrialExpired] = useState(false);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -177,6 +178,31 @@ export default function AgencyGlance() {
     }
   }, []);
 
+  const handleManageBilling = useCallback(async () => {
+    try {
+      const returnBaseUrl = `${window.location.origin}${window.location.pathname}`;
+      const result = await paymentService.createPortalSession(returnBaseUrl);
+      if (result?.portalUrl) {
+        window.location.href = result.portalUrl;
+      } else {
+        setError('No billing portal URL was returned.');
+      }
+    } catch (err) {
+      setError(err?.message || 'Failed to open billing portal.');
+    }
+  }, []);
+
+  const checkTrialStatus = useCallback(async () => {
+    try {
+      const status = await paymentService.getSubscriptionStatus();
+      if (status?.IsTrial === false && status?.CanUpgrade === false) {
+        setIsTrialExpired(true);
+      }
+    } catch {
+      // Non-blocking - trial status is best-effort at this point
+    }
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const paymentStatus = params.get('paymentStatus');
@@ -209,11 +235,11 @@ export default function AgencyGlance() {
     const loadAll = async () => {
       setLoading(true);
       setError('');
-      await Promise.all([loadSummary(), loadTabData()]);
+      await Promise.all([loadSummary(), loadTabData(), checkTrialStatus()]);
       setLoading(false);
     };
     loadAll();
-  }, [loadSummary, loadTabData]);
+  }, [loadSummary, loadTabData, checkTrialStatus]);
 
   if (loading && !summary && !tabData) {
     return (
