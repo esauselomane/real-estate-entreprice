@@ -72,6 +72,7 @@ builder.Services.AddScoped<IBrokerScoreService, BrokerScoreService>();
 builder.Services.AddScoped<IContactPersonRepository, ContactPersonRepository>();
 builder.Services.AddScoped<IUserGrowthRepository, UserGrowthRepository>();
 builder.Services.AddScoped<IPropertyCountService, PropertyCountService>();
+builder.Services.AddScoped<IEmailNotificationService, EmailNotificationService>();
 
 builder.Services.AddHostedService<BrokerMetricsBackgroundJob>();
 

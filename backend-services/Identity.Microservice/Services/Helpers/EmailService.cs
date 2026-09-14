@@ -34,7 +34,8 @@ namespace Identity.Microservice.Services
         {
             try
             {
-                var templatePath = Path.Combine(_env.WebRootPath, "EmailTemplates", "PasswordSetup.html");
+                var templateRoot = _settings.TemplatesRootPath ?? Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "templates");
+                var templatePath = Path.Combine(templateRoot, "registration", "password-setup.html");
                 string htmlBody;
                 if (File.Exists(templatePath))
                 {

@@ -1,0 +1,33 @@
+<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0F172A; page-break-after: always; padding: 24px;">
+  <h2 style="font-size: 18px; font-weight: bold; margin: 0 0 16px 0; padding-bottom: 10px; border-bottom: 1px solid #E2E8F0;">UNIT: {{UnitNumber}}</h2>
+  <p style="font-size: 12px; color: #334155; margin: 0 0 6px 0;"><strong>Unit Description:</strong> {{UnitDescription}}</p>
+  <p style="font-size: 12px; color: #334155; margin: 0 0 16px 0;"><strong>Net Rentable Area:</strong> {{NetRentableAreaSqM}} m²</p>
+  
+  {{#if isRental}}
+  <div style="margin-top: 20px;">
+    <h3 style="font-size: 13px; font-weight: bold; margin: 0 0 8px 0;">RENTAL TERMS</h3>
+    <p style="font-size: 12px; color: #334155; margin: 0 0 4px 0;">Monthly Rental Rate: R {{RentalRate}}</p>
+    <p style="font-size: 12px; color: #334155; margin: 0 0 4px 0;">Annual Escalation: {{RentEscalationPercentage}}%</p>
+    <p style="font-size: 12px; color: #334155; margin: 0;">Lease Term: {{LeaseTermMonths}} months</p>
+  </div>
+  {{else}}
+  <div style="margin-top: 20px;">
+    <h3 style="font-size: 13px; font-weight: bold; margin: 0 0 8px 0;">SALE DETAILS</h3>
+    <p style="font-size: 14px; font-weight: bold; color: #0F172A; margin: 0 0 4px 0;">Purchase Price: R {{SalePrice}} (Excl VAT)</p>
+    {{#if SalePrice}}
+    <p style="font-size: 12px; color: #334155; margin: 0;">Estimated Bond Repayment (80% over 20 yrs): R {{EstimatedBondRepayment}} /month</p>
+    {{/if}}
+  </div>
+  {{/if}}
+  
+  {{#if SelectedImageRefs.length}}
+  <div style="margin-top: 20px;">
+    <h3 style="font-size: 13px; font-weight: bold; margin: 0 0 10px 0;">UNIT IMAGES</h3>
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+      {{#each SelectedImageRefs}}
+      <img src="{{this}}" style="height: 70px; width: 100%; object-fit: cover; border: 1px solid #CBD5E1; border-radius: 4px; display: block;" />
+      {{/each}}
+    </div>
+  </div>
+  {{/if}}
+</div>
