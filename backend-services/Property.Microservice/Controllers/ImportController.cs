@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Authorization;
 using Property.Microservice.DTOs;
 using Property.Microservice.Models;
 using Property.Microservice.Data;
-using Property.Microservice.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
 
@@ -15,14 +14,12 @@ namespace Property.Microservice.Controllers
     public class ImportController : ControllerBase
     {
         private readonly PropertyDbContext _dbContext;
-        private readonly KafkaPublisherService _kafka;
         private readonly ILogger<ImportController> _logger;
         private readonly IConfiguration _configuration;
 
-        public ImportController(PropertyDbContext dbContext, KafkaPublisherService kafka, ILogger<ImportController> logger, IConfiguration configuration)
+        public ImportController(PropertyDbContext dbContext, ILogger<ImportController> logger, IConfiguration configuration)
         {
             _dbContext = dbContext;
-            _kafka = kafka;
             _logger = logger;
             _configuration = configuration;
         }
@@ -129,18 +126,32 @@ namespace Property.Microservice.Controllers
             var caller = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "Unknown";
             var tenantId = GetCurrentTenant();
 
-            var payload = new
+            // Call CRM microservice via gateway to queue data import
+            var gatewayUrl = _configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
+            using var httpClient = new HttpClient { BaseAddress = new Uri(gatewayUrl) };
+            var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(authHeader))
+                httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authHeader.Replace("Bearer ", ""));
+
+            var crmPayload = new
             {
-                JobId = jobId,
-                FileName = request.FileName,
-                Base64Content = request.Base64Content,
-                RequestedBy = caller,
-                TenantId = tenantId,
-                CreatedAt = DateTime.UtcNow
+                jobId = jobId,
+                importType = "mixed",
+                fileName = request.FileName,
+                base64Content = request.Base64Content,
+                tenantId = tenantId,
+                requestedBy = caller
             };
 
-            await _kafka.RaiseEventAsync("data-import", jobId, System.Text.Json.JsonSerializer.Serialize(payload));
+            var response = await httpClient.PostAsJsonAsync("/api/crm/import", crmPayload);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("UploadExcel: CRM call failed — {StatusCode} {Error}", response.StatusCode, errorContent);
+                return StatusCode((int)response.StatusCode, new { message = "Failed to queue data import." });
+            }
 
+            // Also create local tracking record
             var job = new ImportJob
             {
                 JobId = jobId,
@@ -155,7 +166,7 @@ namespace Property.Microservice.Controllers
             _dbContext.ImportJobs.Add(job);
             await _dbContext.SaveChangesAsync();
 
-            _logger.LogInformation("Import job {JobId} queued by {Caller}", jobId, caller);
+            _logger.LogInformation("Import job {JobId} queued via CRM by {Caller}", jobId, caller);
 
             return Accepted(new { jobId, status = "queued" });
         }

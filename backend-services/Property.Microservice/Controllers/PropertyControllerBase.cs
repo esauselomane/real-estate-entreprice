@@ -3,8 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using Property.Microservice.Data;
 using Property.Microservice.DTOs;
 using Property.Microservice.Models;
-using Property.Microservice.Services.Abstractions;
 using Property.Microservice.Services;
+using Property.Microservice.Services.Abstractions;
+using Property.Microservice.Services.BackgroundJobs;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -19,12 +20,15 @@ namespace Property.Microservice.Controllers;
 public abstract class PropertyControllerBase : ControllerBase
 {
     protected readonly PropertyDbContext DbContext;
-    protected readonly KafkaPublisherService KafkaPublisher;
     protected readonly IPropertyRepository PropertyRepository;
     protected readonly IPropertyUnitRepository PropertyUnitRepository;
     protected readonly PermissionCheckService PermissionCheck;
     protected readonly ILogger Logger;
     protected readonly string StorageRootPath;
+    
+    // Job queues for background processing
+    protected readonly IJobQueue<ImageProcessingJob> ImageProcessingQueue;
+    protected readonly IJobQueue<SyndicationJob> SyndicationQueue;
 
     protected static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
     {
@@ -34,18 +38,20 @@ public abstract class PropertyControllerBase : ControllerBase
 
     protected PropertyControllerBase(
         PropertyDbContext dbContext,
-        KafkaPublisherService kafkaPublisher,
         PermissionCheckService permissionCheck,
         IPropertyRepository propertyRepository,
         IPropertyUnitRepository propertyUnitRepository,
-        ILogger logger)
+        ILogger logger,
+        IJobQueue<ImageProcessingJob>? imageProcessingQueue = null,
+        IJobQueue<SyndicationJob>? syndicationQueue = null)
     {
         DbContext = dbContext;
-        KafkaPublisher = kafkaPublisher;
         PermissionCheck = permissionCheck;
         PropertyRepository = propertyRepository;
         PropertyUnitRepository = propertyUnitRepository;
         Logger = logger;
+        ImageProcessingQueue = imageProcessingQueue!;
+        SyndicationQueue = syndicationQueue!;
 
         StorageRootPath = Path.Combine(AppContext.BaseDirectory, "PropertyMediaVault");
         if (!Directory.Exists(StorageRootPath))
