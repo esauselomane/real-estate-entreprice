@@ -24,6 +24,7 @@ namespace Property.Microservice.Models
         public PropertyAsset? PropertyDetails { get; set; }
 
         [ForeignKey("PlatformId")]
+        [System.Text.Json.Serialization.JsonIgnore]
         public ExternalPlatform? PlatformDetails { get; set; }
     }
 }

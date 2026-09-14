@@ -43,7 +43,7 @@ namespace Property.Microservice.Data
                 });
             }
 
-            context.SaveChanges();
+            if (!externalPlatformRepository.Query().Any())
             {
                 externalPlatformRepository.AddRange(new []
                 {

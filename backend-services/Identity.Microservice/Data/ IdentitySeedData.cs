@@ -7,7 +7,7 @@ namespace Identity.Microservice.Data
 {
     public static class IdentitySeedData
     {
-        public static void EnsureSeeded(IdentityDbContext context, IConfiguration configuration, ITenantRepository tenantRepository, IUserRepository userRepository, IUserAccessClaimRepository userAccessClaimRepository, IPermissionRepository permissionRepository, ISystemRoleRepository systemRoleRepository, IRolePermissionRepository rolePermissionRepository, IPricingPackageRepository pricingPackageRepository)
+        public static async Task EnsureSeededAsync(IdentityDbContext context, IConfiguration configuration, ITenantRepository tenantRepository, IUserRepository userRepository, IUserAccessClaimRepository userAccessClaimRepository, IPermissionRepository permissionRepository, ISystemRoleRepository systemRoleRepository, IRolePermissionRepository rolePermissionRepository, IPricingPackageRepository pricingPackageRepository)
         {
             if (context == null)
             {
@@ -139,6 +139,141 @@ namespace Identity.Microservice.Data
                           CONSTRAINT [AK_PricingPackages_Code] UNIQUE ([Code])
                       );
                   ");
+              }
+
+              // 💳 Peach Payments customer mapping
+              var peachCustomerTableExists = context.Database.SqlQueryRaw<int>(
+                  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'PeachCustomers'")
+                  .AsEnumerable().FirstOrDefault();
+              if (peachCustomerTableExists == 0)
+              {
+                  context.Database.ExecuteSqlRaw(@"
+                      CREATE TABLE [PeachCustomers] (
+                          [Id] int NOT NULL IDENTITY(1,1),
+                          [TenantId] nvarchar(450) NOT NULL,
+                          [PeachCustomerId] nvarchar(100) NOT NULL,
+                          [Email] nvarchar(255) NOT NULL,
+                          [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                          [UpdatedAt] datetime2 NULL,
+                          CONSTRAINT [PK_PeachCustomers] PRIMARY KEY ([Id]),
+                          CONSTRAINT [AK_PeachCustomers_TenantId] UNIQUE ([TenantId]),
+                          CONSTRAINT [AK_PeachCustomers_PeachCustomerId] UNIQUE ([PeachCustomerId]),
+                          CONSTRAINT [FK_PeachCustomers_TenantAgencies] FOREIGN KEY ([TenantId]) REFERENCES [TenantAgencies] ([TenantId]) ON DELETE CASCADE
+                      );
+                  ");
+              }
+
+              // 💳 Subscriptions
+              var subscriptionTableExists = context.Database.SqlQueryRaw<int>(
+                  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Subscriptions'")
+                  .AsEnumerable().FirstOrDefault();
+              if (subscriptionTableExists == 0)
+              {
+                  context.Database.ExecuteSqlRaw(@"
+                      CREATE TABLE [Subscriptions] (
+                          [Id] int NOT NULL IDENTITY(1,1),
+                          [TenantId] nvarchar(450) NOT NULL,
+                          [PeachSubscriptionId] nvarchar(100) NOT NULL,
+                          [PeachPriceId] nvarchar(100) NOT NULL,
+                          [PricingPackageCode] nvarchar(50) NOT NULL,
+                          [Status] int NOT NULL DEFAULT 0,
+                          [CurrentPeriodStart] datetime2 NOT NULL,
+                          [CurrentPeriodEnd] datetime2 NOT NULL,
+                          [TrialEndsAt] datetime2 NULL,
+                          [CancelledAt] datetime2 NULL,
+                          [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                          [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                          CONSTRAINT [PK_Subscriptions] PRIMARY KEY ([Id]),
+                          CONSTRAINT [AK_Subscriptions_TenantId] UNIQUE ([TenantId]),
+                          CONSTRAINT [AK_Subscriptions_PeachSubscriptionId] UNIQUE ([PeachSubscriptionId]),
+                          CONSTRAINT [FK_Subscriptions_TenantAgencies] FOREIGN KEY ([TenantId]) REFERENCES [TenantAgencies] ([TenantId]) ON DELETE CASCADE
+                      );
+                  ");
+              }
+
+              // 💳 Payment intents (for idempotency)
+              var paymentIntentTableExists = context.Database.SqlQueryRaw<int>(
+                  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'PaymentIntents'")
+                  .AsEnumerable().FirstOrDefault();
+              if (paymentIntentTableExists == 0)
+              {
+                  context.Database.ExecuteSqlRaw(@"
+                      CREATE TABLE [PaymentIntents] (
+                          [Id] int NOT NULL IDENTITY(1,1),
+                          [TenantId] nvarchar(450) NOT NULL,
+                          [PeachPaymentId] nvarchar(100) NOT NULL,
+                          [PeachCheckoutId] nvarchar(100) NULL,
+                          [Amount] decimal(18,2) NOT NULL,
+                          [Currency] nvarchar(3) NOT NULL DEFAULT 'ZAR',
+                          [Status] int NOT NULL DEFAULT 0,
+                          [IdempotencyKey] nvarchar(100) NOT NULL,
+                          [MetadataJson] nvarchar(max) NULL,
+                          [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                          [CompletedAt] datetime2 NULL,
+                          CONSTRAINT [PK_PaymentIntents] PRIMARY KEY ([Id]),
+                          CONSTRAINT [AK_PaymentIntents_IdempotencyKey] UNIQUE ([IdempotencyKey]),
+                          CONSTRAINT [FK_PaymentIntents_TenantAgencies] FOREIGN KEY ([TenantId]) REFERENCES [TenantAgencies] ([TenantId]) ON DELETE CASCADE
+                      );
+                  ");
+              }
+
+              // 💳 Webhook events (for audit and idempotency)
+              var webhookEventTableExists = context.Database.SqlQueryRaw<int>(
+                  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'WebhookEvents'")
+                  .AsEnumerable().FirstOrDefault();
+              if (webhookEventTableExists == 0)
+              {
+                  context.Database.ExecuteSqlRaw(@"
+                      CREATE TABLE [WebhookEvents] (
+                          [Id] int NOT NULL IDENTITY(1,1),
+                          [PeachEventId] nvarchar(100) NOT NULL,
+                          [EventType] nvarchar(100) NOT NULL,
+                          [PayloadJson] nvarchar(max) NOT NULL,
+                          [Processed] bit NOT NULL DEFAULT 0,
+                          [ReceivedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                          [ProcessedAt] datetime2 NULL,
+                          [ErrorMessage] nvarchar(max) NULL,
+                          CONSTRAINT [PK_WebhookEvents] PRIMARY KEY ([Id]),
+                          CONSTRAINT [AK_WebhookEvents_PeachEventId] UNIQUE ([PeachEventId])
+                      );
+                  ");
+              }
+
+              // Add payment columns to TenantAgencies if missing
+              var peachCustomerIdColumnExists = context.Database.SqlQueryRaw<int>(
+                  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'TenantAgencies' AND COLUMN_NAME = 'PeachCustomerId'")
+                  .AsEnumerable().FirstOrDefault();
+              if (peachCustomerIdColumnExists == 0)
+              {
+                  context.Database.ExecuteSqlRaw(
+                      "ALTER TABLE [TenantAgencies] ADD [PeachCustomerId] nvarchar(100) NULL;");
+              }
+
+              var subscriptionStatusColumnExists = context.Database.SqlQueryRaw<int>(
+                  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'TenantAgencies' AND COLUMN_NAME = 'SubscriptionStatus'")
+                  .AsEnumerable().FirstOrDefault();
+              if (subscriptionStatusColumnExists == 0)
+              {
+                  context.Database.ExecuteSqlRaw(
+                      "ALTER TABLE [TenantAgencies] ADD [SubscriptionStatus] int NOT NULL DEFAULT 0;");
+              }
+
+              var subscriptionEndsAtColumnExists = context.Database.SqlQueryRaw<int>(
+                  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'TenantAgencies' AND COLUMN_NAME = 'SubscriptionEndsAt'")
+                  .AsEnumerable().FirstOrDefault();
+              if (subscriptionEndsAtColumnExists == 0)
+              {
+                  context.Database.ExecuteSqlRaw(
+                      "ALTER TABLE [TenantAgencies] ADD [SubscriptionEndsAt] datetime2 NULL;");
+              }
+
+              var activeSubscriptionIdColumnExists = context.Database.SqlQueryRaw<int>(
+                  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'TenantAgencies' AND COLUMN_NAME = 'ActiveSubscriptionId'")
+                  .AsEnumerable().FirstOrDefault();
+              if (activeSubscriptionIdColumnExists == 0)
+              {
+                  context.Database.ExecuteSqlRaw(
+                      "ALTER TABLE [TenantAgencies] ADD [ActiveSubscriptionId] int NULL;");
               }
 
               var existingTenants = tenantRepository.Query().Count();
@@ -285,6 +420,7 @@ namespace Identity.Microservice.Data
             }
 
             context.SaveChanges();
+            SeedAgencySubscriptions(context, tenantRepository);
 
             var existingClaimUserIds = userAccessClaimRepository.Query().Select(c => c.UserId).ToHashSet();
             var claimsToAdd = new List<UserAccessClaim>();
@@ -529,6 +665,176 @@ namespace Identity.Microservice.Data
                 }
             }
             context.SaveChanges();
+
+            // 🔄 Extend existing trials by 2 months and create subscription records
+            await ExtendExistingTrialsAndCreateSubscriptionsAsync(context);
+        }
+
+        private static async Task ExtendExistingTrialsAndCreateSubscriptionsAsync(IdentityDbContext context)
+        {
+            var now = DateTime.UtcNow;
+            var newTrialEnd = now.AddMonths(2);
+
+            // Get all tenants
+            var tenants = context.TenantAgencies.ToList();
+            
+            foreach (var tenant in tenants)
+            {
+                // Update TenantAgency trial dates
+                tenant.IsTrial = true;
+                tenant.TrialStartDate = now;
+                tenant.TrialEndDate = newTrialEnd;
+                tenant.SubscriptionStatus = SubscriptionStatus.Trialing;
+                tenant.SubscriptionEndsAt = newTrialEnd;
+                tenant.OperationalStatus = "TrialPending";
+
+                // Create subscription record if doesn't exist
+                var existingSub = context.Subscriptions.FirstOrDefault(s => s.TenantId == tenant.TenantId);
+                if (existingSub == null)
+                {
+                    var uniqueTrialSubscriptionId = $"trial-{tenant.TenantId}";
+                    context.Subscriptions.Add(new Subscription
+                    {
+                        TenantId = tenant.TenantId,
+                        PeachSubscriptionId = uniqueTrialSubscriptionId,
+                        PeachPriceId = $"trial-price-{tenant.TenantId}",
+                        PricingPackageCode = "SME_AGENCY",
+                        Status = SubscriptionStatus.Trialing,
+                        CurrentPeriodStart = now,
+                        CurrentPeriodEnd = newTrialEnd,
+                        TrialEndsAt = newTrialEnd,
+                        CreatedAt = now,
+                        UpdatedAt = now
+                    });
+                }
+            }
+
+            await context.SaveChangesAsync();
+        }
+
+        private static void SeedAgencySubscriptions(IdentityDbContext context, ITenantRepository tenantRepository)
+        {
+            var now = DateTime.UtcNow;
+            var seedData = new[]
+            {
+                new AgencySubscriptionSeed
+                {
+                    TenantId = "TEN-001",
+                    PeachSubscriptionId = "sub_active_ten_001",
+                    PeachPriceId = "price_sme_agency_monthly",
+                    PricingPackageCode = "SME_AGENCY",
+                    Status = SubscriptionStatus.Active,
+                    CurrentPeriodStart = now.AddDays(-30),
+                    CurrentPeriodEnd = now.AddDays(30),
+                    TrialEndsAt = null,
+                    CancelledAt = null
+                },
+                new AgencySubscriptionSeed
+                {
+                    TenantId = "TEN-002",
+                    PeachSubscriptionId = "sub_past_ten_002",
+                    PeachPriceId = "price_private_annual",
+                    PricingPackageCode = "PRIVATE",
+                    Status = SubscriptionStatus.Cancelled,
+                    CurrentPeriodStart = now.AddDays(-120),
+                    CurrentPeriodEnd = now.AddDays(-10),
+                    TrialEndsAt = now.AddDays(-12),
+                    CancelledAt = now.AddDays(-7)
+                },
+                new AgencySubscriptionSeed
+                {
+                    TenantId = "TEN-003",
+                    PeachSubscriptionId = "sub_active_ten_003",
+                    PeachPriceId = "price_enterprise_monthly",
+                    PricingPackageCode = "ENTERPRISE",
+                    Status = SubscriptionStatus.Active,
+                    CurrentPeriodStart = now.AddDays(-15),
+                    CurrentPeriodEnd = now.AddDays(45),
+                    TrialEndsAt = null,
+                    CancelledAt = null
+                }
+            };
+
+            foreach (var seed in seedData)
+            {
+                var tenant = context.TenantAgencies.Local.FirstOrDefault(t => t.TenantId == seed.TenantId)
+                    ?? tenantRepository.Query().FirstOrDefault(t => t.TenantId == seed.TenantId);
+
+                if (tenant == null)
+                {
+                    continue;
+                }
+
+                var existingSubscription = context.Subscriptions.FirstOrDefault(s => s.TenantId == seed.TenantId);
+                if (existingSubscription == null)
+                {
+                    existingSubscription = new Subscription
+                    {
+                        TenantId = seed.TenantId,
+                        PeachSubscriptionId = seed.PeachSubscriptionId,
+                        PeachPriceId = seed.PeachPriceId,
+                        PricingPackageCode = seed.PricingPackageCode,
+                        Status = seed.Status,
+                        CurrentPeriodStart = seed.CurrentPeriodStart,
+                        CurrentPeriodEnd = seed.CurrentPeriodEnd,
+                        TrialEndsAt = seed.TrialEndsAt,
+                        CancelledAt = seed.CancelledAt,
+                        CreatedAt = now,
+                        UpdatedAt = now
+                    };
+
+                    context.Subscriptions.Add(existingSubscription);
+                }
+                else
+                {
+                    existingSubscription.PeachSubscriptionId = seed.PeachSubscriptionId;
+                    existingSubscription.PeachPriceId = seed.PeachPriceId;
+                    existingSubscription.PricingPackageCode = seed.PricingPackageCode;
+                    existingSubscription.Status = seed.Status;
+                    existingSubscription.CurrentPeriodStart = seed.CurrentPeriodStart;
+                    existingSubscription.CurrentPeriodEnd = seed.CurrentPeriodEnd;
+                    existingSubscription.TrialEndsAt = seed.TrialEndsAt;
+                    existingSubscription.CancelledAt = seed.CancelledAt;
+                    existingSubscription.UpdatedAt = now;
+                }
+
+                tenant.SubscriptionStatus = seed.Status;
+                tenant.SubscriptionEndsAt = seed.CurrentPeriodEnd;
+            }
+
+            context.SaveChanges();
+
+            foreach (var seed in seedData)
+            {
+                var tenant = context.TenantAgencies.Local.FirstOrDefault(t => t.TenantId == seed.TenantId)
+                    ?? tenantRepository.Query().FirstOrDefault(t => t.TenantId == seed.TenantId);
+
+                if (tenant == null)
+                {
+                    continue;
+                }
+
+                var savedSubscription = context.Subscriptions.FirstOrDefault(s => s.TenantId == seed.TenantId);
+                tenant.ActiveSubscriptionId = savedSubscription != null &&
+                    (seed.Status == SubscriptionStatus.Active || seed.Status == SubscriptionStatus.Trialing)
+                    ? savedSubscription.Id
+                    : null;
+            }
+
+            context.SaveChanges();
+        }
+
+        private sealed class AgencySubscriptionSeed
+        {
+            public string TenantId { get; set; } = string.Empty;
+            public string PeachSubscriptionId { get; set; } = string.Empty;
+            public string PeachPriceId { get; set; } = string.Empty;
+            public string PricingPackageCode { get; set; } = string.Empty;
+            public SubscriptionStatus Status { get; set; }
+            public DateTime CurrentPeriodStart { get; set; }
+            public DateTime CurrentPeriodEnd { get; set; }
+            public DateTime? TrialEndsAt { get; set; }
+            public DateTime? CancelledAt { get; set; }
         }
     }
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
    Briefcase, Banknote, Home, Clock,   TrendingUp, TrendingDown,
    AlertTriangle, Bell, ChevronRight, Send,
-   Users, CheckCircle2, ArrowUp, ArrowDown, Calendar
+   Users, CheckCircle2, ArrowUp, ArrowDown, Calendar, Target
 } from 'lucide-react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -323,7 +323,7 @@ export default function BrokerDashboard() {
        )}
 
       {/* ROW 1: KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
         <KpiCard
           icon={Banknote}
           label="Gross Commission Income (GCI)"
@@ -349,6 +349,13 @@ export default function BrokerDashboard() {
           value={`${fmtNumber(metrics?.averageDom)} d`}
           accent="slate"
         />
+        {effectiveBrokerId && metrics?.monthlyTargets && metrics.monthlyTargets.length > 0 && (
+          <TargetGauge
+            target={metrics.monthlyTargets[metrics.monthlyTargets.length - 1]?.target}
+            realised={metrics.monthlyTargets[metrics.monthlyTargets.length - 1]?.realised}
+            progress={metrics.monthlyTargets[metrics.monthlyTargets.length - 1]?.progress}
+          />
+        )}
       </div>
 
       {/* ROW 2: revenue trend + pipeline funnel */}
@@ -576,6 +583,86 @@ function EmptyState({ label }) {
   return (
     <div className="h-full w-full flex items-center justify-center text-xs text-slate-500">
       {label}
+    </div>
+  );
+}
+
+function TargetGauge({ target, realised, progress }) {
+  const hasTarget = target && target > 0;
+  const progressValue = Math.min(Math.max(progress || 0, 0), 100);
+  const isOverTarget = progressValue >= 100;
+
+  const circumference = 2 * Math.PI * 45; // radius = 45
+  const strokeDashoffset = circumference * (1 - progressValue / 100);
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col items-center">
+      <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+        <Target size={16} className="text-emerald-400" /> Monthly Target Progress
+      </h3>
+      {hasTarget ? (
+        <div className="relative w-40 h-40 flex items-center justify-center">
+          <svg width="100" height="100" viewBox="0 0 100 100" className="transform -rotate-90">
+            {/* Background circle */}
+            <circle
+              cx="50"
+              cy="50"
+              r="45"
+              stroke="#1e293b"
+              strokeWidth="8"
+              fill="none"
+            />
+            {/* Progress circle */}
+            <circle
+              cx="50"
+              cy="50"
+              r="45"
+              stroke={isOverTarget ? '#10b981' : '#6366f1'}
+              strokeWidth="8"
+              fill="none"
+              strokeDasharray={circumference}
+              strokeDashoffset={strokeDashoffset}
+              strokeLinecap="round"
+              className="transition-all duration-500 ease-out"
+              style={{ filter: isOverTarget ? 'drop-shadow(0 0 6px #10b981)' : 'none' }}
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className={`text-2xl font-bold text-white ${isOverTarget ? 'text-emerald-400' : ''}`}>
+              {progressValue.toFixed(1)}%
+            </span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">
+              {isOverTarget ? 'Target Exceeded' : 'of Target'}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="w-40 h-40 flex items-center justify-center">
+          <div className="text-center">
+            <Target size={32} className="mx-auto text-slate-600 mb-2" />
+            <p className="text-xs text-slate-500">No target set</p>
+            <p className="text-[10px] text-slate-600 mt-1">Set a target in Admin Workspace</p>
+          </div>
+        </div>
+      )}
+      <div className="mt-4 w-full space-y-2 text-center">
+        <div className="flex justify-between text-xs text-slate-400">
+          <span>Target</span>
+          <span className="font-semibold text-white">{hasTarget ? `R ${(target / 1000).toFixed(1)}K` : '—'}</span>
+        </div>
+        <div className="flex justify-between text-xs text-slate-400">
+          <span>Realised</span>
+          <span className="font-semibold text-emerald-400">{hasTarget ? `R ${(realised / 1000).toFixed(1)}K` : 'R 0'}</span>
+        </div>
+        {hasTarget && (
+          <div className="flex justify-between text-xs text-slate-400 border-t border-slate-800 pt-2">
+            <span>Remaining</span>
+            <span className="font-semibold text-amber-400">
+              R {((target - realised) / 1000).toFixed(1)}K
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { Home, Search, Users, Briefcase, BarChart3, ChevronLeft, ChevronRight, LogOut, Shield, Map, UserPlus, Settings, Activity } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Home, Building, TrendingUp, User, PieChart, Key, ChevronDown, ChevronRight, LayoutDashboard, Activity, Search, Map, UserPlus, Briefcase, Users, UserCheck, BarChart3, Shield, Settings, Building2, ChevronLeft, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 import { useAgency } from '../contexts/AgencyContext.jsx';
@@ -10,34 +10,91 @@ import AgencyGlance from './AgencyGlance.jsx';
 export default function LeftSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [popoutOpen, setPopoutOpen] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState(new Set(['workspace']));
   const profilePicRef = useRef(null);
   const { userRole, activeProfile, logout } = useAuth();
   const { currentView, navigateTo } = useAppUi();
   const { currentAgency } = useAgency();
   const { hasPermission } = usePermission();
 
+  const toggleCategory = (id) => {
+    setExpandedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
-  // Base structural links mapped directly to permissions
-  const navItems = [
-    { name: 'Dashboard', view: 'dashboard', icon: Home, permission: 'properties:view' },
-    // 📊 Broker dashboard — visible to everyone with deals:view.
-    // Brokers see it as the default landing; admins use it as a submenu
-    // with a broker filter dropdown to drill into one agent.
-    { name: 'Broker Dashboard', view: 'broker-dashboard', icon: Activity, permission: 'deals:view' },
-    { name: 'Property Search', view: 'search', icon: Search, permission: 'properties:view' },
-    { name: 'Property Map', view: 'map', icon: Map, permission: 'properties:view' },
-    { name: 'Leads', view: 'leads', icon: UserPlus, permission: 'leads:view' },
-    { name: 'Deals', view: 'deals', icon: Briefcase, permission: 'deals:view' },
-    { name: 'CRM Directory', view: 'crm', icon: Briefcase, permission: 'users:view' },
-    { name: 'Clients (Tenants/Owners)', view: 'owners-tenants', icon: Users, permission: 'users:view' },
-    { name: 'Performance Reports', view: 'reports', icon: BarChart3, permission: 'billing:view' },
-    { name: 'System Admin', view: 'admin', icon: Shield, permission: 'agencies:view' },
-    { name: 'Agency at a Glance', view: 'agency-glance', icon: BarChart3, permission: 'billing:view' },
-    { name: 'Roles & Permissions', view: 'roles', icon: Settings, permission: 'system:roles:manage' },
+  // Hierarchical navigation: 6 parent categories with expandable submenus
+  const navCategories = [
+    {
+      id: 'workspace',
+      label: 'Workspace',
+      icon: Home,
+      items: [
+        { name: 'Dashboard', view: 'dashboard', icon: LayoutDashboard, permission: 'properties:view' },
+        { name: 'Broker Dashboard', view: 'broker-dashboard', icon: Activity, permission: 'deals:view' },
+      ],
+    },
+    {
+      id: 'properties',
+      label: 'Properties',
+      icon: Building,
+      items: [
+        { name: 'Property Search', view: 'search', icon: Search, permission: 'properties:view' },
+        { name: 'Property Map', view: 'map', icon: Map, permission: 'properties:view' },
+      ],
+    },
+    {
+      id: 'business',
+      label: 'Business',
+      icon: TrendingUp,
+      items: [
+        { name: 'Leads', view: 'leads', icon: UserPlus, permission: 'leads:view' },
+        { name: 'Deals', view: 'deals', icon: Briefcase, permission: 'deals:view' },
+      ],
+    },
+    {
+      id: 'people',
+      label: 'People',
+      icon: User,
+      items: [
+        { name: 'CRM Directory', view: 'crm', icon: Users, permission: 'users:view' },
+        { name: 'Clients (Tenants/Owners)', view: 'owners-tenants', icon: UserCheck, permission: 'users:view' },
+      ],
+    },
+    {
+      id: 'reports',
+      label: 'Reports',
+      icon: PieChart,
+      items: [
+        { name: 'Performance Reports', view: 'reports', icon: BarChart3, permission: 'billing:view' },
+        { name: 'Agency at a Glance', view: 'agency-glance', icon: Building2, permission: 'billing:view' },
+      ],
+    },
+    {
+      id: 'administration',
+      label: 'Administration',
+      icon: Key,
+      items: [
+        { name: 'System Admin', view: 'admin', icon: Shield, permission: 'agencies:view' },
+        { name: 'Roles & Permissions', view: 'roles', icon: Settings, permission: 'system:roles:manage' },
+      ],
+    },
   ];
 
-  // Filters visible screens depending on the user's permission criteria
-  const visibleItems = navItems.filter(item => hasPermission(item.permission));
+  // Auto-expand the category containing the current view
+  useEffect(() => {
+    const cat = navCategories.find(c => c.items.some(item => item.view === currentView));
+    if (cat && !expandedCategories.has(cat.id)) {
+      setExpandedCategories(prev => new Set([...prev, cat.id]));
+    }
+  }, [currentView]);
+
+  const isCategoryActive = (catId) => {
+    const cat = navCategories.find(c => c.id === catId);
+    return cat ? cat.items.some(item => item.view === currentView) : false;
+  };
 
   return (
     <div 
@@ -67,23 +124,62 @@ export default function LeftSidebar() {
           )}
         </div>
 
-        {/* 🔗 Dynamic Functional Navigation Menu Links */}
+        {/* 🔗 Hierarchical Navigation */}
         <nav className="p-3 space-y-1">
-          {visibleItems.map((item, index) => {
-            const IconComponent = item.icon;
+          {navCategories.map(category => {
+            const CategoryIcon = category.icon;
+            const isExpanded = expandedCategories.has(category.id);
+            const isActive = isCategoryActive(category.id);
+            const categoryItems = category.items.filter(item => hasPermission(item.permission));
+
             return (
-              <button
-                key={index}
-                type="button"
-                onClick={() => navigateTo(item.view)}
-                aria-current={currentView === item.view ? 'page' : undefined}
-                className={`w-full flex items-center gap-4 px-3 py-3 rounded-xl transition-all duration-200 group cursor-pointer text-left ${currentView === item.view ? 'bg-blue-600/20 text-white border border-blue-900/70' : 'hover:bg-slate-800/60 hover:text-white border border-transparent'}`}
-              >
-                <IconComponent size={20} className={`transition-colors ${currentView === item.view ? 'text-blue-400' : 'text-slate-400 group-hover:text-blue-400'}`} />
-                {!isCollapsed && (
-                  <span className="text-sm font-medium tracking-wide whitespace-nowrap">{item.name}</span>
+              <div key={category.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isCollapsed) {
+                      navigateTo(categoryItems[0]?.view || 'dashboard');
+                    } else {
+                      toggleCategory(category.id);
+                    }
+                  }}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group cursor-pointer text-left ${
+                    isActive
+                      ? 'bg-blue-600/20 text-white border border-blue-900/70'
+                      : 'hover:bg-slate-800/60 hover:text-white border border-transparent'
+                  }`}
+                >
+                  <CategoryIcon size={20} className={`transition-colors ${isActive ? 'text-blue-400' : 'text-slate-400 group-hover:text-blue-400'}`} />
+                  {!isCollapsed && (
+                    <>
+                      <span className="text-sm font-semibold tracking-wide flex-1 whitespace-nowrap">{category.label}</span>
+                      {isExpanded
+                        ? <ChevronDown size={14} className="text-slate-500" />
+                        : <ChevronRight size={14} className="text-slate-500" />
+                      }
+                    </>
+                  )}
+                </button>
+                {!isCollapsed && isExpanded && (
+                  <div className="ml-7 mt-1 space-y-1 border-l border-slate-800 pl-2">
+                    {categoryItems.map((item, idx) => {
+                      const ItemIcon = item.icon;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => navigateTo(item.view)}
+                          aria-current={currentView === item.view ? 'page' : undefined}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group cursor-pointer text-left ${currentView === item.view ? 'bg-blue-600/20 text-white border border-blue-900/70' : 'hover:bg-slate-800/60 hover:text-white border border-transparent'}`}
+                        >
+                          <ItemIcon size={16} className={`transition-colors ${currentView === item.view ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`} />
+                          <span className="text-xs font-medium tracking-wide whitespace-nowrap">{item.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
-              </button>
+              </div>
             );
           })}
         </nav>

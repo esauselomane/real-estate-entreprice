@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://app.biscovetech.com";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://app.biscovetech.com";
 
 export default function LoginRedirect() {
   useEffect(() => {

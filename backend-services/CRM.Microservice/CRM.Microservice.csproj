@@ -17,12 +17,12 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.0" />
     <!-- 🔐 JWT bearer validation (issuer = Identity microservice) -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
-    <!-- 📨 Apache Kafka Event Streaming Driver -->
-    <PackageReference Include="Confluent.Kafka" Version="2.8.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\Shared.Kafka\Shared.Kafka.csproj" />
+    <!-- 🌐 PDF Generation with Headless Chrome -->
+    <PackageReference Include="PuppeteerSharp" Version="20.0.5" />
+    <!-- 📊 Excel Processing -->
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+    <!-- 📚 Swagger/OpenAPI Documentation -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
 
 </Project>

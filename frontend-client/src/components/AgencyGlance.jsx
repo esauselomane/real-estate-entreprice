@@ -8,6 +8,8 @@ import {
   LineChart, Line, Legend, BarChart, Bar
 } from 'recharts';
 import { crmService } from '../services/crmService.js';
+import { paymentService } from '../services/paymentService.js';
+import { leadCaptureService } from '../services/leadCaptureService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
 import LoadingOverlay from './LoadingOverlay.jsx';
@@ -89,9 +91,13 @@ export default function AgencyGlance() {
   const { activeTenantId } = useTenant();
   const [summary, setSummary] = useState(null);
   const [tabData, setTabData] = useState(null);
+  const [pricingPackages, setPricingPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [statusBanner, setStatusBanner] = useState(null);
+  const [checkoutState, setCheckoutState] = useState({ loading: false, packageCode: null });
   const [activeTab, setActiveTab] = useState('overview');
+  const [isTrialExpired, setIsTrialExpired] = useState(false);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -104,22 +110,136 @@ export default function AgencyGlance() {
 
   const loadTabData = useCallback(async () => {
     try {
-      const data = await crmService.getAgencyGlanceTabs();
-      setTabData(data);
+      const [tabDataResponse, subscriptionHistory, plans] = await Promise.all([
+        crmService.getAgencyGlanceTabs(),
+        paymentService.getSubscriptionHistory(activeTenantId || null),
+        leadCaptureService.getPricingPackages().catch(() => []),
+      ]);
+
+      const formattedTabData = {
+        ...tabDataResponse,
+        activeSubscriptions: (subscriptionHistory || [])
+          .filter((item) => ['active', 'trialing'].includes((item.status || '').toLowerCase()))
+          .map((item) => ({
+            name: item.pricingPackageName || item.pricingPackageCode || 'Subscription',
+            code: item.pricingPackageCode || 'SUBSCRIPTION',
+            monthlyPrice: item.monthlyPrice ?? null,
+            annualPrice: item.annualPrice ?? null,
+            startDate: item.currentPeriodStart,
+            endDate: item.currentPeriodEnd,
+            status: item.status,
+          })),
+        pastSubscriptions: (subscriptionHistory || [])
+          .filter((item) => !['active', 'trialing', 'none'].includes((item.status || '').toLowerCase()))
+          .map((item) => ({
+            name: item.pricingPackageName || item.pricingPackageCode || 'Subscription',
+            code: item.pricingPackageCode || 'SUBSCRIPTION',
+            monthlyPrice: item.monthlyPrice ?? null,
+            annualPrice: item.annualPrice ?? null,
+            startDate: item.currentPeriodStart,
+            endDate: item.currentPeriodEnd,
+            status: item.status,
+          })),
+      };
+
+      setTabData(formattedTabData);
+      setPricingPackages(Array.isArray(plans) ? plans : []);
     } catch (err) {
       setError(err?.message || 'Failed to load agency glance tab data.');
     }
   }, [activeTenantId]);
 
+  const handleUpgrade = useCallback(async (packageCode) => {
+    try {
+      setCheckoutState({ loading: true, packageCode });
+      setError('');
+
+      const returnBaseUrl = `${window.location.origin}${window.location.pathname}`;
+      const successUrl = `${returnBaseUrl}?paymentStatus=success&paymentSource=checkout`;
+      const cancelUrl = `${returnBaseUrl}?paymentStatus=cancelled&paymentSource=checkout`;
+
+      const result = await paymentService.createCheckoutSession({
+        pricingPackageCode: packageCode,
+        billingCycle: 'monthly',
+        successUrl,
+        cancelUrl,
+      });
+
+      if (result?.checkoutUrl) {
+        window.location.href = result.checkoutUrl;
+        return;
+      }
+
+      setError('Checkout session was created but no redirect URL was returned.');
+    } catch (err) {
+      setError(err?.message || 'Failed to start the checkout flow.');
+    } finally {
+      setCheckoutState({ loading: false, packageCode: null });
+    }
+  }, []);
+
+  const handleManageBilling = useCallback(async () => {
+    try {
+      const returnBaseUrl = `${window.location.origin}${window.location.pathname}`;
+      const result = await paymentService.createPortalSession(returnBaseUrl);
+      if (result?.portalUrl) {
+        window.location.href = result.portalUrl;
+      } else {
+        setError('No billing portal URL was returned.');
+      }
+    } catch (err) {
+      setError(err?.message || 'Failed to open billing portal.');
+    }
+  }, []);
+
+  const checkTrialStatus = useCallback(async () => {
+    try {
+      const status = await paymentService.getSubscriptionStatus();
+      if (status?.IsTrial === false && status?.CanUpgrade === false) {
+        setIsTrialExpired(true);
+      }
+    } catch {
+      // Non-blocking - trial status is best-effort at this point
+    }
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paymentStatus = params.get('paymentStatus');
+
+    if (paymentStatus) {
+      const banner =
+        paymentStatus === 'success'
+          ? {
+              type: 'success',
+              message: 'Subscription updated successfully. Your billing status is being refreshed.',
+            }
+          : {
+              type: 'warning',
+              message: 'Checkout was cancelled. No payment was taken and your current plan remains unchanged.',
+            };
+
+      setStatusBanner(banner);
+
+      const refreshAfterReturn = async () => {
+        await Promise.all([loadSummary(), loadTabData()]);
+        const nextUrl = `${window.location.pathname}`;
+        window.history.replaceState({}, '', nextUrl);
+      };
+
+      void refreshAfterReturn();
+    }
+  }, [loadSummary, loadTabData]);
+
   useEffect(() => {
     const loadAll = async () => {
       setLoading(true);
       setError('');
-      await Promise.all([loadSummary(), loadTabData()]);
+      await Promise.all([loadSummary(), loadTabData(), checkTrialStatus()]);
       setLoading(false);
     };
     loadAll();
-  }, [loadSummary, loadTabData]);
+  }, [loadSummary, loadTabData, checkTrialStatus]);
 
   if (loading && !summary && !tabData) {
     return (
@@ -153,6 +273,18 @@ export default function AgencyGlance() {
           Quick Glance
         </button>
       </div>
+
+      {statusBanner && (
+        <div
+          className={`p-3 rounded-xl border text-xs ${
+            statusBanner.type === 'success'
+              ? 'bg-emerald-950/30 border-emerald-800 text-emerald-300'
+              : 'bg-amber-950/30 border-amber-800 text-amber-300'
+          }`}
+        >
+          {statusBanner.message}
+        </div>
+      )}
 
       {error && (
         <div className="p-3 rounded-xl bg-red-950/30 border border-red-900 text-red-300 text-xs">
@@ -301,6 +433,72 @@ export default function AgencyGlance() {
               <Calendar size={16} className="text-amber-400" />
               Subscription Packages
             </h3>
+
+            {pricingPackages.length > 0 && (
+              <div className="mb-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+                {pricingPackages.map((plan) => {
+                  const isCurrentPlan = (tabData.activeSubscriptions || []).some(
+                    (sub) => (sub.code || '').toUpperCase() === (plan.code || '').toUpperCase()
+                  );
+
+                  return (
+                    <div
+                      key={plan.code}
+                      className={`rounded-2xl border p-4 ${
+                        isCurrentPlan
+                          ? 'border-emerald-500/60 bg-emerald-950/20'
+                          : 'border-slate-700 bg-slate-950/60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{plan.name}</p>
+                          <p className="text-[11px] text-slate-400">{plan.code}</p>
+                        </div>
+                        {isCurrentPlan && (
+                          <span className="text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-300 rounded-full px-2 py-1">
+                            Current
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mt-3 flex items-end gap-1">
+                        <span className="text-2xl font-bold text-white">{plan.monthlyPrice ? fmtCurrency(plan.monthlyPrice) : 'Free'}</span>
+                        <span className="text-[11px] text-slate-400">/ month</span>
+                      </div>
+
+                      {plan.annualPrice && (
+                        <p className="mt-1 text-[11px] text-slate-400">or {fmtCurrency(plan.annualPrice)} / year</p>
+                      )}
+
+                      <div className="mt-3 text-[11px] text-slate-300 space-y-1">
+                        {(plan.features || []).slice(0, 3).map((feature) => (
+                          <div key={feature} className="truncate">• {feature}</div>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleUpgrade(plan.code)}
+                        disabled={checkoutState.loading && checkoutState.packageCode === plan.code}
+                        className={`mt-4 w-full rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                          isCurrentPlan
+                            ? 'bg-slate-800 text-slate-300 cursor-not-allowed'
+                            : 'bg-blue-600 text-white hover:bg-blue-500'
+                        } disabled:opacity-60`}
+                      >
+                        {checkoutState.loading && checkoutState.packageCode === plan.code
+                          ? 'Redirecting…'
+                          : isCurrentPlan
+                            ? 'Current Plan'
+                            : 'Upgrade'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Active */}
               <div>

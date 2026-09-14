@@ -22,6 +22,7 @@ namespace Property.Microservice.Data
         public DbSet<AmenityType> AmenityTypes { get; set; }
         public DbSet<PropertyUnitAmenity> PropertyUnitAmenities { get; set; }
         public DbSet<ImportJob> ImportJobs { get; set; } = null!;
+        public DbSet<Notification> Notifications { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

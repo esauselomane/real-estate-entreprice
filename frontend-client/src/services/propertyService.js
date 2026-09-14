@@ -193,8 +193,18 @@ export const propertyService = {
     }
   },
 
-  // --- 📋 LIST A UNIT'S STORED DOCUMENTS (read-only; role-scoped) ---
-  getUnitDocuments: async (propertyId, unitId) => {
+   // --- 📦 GET PROPERTY AMENITIES ---
+   getPropertyAmenities: async (propertyId) => {
+     try {
+       const response = await apiClient.get(`/properties/${propertyId}/amenities`);
+       return response.data;
+     } catch (error) {
+       throw new Error(toMessage(error.response?.data?.message, 'Failed to load property amenities.'));
+     }
+   },
+
+   // --- 📋 LIST A UNIT'S STORED DOCUMENTS (read-only; role-scoped) ---
+   getUnitDocuments: async (propertyId, unitId) => {
     try {
       // See getPropertyById — once a property/unit is open the user
       // should be able to see its records.

@@ -9,6 +9,7 @@ namespace Identity.Microservice.Services
     public interface IEmailService
     {
         Task SendPasswordSetupEmailAsync(string toEmail, string toName, string activationLink, string agencyName);
+        Task SendEmailAsync(string toEmail, string subject, string htmlBody);
     }
 
     public class EmailService : IEmailService
@@ -34,7 +35,8 @@ namespace Identity.Microservice.Services
         {
             try
             {
-                var templatePath = Path.Combine(_env.WebRootPath, "EmailTemplates", "PasswordSetup.html");
+                var templateRoot = _settings.TemplatesRootPath ?? Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "templates");
+                var templatePath = Path.Combine(templateRoot, "registration", "password-setup.html");
                 string htmlBody;
                 if (File.Exists(templatePath))
                 {
@@ -70,6 +72,45 @@ namespace Identity.Microservice.Services
             }
         }
 
+        public async Task SendEmailAsync(string toEmail, string subject, string htmlBody)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(_settings.Host))
+                {
+                    using var message = new MailMessage(_settings.FromAddress, toEmail)
+                    {
+                        Subject = subject,
+                        Body = htmlBody,
+                        IsBodyHtml = true,
+                        From = new MailAddress(_settings.FromAddress, _settings.FromName)
+                    };
+                    message.ReplyToList.Add(new MailAddress(_settings.SupportEmail, "Support"));
+
+                    using var client = new System.Net.Mail.SmtpClient();
+                    client.Host = _settings.Host;
+                    client.Port = _settings.Port;
+                    client.EnableSsl = _settings.EnableSsl;
+                    client.DeliveryMethod = SmtpDeliveryMethod.Network;
+                    client.UseDefaultCredentials = false;
+                    if (!string.IsNullOrEmpty(_settings.Username))
+                        client.Credentials = new NetworkCredential(_settings.Username, _settings.Password);
+
+                    await client.SendMailAsync(message);
+                    _logger.LogInformation("Email sent via SMTP to {Email} - Subject: {Subject}", toEmail, subject);
+                    return;
+                }
+
+                _logger.LogInformation("No email provider configured. Using fallback simulation log.");
+                _logger.LogInformation("[EMAIL SIMULATION]: {Subject} -> {Email} | Body: {Body}", subject, toEmail, htmlBody);
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send email to {Email} - Subject: {Subject}", toEmail, subject);
+            }
+        }
+
         private async Task SendViaSmtpAsync(string toEmail, string toName, string htmlBody, string agencyName)
         {
             using var message = new MailMessage(_settings.FromAddress, toEmail)
@@ -96,8 +137,8 @@ namespace Identity.Microservice.Services
         private async Task SendFallbackEmailAsync(string toEmail, string toName, string activationLink, string agencyName)
         {
             _logger.LogInformation(
-                "[EMAIL SIMULATION]: Password setup email -> {RecipientName} ({Email}) | Agency: {AgencyName} | Link: {ActivationLink}",
-                toName, toEmail, agencyName, activationLink);
+                    "[EMAIL SIMULATION]: Password setup email -> {RecipientName} ({Email}) | Agency: {AgencyName} | Link: {ActivationLink}",
+                    toName, toEmail, agencyName, activationLink);
             await Task.CompletedTask;
         }
     }

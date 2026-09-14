@@ -1,0 +1,58 @@
+<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0F172A; page-break-after: always; padding: 24px; position: relative;">
+  <div style="position: absolute; bottom: 8px; right: 24px; font-size: 9px; color: #94A3B8;">Biscove Real Estate Tech — Confidential</div>
+  <h2 style="font-size: 18px; font-weight: bold; margin: 0 0 6px 0; padding-left: 12px; border-left: 3px solid #2563EB;">UNIT: {{UnitNumber}} {{#if isCurrentlyVacant}}<span style="display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: #ECFDF5; color: #059669; padding: 2px 8px; border-radius: 9999px;">AVAILABLE</span>{{else}}<span style="display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: #FEF3C7; color: #D97706; padding: 2px 8px; border-radius: 9999px;">OCCUPIED</span>{{/if}}</h2>
+  <p style="font-size: 12px; color: #64748B; margin: 0 0 2px 0; padding-left: 15px; font-style: italic;">{{UnitDescription}}</p>
+  <p style="font-size: 12px; color: #334155; margin: 0 0 14px 0; padding-left: 15px;"><strong>Net Rentable Area:</strong> {{NetRentableAreaSqM}} m² {{#unless isRental}}{{#if PropertyType}} · {{PropertyType}} {{/if}}{{#if ErfSpatialSize}} · Erf {{ErfSpatialSize}} {{/if}}{{#if ValuationPrice}} · R {{ValuationPrice}} {{/if}}{{/unless}}</p>
+
+  {{#if isRental}}
+  <div style="margin-top: 20px; border-left: 3px solid #10B981; padding-left: 16px;">
+    <h3 style="font-size: 13px; font-weight: bold; margin: 0 0 10px 0; color: #10B981;">RENTAL TERMS</h3>
+    <div style="background: #ECFDF5; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px;">
+      <p style="font-size: 10px; color: #64748B; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Monthly Rental Rate</p>
+      <p style="font-size: 20px; font-weight: 800; color: #059669; margin: 0;">R {{RentalRate}}</p>
+    </div>
+    <p style="font-size: 12px; color: #334155; margin: 0 0 4px 0;">Lease Term: {{LeaseTermMonths}} months</p>
+    <p style="font-size: 12px; color: #334155; margin: 0 0 4px 0;">Annual Escalation: {{RentEscalationPercentage}}%</p>
+    {{#if PropertyType}}<p style="font-size: 12px; color: #334155; margin: 0 0 4px 0;">Property Type: {{PropertyType}}</p>{{/if}}
+    {{#if TenantInstallationAllowance}}<p style="font-size: 12px; color: #10B981; margin: 4px 0 0 0; font-weight: 600;">Tenant Installation Allowance: R {{TenantInstallationAllowance}}</p>{{/if}}
+    {{#if IsForSale}}<p style="font-size: 11px; color: #64748B; margin: 4px 0 0 0; font-style: italic;">Also available for purchase</p>{{/if}}
+  </div>
+  {{else}}
+  <div style="margin-top: 20px; border-left: 3px solid #2563EB; padding-left: 16px;">
+    <h3 style="font-size: 13px; font-weight: bold; margin: 0 0 10px 0; color: #2563EB;">SALE DETAILS</h3>
+    <div style="background: #F0F9FF; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px;">
+      <p style="font-size: 10px; color: #64748B; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Purchase Price</p>
+      <p style="font-size: 20px; font-weight: 800; color: #059669; margin: 0;">R {{SalePrice}}</p>
+    </div>
+    {{#if SalePrice}}<p style="font-size: 12px; color: #334155; margin: 0 0 8px 0;">Estimated Bond Repayment (80% over 20 yrs): R {{EstimatedBondRepayment}} /month</p>{{/if}}
+    {{#if ErfSpatialSize}}<p style="font-size: 12px; color: #334155; margin: 0 0 4px 0;">Erf Size: {{ErfSpatialSize}}</p>{{/if}}
+    {{#if TitleDeedType}}<p style="font-size: 12px; color: #334155; margin: 0 0 4px 0;">Title Deed: {{TitleDeedType}}</p>{{/if}}
+    {{#if ValuationPrice}}<p style="font-size: 12px; color: #64748B; margin: 4px 0 0 0;">Valuation Reference: R {{ValuationPrice}}</p>{{/if}}
+  </div>
+  {{/if}}
+
+  {{#if SelectedImageRefs.length}}
+  <div style="margin-top: 20px;">
+    <h3 style="font-size: 13px; font-weight: bold; margin: 0 0 10px 0;">UNIT IMAGES</h3>
+    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+      {{#each SelectedImageRefs}}
+      <img src="{{this}}" style="height: 140px; width: 100%; object-fit: cover; border: 1px solid #CBD5E1; border-radius: 8px; display: block; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" />
+      {{/each}}
+    </div>
+  </div>
+  {{/if}}
+
+  {{#if Amenities.length}}
+  <div style="margin-top: 20px;">
+    <h3 style="font-size: 13px; font-weight: bold; margin: 0 0 10px 0;">AMENITIES</h3>
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+      {{#each Amenities}}
+      <div style="display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px;">
+        <span style="color: #2563EB; display: flex; align-items: center;">{{IconSvg Name}}</span>
+        <span style="font-size: 10px; color: #334155; font-weight: 500;">{{BooleanValue ? 'Yes' : (NumberValue ? NumberValue : 'No')}}</span>
+      </div>
+      {{/each}}
+    </div>
+  </div>
+  {{/if}}
+</div>

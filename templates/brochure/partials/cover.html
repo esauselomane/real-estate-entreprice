@@ -1,0 +1,34 @@
+<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0F172A; page-break-after: always; position: relative;">
+  <div style="height: 4px; background: linear-gradient(90deg, #2563EB, #10B981); width: 100%;"></div>
+  <div style="padding: 48px 40px 40px 40px;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px;">
+      <span style="display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; color: #2563EB; background: #EFF6FF; padding: 4px 12px; border-radius: 9999px; border: 1px solid #DBEAFE;">CONFIDENTIAL PROPOSAL</span>
+      <span style="font-size: 10px; color: #94A3B8; font-weight: 500;">Generated {{generatedAt}}</span>
+    </div>
+    <h1 style="font-size: 36px; font-weight: 800; margin: 0 0 8px 0; letter-spacing: -0.02em; line-height: 1.2; color: #0F172A;">REAL ESTATE PORTFOLIO PROPOSAL</h1>
+    <p style="font-size: 14px; color: #64748B; margin: 0 0 40px 0; font-weight: 500;">Curated property portfolio for client presentation</p>
+    <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 48px;">
+      {{{logoHtml}}}
+      <div>
+        <p style="font-size: 20px; font-weight: 700; margin: 0; color: #0F172A;">{{companyName}}</p>
+        <p style="font-size: 11px; color: #94A3B8; margin: 2px 0 0 0;">{{brokerName}}</p>
+      </div>
+    </div>
+    <div style="border-top: 2px solid #2563EB; padding-top: 24px; margin-bottom: 32px; max-width: 80%;">
+      <p style="font-size: 10px; color: #94A3B8; margin: 0 0 8px 0; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;">PREPARED BY</p>
+      <p style="font-size: 18px; font-weight: 700; margin: 0 0 4px 0; color: #0F172A;">{{brokerName}}</p>
+      <p style="font-size: 12px; color: #64748B; margin: 0 0 2px 0;">{{brokerEmail}}</p>
+      <p style="font-size: 12px; color: #64748B; margin: 0;">{{brokerPhone}}</p>
+    </div>
+    <div style="border-top: 2px solid #10B981; padding-top: 24px; max-width: 80%;">
+      <p style="font-size: 10px; color: #94A3B8; margin: 0 0 8px 0; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;">PREPARED FOR</p>
+      <p style="font-size: 18px; font-weight: 700; margin: 0 0 4px 0; color: #0F172A;">{{clientName}}</p>
+      {{#if clientEmail}}
+      <p style="font-size: 12px; color: #64748B; margin: 0 0 2px 0;">{{clientEmail}}</p>
+      {{/if}}
+      {{#if clientPhone}}
+      <p style="font-size: 12px; color: #64748B; margin: 0;">{{clientPhone}}</p>
+      {{/if}}
+    </div>
+  </div>
+</div>

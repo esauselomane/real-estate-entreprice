@@ -7,8 +7,7 @@ using Property.Microservice.DTOs;
 using Property.Microservice.Models;
 using Property.Microservice.Services.Abstractions;
 using Property.Microservice.Services;
-using Shared.Kafka.Events;
-using Shared.Kafka.Topics;
+using Property.Microservice.Services.BackgroundJobs;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -29,10 +28,10 @@ public class PropertyAssetsController : PropertyControllerBase
     private readonly IRepository<PropertyPlatformSyndication> _propertyPlatformSyndicationRepository;
     private readonly IRepository<AmenityType> _amenityTypeRepository;
     private readonly IRepository<PropertyUnitAmenity> _propertyUnitAmenityRepository;
+    private readonly IConfiguration _configuration;
 
     public PropertyAssetsController(
         PropertyDbContext dbContext,
-        KafkaPublisherService kafkaPublisher,
         PermissionCheckService permissionCheck,
         IPropertyRepository propertyRepository,
         IPropertyUnitRepository propertyUnitRepository,
@@ -41,14 +40,18 @@ public class PropertyAssetsController : PropertyControllerBase
         IRepository<SoleMandate> soleMandateRepository,
         IRepository<PropertyPlatformSyndication> propertyPlatformSyndicationRepository,
         IRepository<AmenityType> amenityTypeRepository,
-        IRepository<PropertyUnitAmenity> propertyUnitAmenityRepository)
-        : base(dbContext, kafkaPublisher, permissionCheck, propertyRepository, propertyUnitRepository, logger)
+        IRepository<PropertyUnitAmenity> propertyUnitAmenityRepository,
+        IJobQueue<ImageProcessingJob> imageProcessingQueue,
+        IJobQueue<SyndicationJob> syndicationQueue,
+        IConfiguration configuration)
+        : base(dbContext, permissionCheck, propertyRepository, propertyUnitRepository, logger, imageProcessingQueue, syndicationQueue)
     {
         _externalPlatformRepository = externalPlatformRepository;
         _soleMandateRepository = soleMandateRepository;
         _propertyPlatformSyndicationRepository = propertyPlatformSyndicationRepository;
         _amenityTypeRepository = amenityTypeRepository;
         _propertyUnitAmenityRepository = propertyUnitAmenityRepository;
+        _configuration = configuration;
     }
 
     private class AmenityDto
@@ -478,28 +481,25 @@ public class PropertyAssetsController : PropertyControllerBase
             await DbContext.SaveChangesAsync();
 
             // 🛰️ Notify downstream optimisers (OCR, image resizing, ML
-            // tagging) via Kafka. The event payload is intentionally tiny —
+            // tagging) via in-memory queue. The event payload is intentionally tiny —
             // just the id + filename — so it stays well under the broker's
             // 1 MB default message size limit.
-            var imageEvent = new PropertyImageUploadedEvent(
-                propertyId,
-                payload.FileName,
-                payload.Base64DataString,
-                property.TenantId,
-                caller);
             try
             {
-                await KafkaPublisher.RaiseEventAsync(
-                    TopicNames.PropertyImages,
-                    propertyId.ToString(),
-                    imageEvent);
+                await ImageProcessingQueue.EnqueueAsync(new ImageProcessingJob(
+                    PropertyId: propertyId,
+                    FileName: payload.FileName,
+                    Base64Data: payload.Base64DataString,
+                    TenantId: property.TenantId,
+                    RequestedBy: caller
+                ));
             }
             catch (Exception ex)
             {
-                // The image is already persisted — a Kafka publish failure
+                // The image is already persisted — a queue publish failure
                 // shouldn't fail the user-visible upload. Just log it so the
                 // optimisation pipeline can be re-triggered later.
-                Logger.LogWarning(ex, "UploadPropertyImage: Kafka notify failed for PropertyId={PropertyId} (image still saved)", propertyId);
+                Logger.LogWarning(ex, "UploadPropertyImage: Queue notify failed for PropertyId={PropertyId} (image still saved)", propertyId);
             }
 
             return Ok(new
@@ -562,7 +562,7 @@ public class PropertyAssetsController : PropertyControllerBase
 
             await DbContext.SaveChangesAsync();
 
-            var syndicationEvent = new PropertySyndicationRequestedEvent(
+            var syndicationJob = new SyndicationJob(
                 PropertyId: payload.PropertyId,
                 PlatformId: payload.PlatformId,
                 IsActive: payload.SyndicateStatus,
@@ -570,12 +570,9 @@ public class PropertyAssetsController : PropertyControllerBase
                 RequestedBy: caller
             );
 
-            await KafkaPublisher.RaiseEventAsync(
-                TopicNames.PropertySyndication,
-                payload.PropertyId.ToString(),
-                syndicationEvent);
+            await SyndicationQueue.EnqueueAsync(syndicationJob);
 
-            Logger.LogInformation("ToggleSyndication: completed — PropertyId={PropertyId} PlatformId={PlatformId} Active={Active} ExternalRef={ExternalRef}",
+            Logger.LogInformation("ToggleSyndication: queued — PropertyId={PropertyId} PlatformId={PlatformId} Active={Active} ExternalRef={ExternalRef}",
                 payload.PropertyId, payload.PlatformId, payload.SyndicateStatus, syndicationRecord.ExternalReferenceIndex);
 
             return Ok(new
@@ -630,45 +627,67 @@ public class PropertyAssetsController : PropertyControllerBase
             var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             var tenantId = User.FindFirst("TenantId")?.Value ?? string.Empty;
 
-            var brochureEvent = new BrochureGenerationRequestedEvent(
-                DealId: payload.DealId,
-                BrochureCardId: payload.BrochureCardId,
-                PropertyId: payload.SubUnits.FirstOrDefault()?.PropertyId ?? 0,
-                TenantId: tenantId,
-                RequestedBy: caller,
-                BrokerName: payload.BrokerName,
-                BrokerEmail: payload.BrokerEmail,
-                BrokerPhone: payload.BrokerPhone,
-                CompanyName: payload.CompanyName,
-                CompanyLogoUrl: payload.CompanyLogoUrl,
-                ClientName: payload.ClientName,
-                ClientEmail: payload.ClientEmail,
-                ClientPhone: payload.ClientPhone,
-                MarketClass: payload.MarketClass,
-                TenantInstallationAllowance: payload.TenantInstallationAllowance,
-                SubUnits: payload.SubUnits.Select(u => new BrochureSubUnitEvent
-                {
-                    PropertyId = u.PropertyId,
-                    PropertyDescription = u.PropertyDescription,
-                    Latitude = u.Latitude,
-                    Longitude = u.Longitude,
-                    UnitNumber = u.UnitNumber,
-                    UnitDescription = u.UnitDescription,
-                    NetRentableAreaSqM = u.NetRentableAreaSqM,
-                    RentalRate = u.RentalRate,
-                    RentEscalationPercentage = u.RentEscalationPercentage,
-                    LeaseTermMonths = u.LeaseTermMonths,
-                    SalePrice = u.SalePrice,
-                    SelectedImageRefs = u.SelectedImageRefs
-                }).ToList()
-            );
+             var crmPayload = new
+             {
+                 dealId = payload.DealId,
+                 brochureCardId = payload.BrochureCardId,
+                 propertyId = payload.SubUnits.FirstOrDefault()?.PropertyId ?? 0,
+                 tenantId = tenantId,
+                 requestedBy = caller,
+                 brokerName = payload.BrokerName,
+                 brokerEmail = payload.BrokerEmail,
+                 brokerPhone = payload.BrokerPhone,
+                 companyName = payload.CompanyName,
+                 companyLogoUrl = payload.CompanyLogoUrl,
+                 clientName = payload.ClientName,
+                 clientEmail = payload.ClientEmail,
+                 clientPhone = payload.ClientPhone,
+                 marketClass = payload.MarketClass,
+                 tenantInstallationAllowance = payload.TenantInstallationAllowance,
+                 subUnits = payload.SubUnits.Select(u => new
+                 {
+                     propertyId = u.PropertyId,
+                     propertyDescription = u.PropertyDescription,
+                     latitude = u.Latitude,
+                     longitude = u.Longitude,
+                     unitNumber = u.UnitNumber,
+                     unitDescription = u.UnitDescription,
+                     netRentableAreaSqM = u.NetRentableAreaSqM,
+                     rentalRate = u.RentalRate,
+                     rentEscalationPercentage = u.RentEscalationPercentage,
+                     leaseTermMonths = u.LeaseTermMonths,
+                     salePrice = u.SalePrice,
+                     selectedImageRefs = u.SelectedImageRefs,
+                     propertyType = u.PropertyType,
+                     valuationPrice = u.ValuationPrice,
+                     erfSpatialSize = u.ErfSpatialSize,
+                     titleDeedType = u.TitleDeedType,
+                     portfolioZoning = u.PortfolioZoning,
+                     isForSale = u.IsForSale,
+                     isForRent = u.IsForRent,
+                     isCurrentlyVacant = u.IsCurrentlyVacant,
+                     amenities = u.Amenities
+                 }).ToList()
+             };
 
-            await KafkaPublisher.RaiseEventAsync(
-                TopicNames.BrochureGenerationRequests,
-                payload.DealId.ToString(),
-                brochureEvent);
+            // Call CRM microservice via gateway to queue brochure generation
+            var gatewayUrl = _configuration["Gateway:BaseUrl"]
+                ?? Environment.GetEnvironmentVariable("GATEWAY_BASE_URL")
+                ?? "http://gateway:5000/gateway";
+            using var httpClient = new HttpClient { BaseAddress = new Uri(gatewayUrl) };
+            var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(authHeader))
+                httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authHeader.Replace("Bearer ", ""));
 
-            Logger.LogInformation("GenerateBrochure: queued — DealId={DealId} Units={Units}", payload.DealId, payload.SubUnits.Count);
+            var response = await httpClient.PostAsJsonAsync("/api/crm/brochure/generate", crmPayload);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Logger.LogError("GenerateBrochure: CRM call failed — {StatusCode} {Error}", response.StatusCode, errorContent);
+                return StatusCode((int)response.StatusCode, new { message = "Failed to queue brochure generation." });
+            }
+
+            Logger.LogInformation("GenerateBrochure: queued via CRM — DealId={DealId} Units={Units}", payload.DealId, payload.SubUnits.Count);
             return Accepted(new { message = "Brochure generation request queued." });
         }
     // 📊 Active-listing count + average DOM for the broker dashboard.

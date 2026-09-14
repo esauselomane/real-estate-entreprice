@@ -1,9 +1,10 @@
 using Property.Microservice.Data;
 using Property.Microservice.DTOs;
 using Property.Microservice.Models;
-using Property.Microservice.Services.Abstractions;
-using Property.Microservice.Services.Implementation;
 using Property.Microservice.Services;
+using Property.Microservice.Services.Abstractions;
+using Property.Microservice.Services.BackgroundJobs;
+using Property.Microservice.Services.Implementation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -83,13 +84,20 @@ builder.Services.AddAuthorization(options =>
               .RequireClaim(ClaimTypes.Role, "PlatformAdmin", "SuperAdmin"));
 });
 
-// 4. INJECT EVENT-DRIVEN KAFKA STREAMING SERVICE AS A SINGLETON
-builder.Services.AddSingleton<KafkaPublisherService>();
-builder.Services.AddHostedService<Property.Microservice.Consumers.SyndicationCompletedConsumer>();
-builder.Services.AddHostedService<Property.Microservice.Consumers.PropertyImageProcessedConsumer>();
+builder.Services.AddScoped<PermissionCheckService>();
+
+// Register background job queues
+builder.Services.AddSingleton<IJobQueue<ImageProcessingJob>, JobQueue<ImageProcessingJob>>();
+builder.Services.AddSingleton<IJobQueue<SyndicationJob>, JobQueue<SyndicationJob>>();
+builder.Services.AddSingleton<IJobQueue<DataImportJob>, JobQueue<DataImportJob>>();
+
+// Register background services
+builder.Services.AddHostedService<ImageProcessingBackgroundService>();
+builder.Services.AddHostedService<SyndicationBackgroundService>();
+builder.Services.AddHostedService<DataImportBackgroundService>();
+
 builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<PermissionCheckService>();
 
 var app = builder.Build();
 // 5. AUTOMATED DATABASE LIFECYCLE RECOVERY & DATA SEEDING LOOPS
@@ -305,6 +313,26 @@ using (var serviceScope = app.Services.CreateScope())
     ");
 
     PropertySeedData.EnsureSeeded(databaseContext, propertyTypeRepository, amenityTypeRepository, externalPlatformRepository, propertyRepository, propertyUnitRepository, propertyPlatformSyndicationRepository, unitLeaseRepository, maintenanceCallRepository);
+
+    // 🚫 Remove duplicate ExternalPlatform entries (seed data without guard
+    // could accumulate on repeated restarts — keep lowest PlatformId per name).
+    databaseContext.Database.ExecuteSqlRaw(@"
+        DELETE FROM [ExternalPlatforms]
+        WHERE [PlatformId] NOT IN (
+            SELECT MIN([PlatformId])
+            FROM [ExternalPlatforms]
+            GROUP BY [PlatformName], [BaseUrlAddress]
+        )");
+
+    // 🚫 Remove duplicate PropertyPlatformSyndication rows (keep lowest SyndicationId
+    // per PropertyId+PlatformId combo — needed if rows existed before unique index).
+    databaseContext.Database.ExecuteSqlRaw(@"
+        DELETE FROM [PropertyPlatformSyndications]
+        WHERE [SyndicationId] NOT IN (
+            SELECT MIN([SyndicationId])
+            FROM [PropertyPlatformSyndications]
+            GROUP BY [PropertyId], [PlatformId]
+        )");
 
     // 🚫 Prevent duplicate syndication records at the database level.
     databaseContext.Database.ExecuteSqlRaw(@"

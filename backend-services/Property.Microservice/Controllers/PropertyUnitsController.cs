@@ -5,8 +5,9 @@ using Microsoft.EntityFrameworkCore;
 using Property.Microservice.Data;
 using Property.Microservice.DTOs;
 using Property.Microservice.Models;
-using Property.Microservice.Services.Abstractions;
 using Property.Microservice.Services;
+using Property.Microservice.Services.Abstractions;
+using Property.Microservice.Services.BackgroundJobs;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -27,15 +28,16 @@ public class PropertyUnitsController : PropertyControllerBase
 
     public PropertyUnitsController(
         PropertyDbContext dbContext,
-        KafkaPublisherService kafkaPublisher,
         PermissionCheckService permissionCheck,
         IPropertyRepository propertyRepository,
         IPropertyUnitRepository propertyUnitRepository,
         ILogger<PropertyUnitsController> logger,
         IRepository<UnitLease> unitLeaseRepository,
         IRepository<MaintenanceCall> maintenanceCallRepository,
-        IRepository<SoleMandate> soleMandateRepository)
-        : base(dbContext, kafkaPublisher, permissionCheck, propertyRepository, propertyUnitRepository, logger)
+        IRepository<SoleMandate> soleMandateRepository,
+        IJobQueue<ImageProcessingJob> imageProcessingQueue,
+        IJobQueue<SyndicationJob> syndicationQueue)
+        : base(dbContext, permissionCheck, propertyRepository, propertyUnitRepository, logger, imageProcessingQueue, syndicationQueue)
     {
         _unitLeaseRepository = unitLeaseRepository;
         _maintenanceCallRepository = maintenanceCallRepository;

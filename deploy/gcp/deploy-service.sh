@@ -86,7 +86,7 @@ deploy_service() {
     --concurrency=80 \
     --timeout=300 \
     --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,ASPNETCORE_URLS=http://*:8080" \
-    --set-env-vars="ConnectionStrings__DefaultConnection=Server=172.18.0.3,1433;Database=${db_name};User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;,Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
+    --set-env-vars="ConnectionStrings__DefaultConnection=Server=localhost,1433,1433;Database=${db_name};User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;,Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
     --set-secrets="Jwt__Secret=jwt-secret:latest" \
     "$@" \
     --quiet
@@ -151,7 +151,7 @@ case $SERVICE_NAME in
         ;;
     "developer-api")
         deploy_service developer-api DeveloperDB --no-allow-unauthenticated \
-          --set-env-vars="ConnectionStrings__PropertyConnection=Server=172.18.0.3,1433;Database=PropertyDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;"
+          --set-env-vars="ConnectionStrings__PropertyConnection=Server=localhost,1433,1433;Database=PropertyDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;"
         ;;
     "gateway")
         gcloud run deploy gateway --image="${ARTIFACT_REG}/gateway:${SHORT_SHA}" \

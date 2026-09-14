@@ -31,5 +31,15 @@ namespace Identity.Microservice.Models
         // 🧬 PARENT-AGENCY HIERARCHY (parent tenant this agency rolls up to)
         [MaxLength(64)]
         public string? ParentTenantId { get; set; }
+
+        // 💳 PAYMENT / SUBSCRIPTION FIELDS
+        [MaxLength(100)]
+        public string? PeachCustomerId { get; set; }
+
+        public SubscriptionStatus SubscriptionStatus { get; set; } = SubscriptionStatus.Trialing;
+
+        public DateTime? SubscriptionEndsAt { get; set; }
+
+        public int? ActiveSubscriptionId { get; set; }
     }
 }

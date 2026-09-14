@@ -8,6 +8,7 @@ using CRM.Microservice.DTOs;
 using CRM.Microservice.Models;
 using CRM.Microservice.Services.Abstractions;
 using CRM.Microservice.Services;
+using CRM.Microservice.Services.BackgroundJobs;
 
 namespace CRM.Microservice.Controllers
 {
@@ -1460,7 +1461,8 @@ namespace CRM.Microservice.Controllers
             {
                 var propertyBaseUrl = HttpContext.RequestServices
                     .GetRequiredService<IConfiguration>()["Services:PropertyBaseUrl"]
-                    ?? "http://localhost:5002";
+                    ?? Environment.GetEnvironmentVariable("PROPERTY_BASE_URL")
+                    ?? "http://property:5002";
                 using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
                 var tenantList = string.Join(',', tenantIds);
                 var url = $"/api/properties/expiring-mandates?tenantId={Uri.EscapeDataString(tenantList)}"
@@ -1644,6 +1646,85 @@ namespace CRM.Microservice.Controllers
                 recipients = "all_users_in_tenant",
                 roleFilter = payload.RoleFilter ?? "(all)"
             });
+        }
+
+        // 📄 POST /api/crm/brochure/generate
+        // Called by Property.Microservice to queue brochure generation.
+        // Enqueues a BrochureGenerationJob for the background worker.
+        [HttpPost("brochure/generate")]
+        public async Task<IActionResult> GenerateBrochure([FromBody] BrochureGenerationRequest payload)
+        {
+            if (!await PermissionCheck.HasPermissionAsync("billing:export"))
+                return Forbid();
+
+            if (payload == null || payload.DealId <= 0 || !payload.SubUnits.Any())
+            {
+                Logger.LogWarning("GenerateBrochure: rejected — invalid payload (DealId={DealId} Units={Units})",
+                    payload?.DealId, payload?.SubUnits?.Count ?? 0);
+                return BadRequest(new { message = "A deal and at least one unit are required to generate a brochure." });
+            }
+
+            var tenantIds = await GetVisibleTenantIdsAsync(null);
+            if (tenantIds.Count == 0)
+                return BadRequest(new { message = "No visible tenant for the caller." });
+
+            var role = GetCurrentCanonicalRole();
+            var callerId = GetCurrentUserId();
+            var tenantId = tenantIds.FirstOrDefault();
+
+            var job = new BrochureGenerationJob(
+                DealId: payload.DealId,
+                BrochureCardId: payload.BrochureCardId,
+                PropertyId: payload.SubUnits.FirstOrDefault()?.PropertyId ?? 0,
+                TenantId: tenantId,
+                RequestedBy: callerId,
+                BrokerName: payload.BrokerName,
+                BrokerEmail: payload.BrokerEmail,
+                BrokerPhone: payload.BrokerPhone,
+                CompanyName: payload.CompanyName,
+                CompanyLogoUrl: payload.CompanyLogoUrl,
+                ClientName: payload.ClientName,
+                ClientEmail: payload.ClientEmail,
+                ClientPhone: payload.ClientPhone,
+                MarketClass: payload.MarketClass,
+                TenantInstallationAllowance: payload.TenantInstallationAllowance,
+                 SubUnits: payload.SubUnits.Select(u => new BrochureSubUnitJob
+                {
+                    PropertyId = u.PropertyId,
+                    PropertyDescription = u.PropertyDescription,
+                    Latitude = u.Latitude,
+                    Longitude = u.Longitude,
+                    UnitNumber = u.UnitNumber,
+                    UnitDescription = u.UnitDescription,
+                    NetRentableAreaSqM = u.NetRentableAreaSqM,
+                    RentalRate = u.RentalRate,
+                    RentEscalationPercentage = u.RentEscalationPercentage,
+                    LeaseTermMonths = u.LeaseTermMonths,
+                    SalePrice = u.SalePrice,
+                    SelectedImageRefs = u.SelectedImageRefs,
+                    PropertyType = u.PropertyType,
+                    ValuationPrice = u.ValuationPrice,
+                    ErfSpatialSize = u.ErfSpatialSize,
+                    TitleDeedType = u.TitleDeedType,
+                    PortfolioZoning = u.PortfolioZoning,
+                    IsForSale = u.IsForSale,
+                    IsForRent = u.IsForRent,
+                    IsCurrentlyVacant = u.IsCurrentlyVacant,
+                    Amenities = u.Amenities.Select(a => new CRM.Microservice.Services.BackgroundJobs.AmenityInfo { Name = a.Name, Label = a.Label, BooleanValue = a.BooleanValue, NumberValue = a.NumberValue }).ToList()
+                }).ToList()
+            );
+
+            var brokerageQueue = HttpContext.RequestServices.GetService<IJobQueue<BrochureGenerationJob>>();
+            if (brokerageQueue == null)
+            {
+                Logger.LogError("GenerateBrochure: BrochureGenerationJob queue not registered.");
+                return StatusCode(500, new { message = "Brochure generation service unavailable." });
+            }
+
+            await brokerageQueue.EnqueueAsync(job);
+
+            Logger.LogInformation("GenerateBrochure: queued — DealId={DealId} Units={Units}", payload.DealId, payload.SubUnits.Count);
+            return Accepted(new { message = "Brochure generation request queued." });
         }
 
     }
