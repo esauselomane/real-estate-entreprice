@@ -276,6 +276,8 @@ namespace Identity.Microservice.Data
                       "ALTER TABLE [TenantAgencies] ADD [ActiveSubscriptionId] int NULL;");
               }
 
+              await PaymentSchemaUpgrade.ApplyAsync(context);
+              await AccountSchemaUpgrade.ApplyAsync(context);
               var existingTenants = tenantRepository.Query().Count();
             if (existingTenants < 1000)
             {
@@ -321,10 +323,12 @@ namespace Identity.Microservice.Data
                  };
                  tenantRepository.Add(trialTenant);
              }
-             trialTenant.IsTrial = true;
-             trialTenant.TrialStartDate = DateTime.UtcNow;
-             trialTenant.TrialEndDate = DateTime.UtcNow.AddDays(14);
-             trialTenant.OperationalStatus = "TrialPending";
+             if (trialTenant.TrialStartDate == null && context.Entry(trialTenant).State == EntityState.Added)
+             {
+                 trialTenant.IsTrial = true;
+                 trialTenant.TrialStartDate = DateTime.UtcNow;
+                 trialTenant.TrialEndDate = DateTime.UtcNow.AddDays(14);
+             }
 
               var adminUser = userRepository.Query().FirstOrDefault(u => u.Email == adminEmail);
              if (adminUser == null)
@@ -344,11 +348,7 @@ namespace Identity.Microservice.Data
                      CreatedAt = DateTime.UtcNow
                  });
              }
-             else
-             {
-                 adminUser.IsTrial = true;
-                 adminUser.TrialEndDate = DateTime.UtcNow.AddDays(14);
-             }
+
 
             // 🌐 Canonical role accounts: one seeded user per role in the role contract
             // (PlatformAdmin, AgencyAdmin, Broker, Owner, Tenant). Each is an idempotent
@@ -389,9 +389,7 @@ namespace Identity.Microservice.Data
                      existing.TenantId = seedUser.TenantId;
                      existing.SystemRole = seedUser.SystemRole;
                      existing.AccountStatus = "Active";
-                     existing.PasswordHash = "Password123!";
-                     existing.IsTrial = seedUser.TenantId == "TEN-001";
-                     existing.TrialEndDate = seedUser.TenantId == "TEN-001" ? DateTime.UtcNow.AddDays(14) : null;
+                     // Preserve passwords changed by the account owner.
                  }
              }
 
@@ -420,7 +418,7 @@ namespace Identity.Microservice.Data
             }
 
             context.SaveChanges();
-            SeedAgencySubscriptions(context, tenantRepository);
+            // Sample paid subscriptions must never overwrite real billing state.
 
             var existingClaimUserIds = userAccessClaimRepository.Query().Select(c => c.UserId).ToHashSet();
             var claimsToAdd = new List<UserAccessClaim>();
@@ -652,189 +650,13 @@ namespace Identity.Microservice.Data
                 {
                     pricingPackageRepository.Add(pkg);
                 }
-                else
-                {
-                    existing.Name = pkg.Name;
-                    existing.Description = pkg.Description;
-                    existing.MonthlyPrice = pkg.MonthlyPrice;
-                    existing.AnnualPrice = pkg.AnnualPrice;
-                    existing.FeaturesJson = pkg.FeaturesJson;
-                    existing.SortOrder = pkg.SortOrder;
-                    existing.IsActive = pkg.IsActive;
-                    existing.UpdatedAt = DateTime.UtcNow;
-                }
+
             }
             context.SaveChanges();
 
-            // 🔄 Extend existing trials by 2 months and create subscription records
-            await ExtendExistingTrialsAndCreateSubscriptionsAsync(context);
+            // Apply the historical trial concession once; retain configured pricing and paid state.
+            await TrialExtensionHelper.ApplyAsync(context);
         }
 
-        private static async Task ExtendExistingTrialsAndCreateSubscriptionsAsync(IdentityDbContext context)
-        {
-            var now = DateTime.UtcNow;
-            var newTrialEnd = now.AddMonths(2);
-
-            // Get all tenants
-            var tenants = context.TenantAgencies.ToList();
-            
-            foreach (var tenant in tenants)
-            {
-                // Update TenantAgency trial dates
-                tenant.IsTrial = true;
-                tenant.TrialStartDate = now;
-                tenant.TrialEndDate = newTrialEnd;
-                tenant.SubscriptionStatus = SubscriptionStatus.Trialing;
-                tenant.SubscriptionEndsAt = newTrialEnd;
-                tenant.OperationalStatus = "TrialPending";
-
-                // Create subscription record if doesn't exist
-                var existingSub = context.Subscriptions.FirstOrDefault(s => s.TenantId == tenant.TenantId);
-                if (existingSub == null)
-                {
-                    var uniqueTrialSubscriptionId = $"trial-{tenant.TenantId}";
-                    context.Subscriptions.Add(new Subscription
-                    {
-                        TenantId = tenant.TenantId,
-                        PeachSubscriptionId = uniqueTrialSubscriptionId,
-                        PeachPriceId = $"trial-price-{tenant.TenantId}",
-                        PricingPackageCode = "SME_AGENCY",
-                        Status = SubscriptionStatus.Trialing,
-                        CurrentPeriodStart = now,
-                        CurrentPeriodEnd = newTrialEnd,
-                        TrialEndsAt = newTrialEnd,
-                        CreatedAt = now,
-                        UpdatedAt = now
-                    });
-                }
-            }
-
-            await context.SaveChangesAsync();
-        }
-
-        private static void SeedAgencySubscriptions(IdentityDbContext context, ITenantRepository tenantRepository)
-        {
-            var now = DateTime.UtcNow;
-            var seedData = new[]
-            {
-                new AgencySubscriptionSeed
-                {
-                    TenantId = "TEN-001",
-                    PeachSubscriptionId = "sub_active_ten_001",
-                    PeachPriceId = "price_sme_agency_monthly",
-                    PricingPackageCode = "SME_AGENCY",
-                    Status = SubscriptionStatus.Active,
-                    CurrentPeriodStart = now.AddDays(-30),
-                    CurrentPeriodEnd = now.AddDays(30),
-                    TrialEndsAt = null,
-                    CancelledAt = null
-                },
-                new AgencySubscriptionSeed
-                {
-                    TenantId = "TEN-002",
-                    PeachSubscriptionId = "sub_past_ten_002",
-                    PeachPriceId = "price_private_annual",
-                    PricingPackageCode = "PRIVATE",
-                    Status = SubscriptionStatus.Cancelled,
-                    CurrentPeriodStart = now.AddDays(-120),
-                    CurrentPeriodEnd = now.AddDays(-10),
-                    TrialEndsAt = now.AddDays(-12),
-                    CancelledAt = now.AddDays(-7)
-                },
-                new AgencySubscriptionSeed
-                {
-                    TenantId = "TEN-003",
-                    PeachSubscriptionId = "sub_active_ten_003",
-                    PeachPriceId = "price_enterprise_monthly",
-                    PricingPackageCode = "ENTERPRISE",
-                    Status = SubscriptionStatus.Active,
-                    CurrentPeriodStart = now.AddDays(-15),
-                    CurrentPeriodEnd = now.AddDays(45),
-                    TrialEndsAt = null,
-                    CancelledAt = null
-                }
-            };
-
-            foreach (var seed in seedData)
-            {
-                var tenant = context.TenantAgencies.Local.FirstOrDefault(t => t.TenantId == seed.TenantId)
-                    ?? tenantRepository.Query().FirstOrDefault(t => t.TenantId == seed.TenantId);
-
-                if (tenant == null)
-                {
-                    continue;
-                }
-
-                var existingSubscription = context.Subscriptions.FirstOrDefault(s => s.TenantId == seed.TenantId);
-                if (existingSubscription == null)
-                {
-                    existingSubscription = new Subscription
-                    {
-                        TenantId = seed.TenantId,
-                        PeachSubscriptionId = seed.PeachSubscriptionId,
-                        PeachPriceId = seed.PeachPriceId,
-                        PricingPackageCode = seed.PricingPackageCode,
-                        Status = seed.Status,
-                        CurrentPeriodStart = seed.CurrentPeriodStart,
-                        CurrentPeriodEnd = seed.CurrentPeriodEnd,
-                        TrialEndsAt = seed.TrialEndsAt,
-                        CancelledAt = seed.CancelledAt,
-                        CreatedAt = now,
-                        UpdatedAt = now
-                    };
-
-                    context.Subscriptions.Add(existingSubscription);
-                }
-                else
-                {
-                    existingSubscription.PeachSubscriptionId = seed.PeachSubscriptionId;
-                    existingSubscription.PeachPriceId = seed.PeachPriceId;
-                    existingSubscription.PricingPackageCode = seed.PricingPackageCode;
-                    existingSubscription.Status = seed.Status;
-                    existingSubscription.CurrentPeriodStart = seed.CurrentPeriodStart;
-                    existingSubscription.CurrentPeriodEnd = seed.CurrentPeriodEnd;
-                    existingSubscription.TrialEndsAt = seed.TrialEndsAt;
-                    existingSubscription.CancelledAt = seed.CancelledAt;
-                    existingSubscription.UpdatedAt = now;
-                }
-
-                tenant.SubscriptionStatus = seed.Status;
-                tenant.SubscriptionEndsAt = seed.CurrentPeriodEnd;
-            }
-
-            context.SaveChanges();
-
-            foreach (var seed in seedData)
-            {
-                var tenant = context.TenantAgencies.Local.FirstOrDefault(t => t.TenantId == seed.TenantId)
-                    ?? tenantRepository.Query().FirstOrDefault(t => t.TenantId == seed.TenantId);
-
-                if (tenant == null)
-                {
-                    continue;
-                }
-
-                var savedSubscription = context.Subscriptions.FirstOrDefault(s => s.TenantId == seed.TenantId);
-                tenant.ActiveSubscriptionId = savedSubscription != null &&
-                    (seed.Status == SubscriptionStatus.Active || seed.Status == SubscriptionStatus.Trialing)
-                    ? savedSubscription.Id
-                    : null;
-            }
-
-            context.SaveChanges();
-        }
-
-        private sealed class AgencySubscriptionSeed
-        {
-            public string TenantId { get; set; } = string.Empty;
-            public string PeachSubscriptionId { get; set; } = string.Empty;
-            public string PeachPriceId { get; set; } = string.Empty;
-            public string PricingPackageCode { get; set; } = string.Empty;
-            public SubscriptionStatus Status { get; set; }
-            public DateTime CurrentPeriodStart { get; set; }
-            public DateTime CurrentPeriodEnd { get; set; }
-            public DateTime? TrialEndsAt { get; set; }
-            public DateTime? CancelledAt { get; set; }
-        }
     }
 }

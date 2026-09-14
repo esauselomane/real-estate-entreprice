@@ -28,6 +28,10 @@ namespace Identity.Microservice.Models
         [MaxLength(3)]
         public string Currency { get; set; } = "ZAR";
 
+        public string? CheckoutResponseJson { get; set; }
+        public DateTime? CheckoutExpiresAt { get; set; }
+        public Identity.Microservice.Services.Abstractions.Payments.PaymentGateway? Gateway { get; set; }
+
         public PaymentIntentStatus Status { get; set; } = PaymentIntentStatus.Pending;
 
         [Required]

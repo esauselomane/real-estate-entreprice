@@ -1,3 +1,4 @@
+import PropertyStaticMap from './maps/PropertyStaticMap.jsx';
 import { useState, useEffect } from 'react';
 import {
    ArrowLeft, MapPin, FileText, User, Home, CheckCircle2,
@@ -831,15 +832,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               </div>
             </div>
 
-            {/* 🗺️ Geospatial Coordinates Container */}
-            <div className="h-44 w-full bg-slate-950 border border-slate-800 rounded-xl flex flex-col items-center justify-center p-4 text-center relative overflow-hidden">
-              <MapPin size={28} className="text-blue-500 mb-1 animate-bounce" />
-              <span className="text-xs font-bold text-slate-300">Geospatial Positioning Coordinate Register</span>
-              <span className="text-[11px] font-mono text-slate-400 mt-1">
-                Latitude: {property.latitude} &bull; Longitude: {property.longitude}
-              </span>
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent pointer-events-none" />
-            </div>
+            <PropertyStaticMap latitude={property.latitude} longitude={property.longitude} address={property.completeAddress} />
           </div>
 
           {/* 🧩 PROPERTY-LEVEL OPERATIONS LEDGER (consolidated from the property operations workspace) */}

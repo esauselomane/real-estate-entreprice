@@ -94,10 +94,7 @@ export default function AgencyGlance() {
   const [pricingPackages, setPricingPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [statusBanner, setStatusBanner] = useState(null);
-  const [checkoutState, setCheckoutState] = useState({ loading: false, packageCode: null });
   const [activeTab, setActiveTab] = useState('overview');
-  const [isTrialExpired, setIsTrialExpired] = useState(false);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -149,103 +146,27 @@ export default function AgencyGlance() {
     }
   }, [activeTenantId]);
 
-  const handleUpgrade = useCallback(async (packageCode) => {
-    try {
-      setCheckoutState({ loading: true, packageCode });
-      setError('');
-
-      const returnBaseUrl = `${window.location.origin}${window.location.pathname}`;
-      const successUrl = `${returnBaseUrl}?paymentStatus=success&paymentSource=checkout`;
-      const cancelUrl = `${returnBaseUrl}?paymentStatus=cancelled&paymentSource=checkout`;
-
-      const result = await paymentService.createCheckoutSession({
-        pricingPackageCode: packageCode,
-        billingCycle: 'monthly',
-        successUrl,
-        cancelUrl,
-      });
-
-      if (result?.checkoutUrl) {
-        window.location.href = result.checkoutUrl;
-        return;
-      }
-
-      setError('Checkout session was created but no redirect URL was returned.');
-    } catch (err) {
-      setError(err?.message || 'Failed to start the checkout flow.');
-    } finally {
-      setCheckoutState({ loading: false, packageCode: null });
-    }
-  }, []);
-
-  const handleManageBilling = useCallback(async () => {
-    try {
-      const returnBaseUrl = `${window.location.origin}${window.location.pathname}`;
-      const result = await paymentService.createPortalSession(returnBaseUrl);
-      if (result?.portalUrl) {
-        window.location.href = result.portalUrl;
-      } else {
-        setError('No billing portal URL was returned.');
-      }
-    } catch (err) {
-      setError(err?.message || 'Failed to open billing portal.');
-    }
-  }, []);
-
-  const checkTrialStatus = useCallback(async () => {
-    try {
-      const status = await paymentService.getSubscriptionStatus();
-      if (status?.IsTrial === false && status?.CanUpgrade === false) {
-        setIsTrialExpired(true);
-      }
-    } catch {
-      // Non-blocking - trial status is best-effort at this point
-    }
-  }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const paymentStatus = params.get('paymentStatus');
-
-    if (paymentStatus) {
-      const banner =
-        paymentStatus === 'success'
-          ? {
-              type: 'success',
-              message: 'Subscription updated successfully. Your billing status is being refreshed.',
-            }
-          : {
-              type: 'warning',
-              message: 'Checkout was cancelled. No payment was taken and your current plan remains unchanged.',
-            };
-
-      setStatusBanner(banner);
-
-      const refreshAfterReturn = async () => {
-        await Promise.all([loadSummary(), loadTabData()]);
-        const nextUrl = `${window.location.pathname}`;
-        window.history.replaceState({}, '', nextUrl);
-      };
-
-      void refreshAfterReturn();
-    }
-  }, [loadSummary, loadTabData]);
+  const handleUpgrade = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('open-billing', { detail: { tenantId: activeTenantId } }));
+  }, [activeTenantId]);
+  const handleManageBilling = handleUpgrade;
 
   useEffect(() => {
     const loadAll = async () => {
       setLoading(true);
       setError('');
-      await Promise.all([loadSummary(), loadTabData(), checkTrialStatus()]);
+      await Promise.all([loadSummary(), loadTabData()]);
       setLoading(false);
     };
     loadAll();
-  }, [loadSummary, loadTabData, checkTrialStatus]);
+  }, [loadSummary, loadTabData]);
 
   if (loading && !summary && !tabData) {
     return (
       <LoadingOverlay label="Loading agency data…" subtitle="Aggregating KPIs and growth metrics" />
     );
   }
+
 
   return (
     <div className="space-y-6">
@@ -274,17 +195,6 @@ export default function AgencyGlance() {
         </button>
       </div>
 
-      {statusBanner && (
-        <div
-          className={`p-3 rounded-xl border text-xs ${
-            statusBanner.type === 'success'
-              ? 'bg-emerald-950/30 border-emerald-800 text-emerald-300'
-              : 'bg-amber-950/30 border-amber-800 text-amber-300'
-          }`}
-        >
-          {statusBanner.message}
-        </div>
-      )}
 
       {error && (
         <div className="p-3 rounded-xl bg-red-950/30 border border-red-900 text-red-300 text-xs">
@@ -297,27 +207,27 @@ export default function AgencyGlance() {
         <div className="space-y-6">
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard icon={Users} label="Total Users" value={fmtNumber(summary.totalUsers)} accent="blue" />
+            <KpiCard icon={Users} label="Broker records" value={fmtNumber(summary.totalUsers)} accent="blue" />
             <KpiCard icon={Briefcase} label="Total Leads" value={fmtNumber(summary.totalLeads)} accent="amber" />
             <KpiCard icon={Building2} label="Total Deals" value={fmtNumber(summary.totalDeals)} accent="violet" />
             <KpiCard icon={Home} label="Closed Deals" value={fmtNumber(summary.closedDeals)} accent="emerald" />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard icon={FileText} label="Sole Mandates" value={fmtNumber(summary.totalPropertiesWithSoleMandates)} accent="blue" />
+            <KpiCard icon={FileText} label="Sole Mandates" value={summary.totalPropertiesWithSoleMandates == null ? 'Unavailable' : fmtNumber(summary.totalPropertiesWithSoleMandates)} accent="blue" />
             <KpiCard icon={TrendingUp} label="Realised Commission" value={fmtCurrency(summary.totalRealisedCommission)} accent="emerald" />
           </div>
 
           {/* Growth Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <GrowthChart
-              title="Users Added (Last 6 Months)"
+              title="Broker Records Added (Last 6 Months)"
               data={tabData.usersOverTime || []}
               dataKey="userCount"
               color="#6366f1"
             />
             <GrowthChart
-              title="Properties Added (Last 6 Months)"
+              title="Total Properties by Month (Current Month to Date)"
               data={tabData.propertiesOverTime || []}
               dataKey="propertyCount"
               color="#10b981"
@@ -429,16 +339,25 @@ export default function AgencyGlance() {
 
           {/* Subscriptions */}
           <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5">
-            <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-              <Calendar size={16} className="text-amber-400" />
-              Subscription Packages
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Calendar size={16} className="text-amber-400" />
+                Subscription Packages
+              </h3>
+              <button
+                type="button"
+                onClick={handleManageBilling}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                Manage Billing
+              </button>
+            </div>
 
             {pricingPackages.length > 0 && (
               <div className="mb-5 grid grid-cols-1 md:grid-cols-3 gap-3">
                 {pricingPackages.map((plan) => {
                   const isCurrentPlan = (tabData.activeSubscriptions || []).some(
-                    (sub) => (sub.code || '').toUpperCase() === (plan.code || '').toUpperCase()
+                    (sub) => sub.status === 'active' && (sub.code || '').toUpperCase() === (plan.code || '').toUpperCase()
                   );
 
                   return (
@@ -479,19 +398,17 @@ export default function AgencyGlance() {
 
                       <button
                         type="button"
-                        onClick={() => handleUpgrade(plan.code)}
-                        disabled={checkoutState.loading && checkoutState.packageCode === plan.code}
+                        onClick={() => plan.code === 'ENTERPRISE' ? window.location.assign(import.meta.env.VITE_SALES_URL || 'http://localhost:3000/contact?package=ENTERPRISE') : handleUpgrade()}
+                        disabled={isCurrentPlan || !['AgencyAdmin', 'PlatformAdmin'].includes(userRole)}
                         className={`mt-4 w-full rounded-xl px-3 py-2 text-xs font-semibold transition ${
                           isCurrentPlan
                             ? 'bg-slate-800 text-slate-300 cursor-not-allowed'
                             : 'bg-blue-600 text-white hover:bg-blue-500'
                         } disabled:opacity-60`}
                       >
-                        {checkoutState.loading && checkoutState.packageCode === plan.code
-                          ? 'Redirecting…'
-                          : isCurrentPlan
+                        {isCurrentPlan
                             ? 'Current Plan'
-                            : 'Upgrade'}
+                            : plan.code === 'ENTERPRISE' ? 'Contact sales' : 'View billing'}
                       </button>
                     </div>
                   );

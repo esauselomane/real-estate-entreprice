@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { Sparkles, Printer, Image, CheckCircle2, User, Phone, Mail, Building2, MapPin, Layers, Loader2, ArrowLeft, AlertTriangle, Plus, X } from 'lucide-react';
+import apiClient from '../services/apiClient.js';
 import { propertyService } from '../services/propertyService.js';
 import { crmService } from '../services/crmService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { isTrialUser, getTrialExpiry } from '../services/authService.js';
+import { useSubscription } from '../contexts/SubscriptionContext.jsx';
 
 export default function BrochureBuilderWorkspace({ dealData, onBack }) {
   const { activeProfile } = useAuth();
@@ -22,17 +23,26 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
 
   const pollRef = useRef(null);
 
-  const profile = activeProfile || {};
+  const [dealBrokers, setDealBrokers] = useState([]);
   const brokerProfile = {
-    fullName: profile.name || 'Unassigned broker',
-    emailAddress: profile.email || 'No email on file',
-    phoneNumber: profile.phone || 'No phone on file',
-    companyReferenceNumber: `PROP-REF-${dealData?.dealId || '991'}`,
-    companyName: profile.tenantId || 'Agency workspace'
+    fullName: dealBrokers[0]?.fullName || 'Unassigned broker',
+    emailAddress: dealBrokers[0]?.email || '', phoneNumber: dealBrokers[0]?.phone || '',
+    companyReferenceNumber: `DEAL-${dealData?.dealId || ''}`, companyName: companyInfo.name || 'Agency'
   };
+  useEffect(() => {
+    if (!dealData?.dealId) return;
+    let mounted = true;
+    apiClient.get(`/crm/deals/${dealData.dealId}/presentation`).then(({ data }) => {
+      if (!mounted) return;
+      setDealBrokers(data.brokers || []);
+      setCompanyInfo({ name: data.agencyName, logoUrl: data.agencyLogoUrl || '' });
+    }).catch(error => { if (mounted) setFeedbackMessage(error.message); });
+    return () => { mounted = false; };
+  }, [dealData?.dealId]);
 
-  const isOnTrial = isTrialUser();
-  const trialExpiresAt = getTrialExpiry();
+  const subscription = useSubscription();
+  const isOnTrial = subscription?.isTrial === true;
+  const trialExpiresAt = subscription?.trialEndsAt;
   const isTrialExpired = isOnTrial && trialExpiresAt && new Date(trialExpiresAt) < new Date();
 
   const formatTrialExpiry = (expiry) => {
@@ -86,7 +96,6 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
         if (card) {
           setCardId(card.cardId);
           setClientInfo({ name: card.clientName || '', email: card.clientEmail || '', phone: card.clientPhone || '' });
-          setCompanyInfo({ name: card.companyName || '', logoUrl: card.companyLogoUrl || '' });
           setCardStatus((card.status || 'active').toLowerCase());
           if (Array.isArray(card.lines) && card.lines.length) {
             const unitIds = card.lines.map(l => l.unitId);
@@ -478,10 +487,11 @@ export default function BrochureBuilderWorkspace({ dealData, onBack }) {
                   <span className="text-[10px] font-mono text-slate-500">Ref: {brokerProfile.companyReferenceNumber}</span>
                 </div>
               </div>
-              <div className="pt-2 border-t border-slate-800/60 space-y-2 text-xs text-slate-400 font-medium">
-                <p className="flex items-center gap-2"><User size={12} className="text-slate-500" /> {brokerProfile.fullName}</p>
-                <p className="flex items-center gap-2"><Mail size={12} className="text-slate-500" /> {brokerProfile.emailAddress}</p>
-                <p className="flex items-center gap-2"><Phone size={12} className="text-slate-500" /> {brokerProfile.phoneNumber}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-800 text-xs text-slate-300">
+                {dealBrokers.length === 0 && <p>No broker assigned to this deal.</p>}
+                {dealBrokers.map(broker => <section key={broker.brokerId} className="space-y-2">
+                  <p className="font-semibold">{broker.fullName}</p><p>{broker.email}</p><p>{broker.phone}</p>
+                </section>)}
               </div>
             </div>
           </div>

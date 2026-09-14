@@ -6,7 +6,7 @@ namespace CRM.Microservice.DTOs
         public int TotalBrokers { get; init; }
         public int TotalLeads { get; init; }
         public int TotalDeals { get; init; }
-        public int TotalPropertiesWithSoleMandates { get; init; }
+        public int? TotalPropertiesWithSoleMandates { get; init; }
         public decimal TotalRealisedCommission { get; init; }
         public int ActiveListings { get; init; }
         public int ClosedDeals { get; init; }

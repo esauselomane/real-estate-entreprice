@@ -699,15 +699,10 @@ public class PropertyAssetsController : PropertyControllerBase
         [FromQuery] string? linkedBrokerId = null)
     {
         var tenantIds = ParseTenantList(tenantId);
-        IQueryable<PropertyAsset> q;
-        if (tenantIds.Count == 0)
-        {
-            q = PropertyRepository.Query().Where(p => p.IsForSale || p.IsForRent);
-        }
-        else
-        {
-            q = PropertyRepository.Query().Where(p => tenantIds.Contains(p.TenantId) && (p.IsForSale || p.IsForRent));
-        }
+        var q = ApplyPropertyVisibility(PropertyRepository.Query())
+            .Where(property => property.IsForSale || property.IsForRent);
+        if (tenantIds.Count > 0)
+            q = q.Where(property => tenantIds.Contains(property.TenantId));
         var count = await q.CountAsync();
         if (count == 0) return Ok(new { activeListings = 0, averageDom = 0 });
         var avg = await q.Select(p => (double)EF.Functions.DateDiffDay(p.CreatedAt, DateTime.UtcNow)).AverageAsync();
@@ -721,7 +716,7 @@ public class PropertyAssetsController : PropertyControllerBase
     public async Task<IActionResult> GetSoleMandatesCount([FromQuery] string? tenantId = null)
     {
         var tenantIds = ParseTenantList(tenantId);
-        IQueryable<PropertyAsset> query = PropertyRepository.Query()
+        IQueryable<PropertyAsset> query = ApplyPropertyVisibility(PropertyRepository.Query())
             .Where(p => p.SoleMandates.Any(sm => sm.IsActive));
 
         if (tenantIds.Count > 0)
@@ -733,7 +728,7 @@ public class PropertyAssetsController : PropertyControllerBase
         return Ok(new { totalSoleMandates = count });
     }
 
-    // 📈 Property growth over the last N months for the AgencyGlance charts.
+    // Cumulative property count at each month end; current month is counted to date.
     // Accepts the same tenantId formats as sole-mandates.
     [HttpGet("stats/growth")]
     public async Task<IActionResult> GetPropertiesGrowth(
@@ -741,27 +736,23 @@ public class PropertyAssetsController : PropertyControllerBase
         [FromQuery] int months = 6)
     {
         var tenantIds = ParseTenantList(tenantId);
-        var cutoff = DateTime.UtcNow.AddMonths(-months).Date;
-
-        IQueryable<PropertyAsset> query = PropertyRepository.Query()
-            .Where(p => p.CreatedAt >= cutoff);
-
+        months = Math.Clamp(months, 1, 24);
+        var now = DateTime.UtcNow;
+        var firstMonth = new DateTime(now.Year, now.Month, 1).AddMonths(1 - months);
+        var query = ApplyPropertyVisibility(PropertyRepository.Query());
         if (tenantIds.Count > 0)
-        {
-            query = query.Where(p => tenantIds.Contains(p.TenantId));
-        }
+            query = query.Where(property => tenantIds.Contains(property.TenantId));
 
-        var monthly = await query
-            .GroupBy(p => new { Year = p.CreatedAt.Year, Month = p.CreatedAt.Month })
-            .Select(g => new
-            {
-                Year = g.Key.Year,
-                Month = g.Key.Month,
-                PropertyCount = g.Count()
-            })
-            .OrderBy(x => x.Year)
-            .ThenBy(x => x.Month)
-            .ToListAsync();
+        // Include records created before the visible window. Historical totals
+        // describe surviving records, since deleted-property history is not stored.
+        var monthly = new List<PropertyCountAtMonth>();
+        for (var index = 0; index < months; index++)
+        {
+            var month = firstMonth.AddMonths(index);
+            var endExclusive = month.AddMonths(1);
+            var count = await query.CountAsync(property => property.CreatedAt < endExclusive && property.CreatedAt <= now);
+            monthly.Add(new PropertyCountAtMonth(month.Year, month.Month, count));
+        }
 
         return Ok(monthly);
     }

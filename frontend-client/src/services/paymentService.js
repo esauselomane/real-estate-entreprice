@@ -54,8 +54,12 @@ export const paymentService = {
     billingCycle = 'monthly',
     successUrl = '',
     cancelUrl = '',
+    tenantId = null,
+    idempotencyKey,
   }) => {
     const response = await apiClient.post('/payments/create-checkout', {
+      tenantId: tenantId || paymentService._tenantQueryParams().tenantId,
+      idempotencyKey,
       pricingPackageCode,
       billingCycle,
       successUrl,
@@ -64,8 +68,8 @@ export const paymentService = {
     return response.data;
   },
 
-  createPortalSession: async (returnUrl = '') => {
-    const response = await apiClient.post('/payments/portal', { returnUrl });
+  createPortalSession: async (returnUrl = '', tenantId = null) => {
+    const response = await apiClient.post('/payments/portal', { returnUrl, tenantId: tenantId || paymentService._tenantQueryParams().tenantId });
     return response.data || {};
   },
 };

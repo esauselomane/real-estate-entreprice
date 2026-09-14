@@ -1,3 +1,5 @@
+using Identity.Microservice.Models;
+
 namespace Identity.Microservice.Services.Abstractions.Payments
 {
     /// <summary>
@@ -19,19 +21,6 @@ namespace Identity.Microservice.Services.Abstractions.Payments
     }
 
     /// <summary>
-    /// Subscription status normalized across all gateways.
-    /// </summary>
-    public enum SubscriptionStatus
-    {
-        Trialing = 0,
-        Active = 1,
-        PastDue = 2,
-        Cancelled = 3,
-        Expired = 4,
-        Paused = 5
-    }
-
-    /// <summary>
     /// Request to create a checkout session for subscription signup.
     /// </summary>
     public record CreateCheckoutRequest
@@ -41,6 +30,8 @@ namespace Identity.Microservice.Services.Abstractions.Payments
         public BillingCycle BillingCycle { get; init; } = BillingCycle.Monthly;
         public string SuccessUrl { get; init; } = string.Empty;
         public string CancelUrl { get; init; } = string.Empty;
+        public decimal Amount { get; init; }
+        public string MerchantReference { get; init; } = string.Empty;
         public string? CustomerEmail { get; init; }
         public string? CustomerName { get; init; }
         public PaymentGateway? PreferredGateway { get; init; }
@@ -52,6 +43,8 @@ namespace Identity.Microservice.Services.Abstractions.Payments
     public record CreateCheckoutResult
     {
         public string CheckoutUrl { get; init; } = string.Empty;
+        public string Method { get; init; } = "GET";
+        public IReadOnlyDictionary<string, string>? FormFields { get; init; }
         public string SessionId { get; init; } = string.Empty;
         public DateTime ExpiresAt { get; init; }
         public PaymentGateway Gateway { get; init; }
@@ -64,6 +57,8 @@ namespace Identity.Microservice.Services.Abstractions.Payments
     {
         public string TenantId { get; init; } = string.Empty;
         public string ReturnUrl { get; init; } = string.Empty;
+        public string GatewaySubscriptionId { get; init; } = string.Empty;
+        public string? GatewayCustomerId { get; init; }
     }
 
     /// <summary>
@@ -109,6 +104,10 @@ namespace Identity.Microservice.Services.Abstractions.Payments
     public record WebhookEvent
     {
         public string GatewayEventId { get; init; } = string.Empty;
+        public string MerchantReference { get; init; } = string.Empty;
+        public string GatewaySubscriptionId { get; init; } = string.Empty;
+        public decimal? Amount { get; init; }
+        public SubscriptionStatus? SubscriptionStatus { get; init; }
         public string EventType { get; init; } = string.Empty;
         public string PayloadJson { get; init; } = string.Empty;
         public PaymentGateway Gateway { get; init; }

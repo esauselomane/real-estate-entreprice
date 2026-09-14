@@ -25,8 +25,8 @@ import { useAppUi } from './contexts/AppUiContext.jsx';
 import { useAgency } from './contexts/AgencyContext.jsx';
 import { usePermission } from './contexts/PermissionContext.jsx';
 import { useTenant } from './contexts/TenantContext.jsx';
-import { isTrialUser, getTrialExpiry } from './services/authService.js';
 import './index.css';
+import SubscriptionGate from './components/SubscriptionGate.jsx';
 
 export default function App() {
   const {
@@ -55,6 +55,7 @@ export default function App() {
   const { hasPermission } = usePermission();
   const { isAllTenants } = useTenant();
 
+  const recoveryToken = new URLSearchParams(window.location.search).get('recoveryToken');
   const activationToken = !isLoggedIn ? new URLSearchParams(window.location.search).get('token') : null;
 
   const handlePasswordSet = () => {
@@ -98,6 +99,9 @@ export default function App() {
   }, [isLoggedIn]);
 
   // 0. ACTIVATION GATE: If not logged in but a token query param is present, show set-password
+  if (recoveryToken) {
+    return <SetPassword recoveryToken={recoveryToken} onPasswordSet={() => { window.location.href = "/"; }} />;
+  }
   if (!isLoggedIn && activationToken) {
     return <SetPassword activationToken={activationToken} onPasswordSet={handlePasswordSet} />;
   }
@@ -221,7 +225,7 @@ export default function App() {
 
   // 2. MAIN SYSTEM DASHBOARD VIEW: Render workspace layers after successful authentication
   return (
-    <div className="flex bg-slate-950 min-h-screen text-slate-100">
+    <SubscriptionGate><div className="flex bg-slate-950 min-h-screen text-slate-100">
 
       {/* 🧭 Collapsible Side Navigation Drawer Shell */}
       <LeftSidebar />
@@ -256,32 +260,6 @@ export default function App() {
             <TenantSwitcher />
           </div>
         </header>
-
-        {/* 🎯 TRIAL BANNER — prominently shown at the top for trial accounts */}
-        {isTrialUser() && (() => {
-          const expiry = getTrialExpiry();
-          const isExpired = expiry && new Date(expiry) < new Date();
-          const formatted = expiry ? new Date(expiry).toLocaleDateString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric' }) : 'soon';
-          return (
-            <div className={`mb-6 p-4 rounded-2xl border flex items-center gap-3 ${
-              isExpired
-                ? 'bg-red-950/40 border-red-800 text-red-200'
-                : 'bg-amber-950/40 border-amber-700 text-amber-200'
-            }`}>
-              <div className={`text-2xl ${isExpired ? 'text-red-400' : 'text-amber-400'}`}>⚠️</div>
-              <div className="flex-1">
-                <p className="text-sm font-bold uppercase tracking-wider">
-                  {isExpired ? 'Trial Expired' : 'Trial Period Active'}
-                </p>
-                <p className="text-xs opacity-90">
-                  {isExpired
-                    ? 'Your trial has ended. Please contact support to upgrade.'
-                    : `Your 14-day free trial expires on ${formatted}.`}
-                </p>
-              </div>
-            </div>
-          );
-        })()}
 
         {/* ⚙️ Dynamic UI view routing execution conditional dispatcher matrices */}
         {currentView === 'broker-dashboard' && <BrokerDashboard />}
@@ -344,6 +322,6 @@ export default function App() {
         )}
       </div>
 
-    </div>
+    </div></SubscriptionGate>
   );
 }

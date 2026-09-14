@@ -1,3 +1,4 @@
+using CRM.Microservice.Services.Reporting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -713,10 +714,10 @@ namespace CRM.Microservice.Controllers
                 var likePattern = $"%{callerId}%";
                 leadsQuery = leadsQuery.Where(l => l.AllocatedBrokerIds == callerId
                     || l.AllocatedBrokerIds.StartsWith(callerId + ",")
-                    || l.AllocatedBrokerIds.Contains("," + callerId));
+                    || (l.AllocatedBrokerIds.Contains("," + callerId + ",") || l.AllocatedBrokerIds.EndsWith("," + callerId)));
                 dealsQuery = dealsQuery.Where(d => d.AllocatedBrokerIds == callerId
                     || d.AllocatedBrokerIds.StartsWith(callerId + ",")
-                    || d.AllocatedBrokerIds.Contains("," + callerId));
+                    || (d.AllocatedBrokerIds.Contains("," + callerId + ",") || d.AllocatedBrokerIds.EndsWith("," + callerId)));
             }
 
             // 📊 Stage aggregates computed over the entire filtered universe so
@@ -750,15 +751,16 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            if (visibleTenants.Count == 0) return Ok(new PipelineSummaryReport());
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var callerId = GetCurrentUserId();
 
             IQueryable<LeadRecord> baseLeadQuery = LeadRepository.Query()
                 .Where(l => !l.IsConvertedToDeal)
-                .Where(l => !isBroker || l.AllocatedBrokerIds == callerId || l.AllocatedBrokerIds.StartsWith(callerId + ",") || l.AllocatedBrokerIds.Contains("," + callerId));
+                .Where(l => !isBroker || l.AllocatedBrokerIds == callerId || l.AllocatedBrokerIds.StartsWith(callerId + ",") || (l.AllocatedBrokerIds.Contains("," + callerId + ",") || l.AllocatedBrokerIds.EndsWith("," + callerId)));
             IQueryable<DealRecord> baseDealQuery = DealRepository.Query()
-                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
+                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || (d.AllocatedBrokerIds.Contains("," + callerId + ",") || d.AllocatedBrokerIds.EndsWith("," + callerId)));
             if (visibleTenants.Count > 0)
             {
                 baseLeadQuery = baseLeadQuery.Where(l => visibleTenants.Contains(l.TenantId));
@@ -799,6 +801,7 @@ namespace CRM.Microservice.Controllers
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var callerId = GetCurrentUserId();
             var activeYear = year ?? DateTime.UtcNow.Year;
+            if (activeYear < 1 || activeYear > 9998) return BadRequest(new { message = "Year is outside the supported range." });
             Logger.LogInformation("GetReportOverview: Year={Year} overrideTenant={Override} Tenants={TenantCount}", activeYear, tenantId ?? "(default)", visibleTenants.Count);
 
             var yearStart = new DateTime(activeYear, 1, 1);
@@ -806,10 +809,11 @@ namespace CRM.Microservice.Controllers
 
             IQueryable<LeadRecord> tenantLeadsQuery = LeadRepository.Query()
                 .Where(l => l.CreatedAt >= yearStart && l.CreatedAt < yearEnd)
-                .Where(l => !isBroker || l.AllocatedBrokerIds == callerId || l.AllocatedBrokerIds.StartsWith(callerId + ",") || l.AllocatedBrokerIds.Contains("," + callerId));
+                .Where(l => !isBroker || l.AllocatedBrokerIds == callerId || l.AllocatedBrokerIds.StartsWith(callerId + ",") || (l.AllocatedBrokerIds.Contains("," + callerId + ",") || l.AllocatedBrokerIds.EndsWith("," + callerId)));
             IQueryable<DealRecord> tenantDealsQuery = DealRepository.Query()
-                .Where(d => d.CreatedAt >= yearStart && d.CreatedAt < yearEnd)
-                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
+                .Where(d => (d.CreatedAt >= yearStart && d.CreatedAt < yearEnd) || (d.LastStageUpdatedAt >= yearStart && d.LastStageUpdatedAt < yearEnd))
+                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || (d.AllocatedBrokerIds.Contains("," + callerId + ",") || d.AllocatedBrokerIds.EndsWith("," + callerId)));
+            if (visibleTenants.Count == 0) return Ok(new CRMReportOverview());
             if (visibleTenants.Count > 0)
             {
                 tenantLeadsQuery = tenantLeadsQuery.Where(l => visibleTenants.Contains(l.TenantId));
@@ -819,46 +823,7 @@ namespace CRM.Microservice.Controllers
             var tenantLeads = await tenantLeadsQuery.ToListAsync();
             var tenantDeals = await tenantDealsQuery.ToListAsync();
 
-            var monthlyBreakdown = Enumerable.Range(1, 12)
-                .Select(month => new ReportDrilldownRow
-                {
-                    Period = new DateTime(activeYear, month, 1).ToString("MMM"),
-                    Leads = tenantLeads.Count(l => l.CreatedAt.Month == month),
-                    Deals = tenantDeals.Count(d => d.CreatedAt.Month == month),
-                    // 💰 Realised commission on ClosedWon deals created this
-                    // month — same formula as the totals so the line chart
-                    // sums back to the headline number.
-                    Revenue = Math.Round(tenantDeals
-                        .Where(d => d.CreatedAt.Month == month && d.DealStage == DealWorkflowStage.ClosedWon)
-                        .Sum(d => d.RealisedCommission
-                            ?? (d.CommissionType == CommissionTypes.Percent
-                                ? d.TransactionValue * d.CommissionValue / 100m
-                                : d.CommissionValue)), 2)
-                })
-                .ToList();
-
-            return Ok(new CRMReportOverview
-            {
-                TotalLeads = tenantLeads.Count,
-                TotalDeals = tenantDeals.Count,
-                // 💰 Revenue is realised commission on ClosedWon deals, not
-                // raw TransactionValue. Use the locked-in amount when
-                // available, otherwise fall back to the per-deal formula so
-                // legacy seed rows (no RealisedCommission) still surface.
-                TotalRevenue = Math.Round(tenantDeals
-                    .Where(d => d.DealStage == DealWorkflowStage.ClosedWon)
-                    .Sum(d => d.RealisedCommission
-                        ?? (d.CommissionType == CommissionTypes.Percent
-                            ? d.TransactionValue * d.CommissionValue / 100m
-                            : d.CommissionValue)), 2),
-                TotalRealisedCommission = Math.Round(tenantDeals
-                    .Where(d => d.DealStage == DealWorkflowStage.ClosedWon)
-                    .Sum(d => d.RealisedCommission
-                        ?? (d.CommissionType == CommissionTypes.Percent
-                            ? d.TransactionValue * d.CommissionValue / 100m
-                            : d.CommissionValue)), 2),
-                MonthlyBreakdown = monthlyBreakdown
-            });
+            return Ok(ReportSummaryHelper.Build(activeYear, tenantLeads, tenantDeals));
         }
 
         // 📊 Commission per deal stage — the "expected commission" for every
@@ -876,47 +841,21 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            if (visibleTenants.Count == 0) return Ok(Array.Empty<object>());
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var callerId = GetCurrentUserId();
 
             IQueryable<DealRecord> query = DealRepository.Query()
-                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
+                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || (d.AllocatedBrokerIds.Contains("," + callerId + ",") || d.AllocatedBrokerIds.EndsWith("," + callerId)));
             if (visibleTenants.Count > 0)
                 query = query.Where(d => visibleTenants.Contains(d.TenantId));
 
-            // Pull the rows so we can apply the per-deal commission formula
-            // in C# (EF Core can't translate a nullable-vs-string switch).
-            var deals = await query.Select(d => new {
-                d.DealStage,
-                d.TransactionValue,
-                d.CommissionType,
-                d.CommissionValue,
-                d.RealisedCommission
-            }).ToListAsync();
-
-            var rows = deals
-                .GroupBy(d => d.DealStage)
-                .Select(g => new ReportDrilldownRow
-                {
-                    Period = g.Key.ToString(),
-                    Deals = g.Count(),
-                    // 🧮 Expected commission per deal: Percent → TV*CV/100, Flat → CV.
-                    // For ClosedWon we still use the locked RealisedCommission
-                    // so the chart agrees with the closed-won accounting.
-                    Revenue = Math.Round(g.Sum(d =>
-                        d.DealStage == DealWorkflowStage.ClosedWon
-                            ? (d.RealisedCommission ?? ComputeExpectedCommission(d))
-                            : ComputeExpectedCommission(d)
-                    ), 2)
-                })
-                .ToList();
+            var deals = await query.ToListAsync();
+            var rows = new List<ReportDrilldownRow>();
+            foreach (var group in deals.GroupBy(deal => deal.DealStage))
+                rows.Add(new ReportDrilldownRow { Period = group.Key.ToString(), Deals = group.Count(), Revenue = group.Sum(CommissionCalculator.Pipeline) });
             return Ok(rows);
-
-            static decimal ComputeExpectedCommission(dynamic d) =>
-                d.CommissionType == CommissionTypes.Percent
-                    ? Math.Round((decimal)d.TransactionValue * (decimal)d.CommissionValue / 100m, 2)
-                    : (decimal)d.CommissionValue;
         }
 
         // 📊 Broker leaderboard — deal count + pipeline value, ranked.
@@ -930,12 +869,12 @@ namespace CRM.Microservice.Controllers
             }
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+            if (visibleTenants.Count == 0) return Ok(Array.Empty<object>());
             var callerName = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? string.Empty;
             var isBroker = GetCurrentCanonicalRole() == "Broker";
             var callerId = GetCurrentUserId();
             IQueryable<DealRecord> query = DealRepository.Query()
-                .Where(d => d.AllocatedBrokerIds != null && d.AllocatedBrokerIds != "")
-                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || d.AllocatedBrokerIds.Contains("," + callerId));
+                .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || (d.AllocatedBrokerIds.Contains("," + callerId + ",") || d.AllocatedBrokerIds.EndsWith("," + callerId)));
             if (visibleTenants.Count > 0)
                 query = query.Where(d => visibleTenants.Contains(d.TenantId));
 
@@ -943,21 +882,8 @@ namespace CRM.Microservice.Controllers
             // C# (EF Core can't translate a string-vs-enum branch on a
             // nullable CommissionType). Each deal's commission is normalised
             // to Rand before aggregation.
-            var deals = await query
-                .Select(d => new {
-                    d.AllocatedBrokerIds,
-                    d.TransactionValue,
-                    d.CommissionType,
-                    d.CommissionValue,
-                    d.RealisedCommission,
-                    d.DealStage
-                })
-                .ToListAsync();
+            var deals = await query.ToListAsync();
 
-            // 🧑‍💼 Broker name lookup. AllocatedBrokerIds is a comma-separated list of
-            // broker user ids; load the full visible broker roster once and build
-            // a map so we can resolve each id in a deal's allocation to a
-            // human-readable name for the leaderboard display.
             var brokerRoster = await BrokerRepository.Query()
                 .Where(b => visibleTenants.Count == 0 || visibleTenants.Contains(b.TenantId))
                 .Select(b => new { b.BrokerId, b.FullName })
@@ -968,30 +894,8 @@ namespace CRM.Microservice.Controllers
 
             var rows = deals
                 .GroupBy(d => d.AllocatedBrokerIds)
-                .Select(g => new
-                {
-                    // Resolve a representative name for the first broker in the
-                    // list. Multi-broker groups will surface one of the names;
-                    // the raw ids are returned separately for drill-downs.
-                    agent = (g.Key ?? string.Empty)
-                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                        .Select(id => brokerNames.TryGetValue(id, out var n) ? n : id)
-                        .FirstOrDefault() ?? g.Key,
-                    agentIds = g.Key,
-                    deals = g.Count(),
-                    // 🧮 totalValue = full TransactionValue across every deal
-                    // (the headline "pipeline value" metric for the broker).
-                    totalValue = Math.Round(g.Sum(d => d.TransactionValue), 2),
-                    // 🧮 totalCommission = expected commission on every deal
-                    // (use the locked RealisedCommission for ClosedWon so the
-                    // number agrees with the realised revenue on the report).
-                    totalCommission = Math.Round(g.Sum(d => d.RealisedCommission
-                        ?? (d.CommissionType == CommissionTypes.Percent
-                            ? d.TransactionValue * d.CommissionValue / 100m
-                            : d.CommissionValue)), 2),
-                    won = g.Count(d => d.DealStage == DealWorkflowStage.ClosedWon)
-                })
-                .OrderByDescending(r => r.totalValue)
+                .Select(group => BrokerReportHelper.BuildLeaderboardRow(group, brokerNames))
+                .OrderByDescending(row => row.TotalValue)
                 .ToList();
             return Ok(rows);
         }
@@ -1021,40 +925,34 @@ namespace CRM.Microservice.Controllers
             // Base query: deals in scope, optionally filtered to one broker.
             var deals = DealRepository.Query()
                 .Where(d => tenantIds.Contains(d.TenantId)
-                    && (effectiveBrokerId == null || d.AllocatedBrokerIds == effectiveBrokerId || d.AllocatedBrokerIds.Contains(effectiveBrokerId + ",")
-                        || d.AllocatedBrokerIds.Contains("," + effectiveBrokerId)
+                    && (effectiveBrokerId == null || d.AllocatedBrokerIds == effectiveBrokerId || d.AllocatedBrokerIds.StartsWith(effectiveBrokerId + ",")
+                        || (d.AllocatedBrokerIds.Contains("," + effectiveBrokerId + ",") || d.AllocatedBrokerIds.EndsWith("," + effectiveBrokerId))
                         || d.AllocatedBrokerIds == effectiveBrokerId));
 
-            // GCI = sum of commissionValue (Percent: txn × pct/100, Amount: fixed)
-            // over all deals in scope.
-            var gci = await deals.SumAsync(d => (decimal?)(
-                d.CommissionType == CommissionTypes.Percent
-                    ? d.TransactionValue * d.CommissionValue / 100m
-                    : d.CommissionValue)) ?? 0m;
-
-            // Company Dollar = GCI × the configured split (default 70% / 30%)
-            // for now: companyDollar = 70% of GCI (broker split is configurable
-            // per-deal but the system default is 30% broker / 70% brokerage).
-            var companyDollar = Math.Round(gci * 0.7m, 2);
+            var scopeRecords = await deals.ToListAsync();
+            var gci = scopeRecords.Sum(CommissionCalculator.Realised);
+            var configuredShare = HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetValue<decimal?>("Brokerage:CompanySharePercent");
+            var companyShare = configuredShare is >= 0 and <= 100 ? configuredShare : null;
+            decimal? companyDollar = companyShare.HasValue ? Math.Round(gci * companyShare.Value / 100m, 2) : null;
 
             // Active listings: call the property service to count
             // for-sale + for-rent properties in the visible tenant.
             // The CRM service doesn't share a DB with property, so we
             // call over HTTP and ask for a page-size=1 with a huge
             // pageSize just to read X-Total-Count.
-            int activeListings = 0;
-            double averageDom = 0;
+            int? activeListings = null;
+            double? averageDom = null;
             try
             {
                 var propertyBaseUrl = HttpContext.RequestServices
                     .GetRequiredService<IConfiguration>()["Gateway:BaseUrl"]
                     ?? throw new InvalidOperationException("Gateway:BaseUrl is not configured in appsettings.json.");
-                using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
+                using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl.TrimEnd('/') + "/") };
                 var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
                 if (!string.IsNullOrEmpty(authHeader))
                     http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authHeader.Replace("Bearer ", ""));
                 var tenantList = string.Join(',', tenantIds);
-                var resp = await http.GetAsync($"/properties/active-listings-count?tenantId={Uri.EscapeDataString(tenantList)}"
+                var resp = await http.GetAsync($"properties/active-listings-count?tenantId={Uri.EscapeDataString(tenantList)}"
                     + (effectiveBrokerId != null ? $"&linkedBrokerId={Uri.EscapeDataString(effectiveBrokerId)}" : ""));
                 if (resp.IsSuccessStatusCode)
                 {
@@ -1074,54 +972,15 @@ namespace CRM.Microservice.Controllers
             if (!string.IsNullOrWhiteSpace(month) && DateTime.TryParseExact(month, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out var parsedMonth))
                 targetMonth = parsedMonth;
 
-            int monthsToLookBack = targetMonth.HasValue ? 0 : 5;
-            var startDate = DateTime.UtcNow.AddMonths(-monthsToLookBack);
-            var trend = await deals
-                .Where(d => d.CreatedAt >= new DateTime(startDate.Year, startDate.Month, 1))
-                .GroupBy(d => new { d.CreatedAt.Year, d.CreatedAt.Month })
-                .Select(g => new
-                {
-                    Year = g.Key.Year,
-                    Month = g.Key.Month,
-                    Gci = g.Sum(d => d.CommissionType == CommissionTypes.Percent
-                        ? d.TransactionValue * d.CommissionValue / 100m
-                        : d.CommissionValue),
-                    ClosedCount = g.Count(d => d.DealStage == DealWorkflowStage.ClosedWon)
-                })
-                .OrderBy(x => x.Year).ThenBy(x => x.Month)
-                .ToListAsync();
-
-            // Closed-deal commission trend: realised commission is the inferred
-            // commission from deals that reached ClosedWon, grouped by the month
-            // in which the deal was actually closed (LastStageUpdatedAt).
-            var closedDealTrend = await deals
-                .Where(d => d.DealStage == DealWorkflowStage.ClosedWon
-                    && d.LastStageUpdatedAt >= new DateTime(startDate.Year, startDate.Month, 1))
-                .GroupBy(d => new { d.LastStageUpdatedAt.Year, d.LastStageUpdatedAt.Month })
-                .Select(g => new
-                {
-                    Year = g.Key.Year,
-                    Month = g.Key.Month,
-                    Commission = g.Sum(d => d.RealisedCommission ?? (d.CommissionType == CommissionTypes.Percent
-                        ? d.TransactionValue * d.CommissionValue / 100m
-                        : d.CommissionValue))
-                })
-                .OrderBy(x => x.Year).ThenBy(x => x.Month)
-                .ToListAsync();
-
-            // If a specific month was requested, filter the trend to just that month.
+            var startDate = targetMonth ?? new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1).AddMonths(-5);
+            var trend = CommissionTrendHelper.Build(scopeRecords, startDate, targetMonth.HasValue ? 1 : 6);
+            var closedDealTrend = trend;
             if (targetMonth.HasValue)
             {
-                trend = trend.Where(t => t.Year == targetMonth.Value.Year && t.Month == targetMonth.Value.Month).ToList();
-                closedDealTrend = closedDealTrend.Where(t => t.Year == targetMonth.Value.Year && t.Month == targetMonth.Value.Month).ToList();
+                gci = trend.Sum(point => point.Gci);
+                companyDollar = companyShare.HasValue ? Math.Round(gci * companyShare.Value / 100m, 2) : null;
             }
-            var monthlyTrend = trend.Select(t => new
-            {
-                period = $"{t.Year}-{t.Month:D2}",
-                gci = Math.Round(t.Gci, 2),
-                companyDollar = Math.Round(t.Gci * 0.7m, 2),
-                closedCount = t.ClosedCount
-            }).ToList();
+            var monthlyTrend = trend.Select(point => BrokerReportHelper.BuildTrendRow(point, companyShare)).ToList();
 
             // Trend vs last month (for KPI trend badges).
             var thisMonthGci = trend.LastOrDefault()?.Gci ?? 0m;
@@ -1149,42 +1008,24 @@ namespace CRM.Microservice.Controllers
             else
             {
                 var ym = new DateTime(targetStartMonth.Year, targetStartMonth.Month, 1);
-                targetQuery = targetQuery.Where(t => t.CreatedAt >= ym);
+                targetQuery = targetQuery.Where(t => t.Year > ym.Year || (t.Year == ym.Year && t.Month >= ym.Month));
             }
 
-            var targets = await targetQuery
-                .Select(t => new
-                {
-                    t.Year,
-                    t.Month,
-                    Target = t.TargetCommission
-                })
-                .ToListAsync();
-
-            var targetProgress = targets.Select(t => {
-                var closedMonth = closedDealTrend.FirstOrDefault(mt => mt.Year == t.Year && mt.Month == t.Month);
-                var realised = closedMonth?.Commission ?? 0m;
-                return new
-                {
-                    year = t.Year,
-                    month = t.Month,
-                    period = $"{t.Year}-{t.Month:D2}",
-                    target = Math.Round(t.Target, 2),
-                    realised = Math.Round(realised, 2),
-                    progress = t.Target == 0m ? 0m : Math.Round(realised / t.Target * 100m, 1)
-                };
-            }).ToList();
+            var targets = await targetQuery.ToListAsync();
+            var targetProgress = targets.Select(target => BrokerReportHelper.BuildTargetProgress(target, closedDealTrend)).ToList();
 
             return Ok(new
             {
                 gci = Math.Round(gci, 2),
-                companyDollar = Math.Round(companyDollar, 2),
+                companyDollar,
+                companySharePercent = companyShare,
                 activeListings,
                 averageDom,
                 monthlyTrend,
+                pipelineStages = scopeRecords.GroupBy(deal => deal.DealStage).Select(group => new { stage = group.Key.ToString(), count = group.Count() }),
                 gciTrendPct = trendPct,
-                dealCount = await deals.CountAsync(),
-                closedWonCount = await deals.CountAsync(d => d.DealStage == DealWorkflowStage.ClosedWon),
+                dealCount = scopeRecords.Count(deal => !targetMonth.HasValue || (deal.CreatedAt >= targetMonth.Value && deal.CreatedAt < targetMonth.Value.AddMonths(1))),
+                closedWonCount = targetMonth.HasValue ? trend.Sum(point => point.ClosedCount) : scopeRecords.Count(deal => deal.DealStage == DealWorkflowStage.ClosedWon),
                 monthlyTargets = targetProgress
             });
         }
@@ -1357,35 +1198,16 @@ namespace CRM.Microservice.Controllers
             var tenantIds = await GetVisibleTenantIdsAsync(tenantId);
             if (tenantIds.Count == 0) return Ok(Array.Empty<object>());
 
-            // Brokers in the visible tenant scope (Email is a soft proxy for "active").
-            var brokers = await BrokerRepository.Query()
-                .Where(b => tenantIds.Contains(b.TenantId) && b.Email != "")
-                .Select(b => new { b.BrokerId, b.FullName, b.TenantId })
-                .ToListAsync();
-
-            // Aggregate per-broker deal metrics.
-            var deals = await DealRepository.Query()
-                .Where(d => tenantIds.Contains(d.TenantId))
-                .Select(d => new { d.AllocatedBrokerIds, d.DealStage, d.CommissionType, d.CommissionValue, d.TransactionValue })
-                .ToListAsync();
-
-            var rows = brokers.Select(b =>
+            var brokerQuery = BrokerRepository.Query().Where(broker => tenantIds.Contains(broker.TenantId));
+            if (GetCurrentCanonicalRole() == "Broker")
             {
-                var mine = deals.Where(d => BrokerMatches(d.AllocatedBrokerIds, b.BrokerId)).ToList();
-                var gci = mine.Sum(d => d.CommissionType == CommissionTypes.Percent
-                    ? d.TransactionValue * d.CommissionValue / 100m
-                    : d.CommissionValue);
-                return new
-                {
-                    brokerId = b.BrokerId,
-                    name = b.FullName,
-                    activeListings = 0, // populated below from property service if we ever want to cross-call
-                    dealsClosed = mine.Count(d => d.DealStage == DealWorkflowStage.ClosedWon),
-                    totalGci = Math.Round(gci, 2)
-                };
-            })
-            .OrderByDescending(r => r.totalGci)
-            .ToList();
+                var callerId = GetCurrentUserId();
+                brokerQuery = brokerQuery.Where(broker => broker.BrokerId == callerId);
+            }
+            var brokers = await brokerQuery.ToListAsync();
+            var deals = await DealRepository.Query().Where(deal => tenantIds.Contains(deal.TenantId)).ToListAsync();
+            var rows = brokers.Select(broker => BrokerReportHelper.BuildPerformanceRow(broker, deals))
+                .OrderByDescending(row => row.TotalGci).ToList();
 
             return Ok(rows);
         }
@@ -1465,6 +1287,7 @@ namespace CRM.Microservice.Controllers
                     ?? "http://property:5002";
                 using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
                 var tenantList = string.Join(',', tenantIds);
+                http.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", Request.Headers.Authorization.ToString());
                 var url = $"/api/properties/expiring-mandates?tenantId={Uri.EscapeDataString(tenantList)}"
                     + (effectiveBrokerId != null ? $"&brokerId={Uri.EscapeDataString(effectiveBrokerId)}" : "")
                     + "&days=14";
@@ -1566,16 +1389,20 @@ namespace CRM.Microservice.Controllers
         // → create a notification for the broker (or all brokers on the deal).
         [Authorize]
         [HttpPost("notifications")]
-        public async Task<IActionResult> CreateNotification([FromBody] CreateNotificationPayload payload)
+        public async Task<IActionResult> CreateNotification([FromBody] CreateNotificationPayload payload,
+            [FromServices] CRM.Microservice.Services.Implementation.IEmailNotificationService emailService)
         {
             if (!await PermissionCheck.HasPermissionAsync("deals:edit"))
                 return Forbid();
              if (payload == null) return BadRequest(new { message = "Payload is required." });
              var tenantIds = await GetVisibleTenantIdsAsync(null);
-            // The notification lives in the admin's tenant — first one.
-            var tenantId = tenantIds.FirstOrDefault();
-            if (string.IsNullOrEmpty(tenantId))
-                return BadRequest(new { message = "No visible tenant for the caller." });
+            var recipient = await BrokerRepository.Query()
+                .FirstOrDefaultAsync(broker => broker.BrokerId == payload.UserId && tenantIds.Contains(broker.TenantId));
+            if (!string.IsNullOrWhiteSpace(payload.UserId) && recipient == null)
+                return BadRequest(new { message = "Recipient must belong to an agency you can manage." });
+            var tenantId = recipient?.TenantId ?? User.FindFirst("TenantId")?.Value;
+            if (string.IsNullOrEmpty(tenantId) || !tenantIds.Contains(tenantId))
+                return BadRequest(new { message = "No visible agency for this reminder." });
 
             var n = new Notification
             {
@@ -1591,6 +1418,12 @@ namespace CRM.Microservice.Controllers
             };
             NotificationRepository.Add(n);
             await DbContext.SaveChangesAsync();
+            if (recipient != null && !string.IsNullOrWhiteSpace(recipient.Email))
+            {
+                var agency = await AgencyRepository.Query().FirstOrDefaultAsync(record => record.TenantId == tenantId);
+                await emailService.SendReminderEmailAsync(recipient.Email, recipient.FullName, n.Title, n.Body,
+                    agency?.Name ?? "Your agency", agency?.CompanyLogoUrl);
+            }
             return Created($"/crm/notifications/{n.NotificationId}", n);
         }
 
@@ -1670,7 +1503,14 @@ namespace CRM.Microservice.Controllers
 
             var role = GetCurrentCanonicalRole();
             var callerId = GetCurrentUserId();
-            var tenantId = tenantIds.FirstOrDefault();
+            var deal = await DealRepository.Query().SingleOrDefaultAsync(deal => deal.DealId == payload.DealId && tenantIds.Contains(deal.TenantId));
+            if (deal == null) return NotFound();
+            if (role == "Broker" && !CallerIsAssignedTo(deal.AllocatedBrokerIds, callerId)) return Forbid();
+            if (payload.BrochureCardId > 0 && !await BrochureCardRepository.Query().AnyAsync(card => card.CardId == payload.BrochureCardId && card.DealId == deal.DealId))
+                return BadRequest(new { message = "Brochure card does not belong to this deal." });
+            var presentation = await Services.Brochures.DealPresentationHelper.ResolveAsync(deal, BrokerRepository.Query(), AgencyRepository.Query());
+            if (presentation.Brokers.Count == 0) return BadRequest(new { message = "Assign a broker to this deal before generating a brochure." });
+            var tenantId = deal.TenantId;
 
             var job = new BrochureGenerationJob(
                 DealId: payload.DealId,
@@ -1678,11 +1518,11 @@ namespace CRM.Microservice.Controllers
                 PropertyId: payload.SubUnits.FirstOrDefault()?.PropertyId ?? 0,
                 TenantId: tenantId,
                 RequestedBy: callerId,
-                BrokerName: payload.BrokerName,
-                BrokerEmail: payload.BrokerEmail,
-                BrokerPhone: payload.BrokerPhone,
-                CompanyName: payload.CompanyName,
-                CompanyLogoUrl: payload.CompanyLogoUrl,
+                BrokerName: presentation.Brokers[0].FullName,
+                BrokerEmail: presentation.Brokers[0].Email,
+                BrokerPhone: presentation.Brokers[0].Phone,
+                CompanyName: presentation.AgencyName,
+                CompanyLogoUrl: presentation.AgencyLogoUrl,
                 ClientName: payload.ClientName,
                 ClientEmail: payload.ClientEmail,
                 ClientPhone: payload.ClientPhone,
@@ -1712,7 +1552,7 @@ namespace CRM.Microservice.Controllers
                     IsCurrentlyVacant = u.IsCurrentlyVacant,
                     Amenities = u.Amenities.Select(a => new CRM.Microservice.Services.BackgroundJobs.AmenityInfo { Name = a.Name, Label = a.Label, BooleanValue = a.BooleanValue, NumberValue = a.NumberValue }).ToList()
                 }).ToList()
-            );
+            ) { Brokers = presentation.Brokers };
 
             var brokerageQueue = HttpContext.RequestServices.GetService<IJobQueue<BrochureGenerationJob>>();
             if (brokerageQueue == null)

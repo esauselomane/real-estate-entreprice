@@ -172,6 +172,15 @@ export const authService = {
       }
     },
 
+    resetPassword: async (token, newPassword, confirmPassword) => {
+      try {
+        const response = await apiClient.post('/auth/reset-password', { token, newPassword, confirmPassword });
+        return response.data;
+      } catch (error) {
+        throw new Error(error.response?.data?.message || 'Unable to reset password. Please request a new link.');
+      }
+    },
+
     // --- 👤 LOCAL ACCOUNT STATUS CLEARING ---
     logout: () => {
      localStorage.removeItem('user_session_jwt');

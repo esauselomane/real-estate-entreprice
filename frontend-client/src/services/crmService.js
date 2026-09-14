@@ -360,7 +360,8 @@ export const crmService = {
           budgetMax: filters.budgetMax,
           propertyType: filters.propertyType,
           limit: filters.limit || 3,
-          ...crmService._tenantQueryParams()
+          ...crmService._tenantQueryParams(),
+          ...(filters.tenantId ? { tenantId: filters.tenantId } : {})
         }
       });
       return response.data.brokers || [];
@@ -759,7 +760,7 @@ export const crmService = {
   },
 
   // 📋 Agent performance leaderboard.
-  getBrokerLeaderboard: async (brokerId = null) => {
+  getBrokerPerformanceLeaderboard: async (brokerId = null) => {
     try {
       const params = { ...crmService._tenantQueryParams() };
       if (brokerId) params.brokerId = brokerId;

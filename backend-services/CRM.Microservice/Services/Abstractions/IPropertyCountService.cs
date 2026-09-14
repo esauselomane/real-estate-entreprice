@@ -13,10 +13,10 @@ public interface IPropertyCountService
     /// Returns the total number of properties with active sole mandates across
     /// the provided tenant IDs. Calls the Property microservice over HTTP.
     /// </summary>
-    Task<int> GetTotalSoleMandatesAsync(IReadOnlyList<string> tenantIds, HttpContext httpContext);
+    Task<int?> GetTotalSoleMandatesAsync(IReadOnlyList<string> tenantIds, HttpContext httpContext);
 
     /// <summary>
-    /// Returns property counts per month for the last 6 months, scoped to
+    /// Returns cumulative month-end property totals for the last 6 months (current month to date), scoped to
     /// the provided tenant IDs. Calls the Property microservice over HTTP.
     /// </summary>
     Task<IReadOnlyList<PropertyGrowthPoint>> GetPropertiesGrowthOver6MonthsAsync(IReadOnlyList<string> tenantIds, HttpContext httpContext);

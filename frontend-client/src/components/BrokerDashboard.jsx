@@ -121,7 +121,7 @@ export default function BrokerDashboard() {
     try {
       const [m, lb, ci] = await Promise.all([
         crmService.getBrokerMetrics(effectiveBrokerId, selectedMonth || null),
-        crmService.getBrokerLeaderboard(effectiveBrokerId),
+        crmService.getBrokerPerformanceLeaderboard(effectiveBrokerId),
         crmService.getComplianceInbox(effectiveBrokerId),
       ]);
       setMetrics(m || {});
@@ -201,19 +201,11 @@ export default function BrokerDashboard() {
     return sortDir === 'asc' ? sorted : sorted.reverse();
   }, [leaderboard, sortKey, sortDir]);
 
-  // Pipeline split derived from leaderboard (closedCount per month + Negotiation count from compliance).
-  const pipelineData = useMemo(() => {
-    const trend = metrics?.monthlyTrend || [];
-    const closedThisMonth = trend.length ? trend[trend.length - 1].closedCount : 0;
-    const awaiting = compliance.filter((c) => c.category === 'compliance.awaiting_signature').length;
-    const expiringCritical = compliance.filter((c) => c.severity === 'critical' || c.severity === 'high').length;
-    return [
-      { name: 'New / Active',  value: Math.max(0, (metrics?.dealCount || 0) - closedThisMonth - awaiting), color: PIPELINE_COLORS[1] },
-      { name: 'Negotiation',   value: awaiting, color: PIPELINE_COLORS[2] },
-      { name: 'Closed Won',    value: closedThisMonth, color: PIPELINE_COLORS[0] },
-      { name: 'At Risk',       value: expiringCritical, color: PIPELINE_COLORS[4] },
-    ];
-  }, [metrics, compliance]);
+  const pipelineData = useMemo(() => (metrics?.pipelineStages || []).map((stage, index) => ({
+    name: stage.stage.replace(/([a-z])([A-Z])/g, '$1 $2'),
+    value: stage.count,
+    color: PIPELINE_COLORS[index % PIPELINE_COLORS.length],
+  })), [metrics]);
 
   const trendData = useMemo(() => {
     const trend = metrics?.monthlyTrend || [];
@@ -333,20 +325,20 @@ export default function BrokerDashboard() {
         />
         <KpiCard
           icon={Banknote}
-          label="Company Rand (Net)"
-          value={fmtCurrency(metrics?.companyDollar)}
+          label="Company Share"
+          value={metrics?.companyDollar == null ? 'Not configured' : fmtCurrency(metrics.companyDollar)}
           accent="emerald"
         />
         <KpiCard
           icon={Home}
-          label="Total Active Listings"
-          value={fmtNumber(metrics?.activeListings)}
+          label="Agency Active Listings"
+          value={metrics?.activeListings == null ? 'Unavailable' : fmtNumber(metrics.activeListings)}
           accent="indigo"
         />
         <KpiCard
           icon={Clock}
-          label="Average Days on Market"
-          value={`${fmtNumber(metrics?.averageDom)} d`}
+          label="Agency Average Days on Market"
+          value={metrics?.averageDom == null ? 'Unavailable' : `${fmtNumber(metrics.averageDom)} d`}
           accent="slate"
         />
         {effectiveBrokerId && metrics?.monthlyTargets && metrics.monthlyTargets.length > 0 && (
@@ -416,7 +408,7 @@ export default function BrokerDashboard() {
              <Users size={16} className="text-emerald-400" /> {effectiveBrokerId ? 'Broker Activity Log' : 'Agent Performance'}
            </h3>
            <p className="text-xs text-slate-500 mb-4">
-             {effectiveBrokerId ? 'Recent deal stage changes (polling every 30s)' : 'Sortable leaderboard for the active tenant'}
+             {effectiveBrokerId ? 'Recent deal stage changes (polling every 30s)' : 'Realised commission on assigned deals. Shared deals appear for each broker; rows are not additive.'}
            </p>
            {effectiveBrokerId ? (
              activityLog.length === 0 ? (
@@ -462,14 +454,14 @@ export default function BrokerDashboard() {
                      <SortHeader label="Agent" field="name" active={sortKey === 'name'} dir={sortDir === 'asc'} onRequest={requestSort} right={false} />
                      <SortHeader label="Active Listings" field="activeListings" active={sortKey === 'activeListings'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />
                      <SortHeader label="Deals Closed" field="dealsClosed" active={sortKey === 'dealsClosed'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />
-                     <SortHeader label="GCI Generated" field="totalGci" active={sortKey === 'totalGci'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />
+                     <SortHeader label="Assigned Deal GCI" field="totalGci" active={sortKey === 'totalGci'} dir={sortDir === 'asc'} onRequest={requestSort} right={true} />
                    </tr>
                  </thead>
                  <tbody>
                    {sortableRows.map((row) => (
                      <tr key={row.brokerId} className={`border-b border-slate-800/50 ${pickedBroker?.brokerId === row.brokerId ? 'bg-blue-950/30' : 'hover:bg-slate-800/30'}`}>
                        <td className="py-2.5 px-3 text-white font-medium">{row.name}</td>
-                       <td className="py-2.5 px-3 text-right text-slate-300">{fmtNumber(row.activeListings)}</td>
+                       <td className="py-2.5 px-3 text-right text-slate-300">{row.activeListings == null ? 'Unavailable' : fmtNumber(row.activeListings)}</td>
                        <td className="py-2.5 px-3 text-right text-slate-300">{fmtNumber(row.dealsClosed)}</td>
                        <td className="py-2.5 px-3 text-right font-semibold text-emerald-400">{fmtCurrency(row.totalGci)}</td>
                      </tr>

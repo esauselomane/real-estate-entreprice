@@ -19,6 +19,17 @@ namespace CRM.Microservice.Controllers;
 [Route("api/crm")]
 public class DealsController : CRMControllerBase
 {
+    [HttpGet("deals/{dealId:int}/presentation")]
+    public async Task<IActionResult> GetDealPresentation(int dealId)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("billing:view")) return Forbid();
+        var tenants = await GetVisibleTenantIdsAsync(null);
+        var deal = await DealRepository.Query().SingleOrDefaultAsync(deal => deal.DealId == dealId && tenants.Contains(deal.TenantId));
+        if (deal == null) return NotFound();
+        if (GetCurrentCanonicalRole() == "Broker" && !CallerIsAssignedTo(deal.AllocatedBrokerIds, GetCurrentUserId())) return Forbid();
+        return Ok(await Services.Brochures.DealPresentationHelper.ResolveAsync(deal, BrokerRepository.Query(), AgencyRepository.Query()));
+    }
+
     public DealsController(
         CRMDbContext dbContext,
         IHttpClientFactory http,
@@ -322,6 +333,14 @@ public class DealsController : CRMControllerBase
                 await DbContext.SaveChangesAsync();
                 return Ok(new { message = "All broker splits cleared." });
             }
+
+            var requestedIds = request.Splits.Select(split => split.BrokerId).ToArray();
+            var allocatedIds = Services.Brochures.DealPresentationHelper.BrokerIds(deal.AllocatedBrokerIds);
+            if (requestedIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() != requestedIds.Length ||
+                request.Splits.Any(split => split.SplitPercentage < 0 || split.SplitPercentage > 100) ||
+                request.Splits.Sum(split => split.SplitPercentage) > 100 ||
+                requestedIds.Any(id => !allocatedIds.Contains(id, StringComparer.OrdinalIgnoreCase)))
+                return BadRequest(new { message = "Splits must use distinct assigned brokers, non-negative percentages, and total no more than 100%." });
 
             var existing = DealBrokerSplitRepository.Query().Where(s => s.DealId == dealId);
             DealBrokerSplitRepository.RemoveRange(existing);

@@ -25,6 +25,8 @@ namespace Identity.Microservice.Models
         [MaxLength(50)]
         public string PricingPackageCode { get; set; } = string.Empty;
 
+        public Identity.Microservice.Services.Abstractions.Payments.PaymentGateway? Gateway { get; set; }
+
         public SubscriptionStatus Status { get; set; } = SubscriptionStatus.Trialing;
 
         public DateTime CurrentPeriodStart { get; set; }

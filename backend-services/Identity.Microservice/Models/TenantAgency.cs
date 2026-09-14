@@ -25,6 +25,7 @@ namespace Identity.Microservice.Models
 
         // 🎯 TRIAL ONBOARDING FIELDS
         public bool IsTrial { get; set; } = false;
+        public DateTime? TrialExtensionAppliedAt { get; set; }
         public DateTime? TrialStartDate { get; set; }
         public DateTime? TrialEndDate { get; set; }
 

@@ -10,10 +10,12 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
+import SubscriptionPackagesAdmin from './subscriptions/SubscriptionPackagesAdmin.jsx';
 import AmenityTypesWorkspace from './AmenityTypesWorkspace.jsx';
 
 export default function SystemAdminWorkspace({ defaultTab }) {
-  const { userRole: currentUserRole } = useAuth();
+  const { userRole: currentUserRole, activeProfile } = useAuth();
+  const canManageSubscriptionPackages = activeProfile?.originalRole === 'SuperAdmin';
   const { hasPermission } = usePermission();
   const { activeTenantId, activeAgency, isAllTenants } = useTenant();
   const isSuperAdmin = currentUserRole === 'PlatformAdmin';
@@ -364,6 +366,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     <div className="space-y-6 animate-fade-in">
       {error && <div className="p-3 rounded-xl border border-red-900 bg-red-950/40 text-red-300 text-xs">{error}</div>}
 
+      {canManageSubscriptionPackages && <button onClick={() => setActiveTab('subscription-packages')} className="px-4 py-2 rounded-xl bg-blue-600 text-white">Subscription packages</button>}
+      {activeTab === 'subscription-packages' && canManageSubscriptionPackages && <SubscriptionPackagesAdmin />}
       {/* 🎛️ DRILL-NAVIGATION MENU */}
       <div className="flex gap-2 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl shadow-xl overflow-x-auto">
         {isSuperAdmin && (
@@ -793,13 +797,13 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={reportOverview.monthlyBreakdown || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="Period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }} />
                     <Legend wrapperStyle={{ fontSize: '10px', color: '#94a3b8' }} />
-                    <Line type="monotone" dataKey="Leads" stroke="#38bdf8" strokeWidth={2} name="Leads" />
-                    <Line type="monotone" dataKey="Deals" stroke="#a78bfa" strokeWidth={2} name="Deals" />
-                    <Line type="monotone" dataKey="Revenue" stroke="#4ade80" strokeWidth={2} name="Revenue" />
+                    <Line type="monotone" dataKey="leads" stroke="#38bdf8" strokeWidth={2} name="Leads" />
+                    <Line type="monotone" dataKey="deals" stroke="#a78bfa" strokeWidth={2} name="Deals" />
+                    <Line type="monotone" dataKey="revenue" stroke="#4ade80" strokeWidth={2} name="Revenue" />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -814,9 +818,9 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   <BarChart data={commissionByStage} layout="vertical" margin={{ top: 5, right: 20, left: 80, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                     <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                    <YAxis type="category" dataKey="Period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <YAxis type="category" dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }} />
-                    <Bar dataKey="Revenue" fill="#4ade80" name="Commission" />
+                    <Bar dataKey="revenue" fill="#4ade80" name="Commission" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

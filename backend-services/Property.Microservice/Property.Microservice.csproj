@@ -28,4 +28,5 @@
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.22.0" />
   </ItemGroup>
 
+  <ItemGroup><ProjectReference Include="../Shared.Access/Shared.Access.csproj" /></ItemGroup>
 </Project>
