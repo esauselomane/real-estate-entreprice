@@ -63,11 +63,13 @@ export default function CRMWorkspace() {
     setErrorMessage('');
     try {
       const metrics = await crmService.getPipelineReportSummary();
-      setSummaryReport(metrics);
+      setSummaryReport({
+        activeLeadsCount: Number(metrics?.activeLeadsCount) || 0,
+        valuationsInProcessCount: Number(metrics?.valuationsInProcessCount) || 0,
+        conveyancingAtDeedsCount: Number(metrics?.conveyancingAtDeedsCount) || 0,
+        totalPipelineEstimatedValue: Number(metrics?.totalPipelineEstimatedValue) || 0,
+      });
 
-      const [cardsRes] = await Promise.all([
-        crmService.getActiveBrochureCards().catch(() => [])
-      ]);
 
       // Companies + legal entities are always loaded so the inline create
       // pickers and the contact form's company autocomplete always have a
@@ -76,20 +78,24 @@ export default function CRMWorkspace() {
         crmService.getCompanies(coPage),
         crmService.getLegalEntities(lePage)
       ]);
-      setCompanies((prev) => resetPages ? ((companiesRes || []).items || (companiesRes || [])) : [...prev, ...((companiesRes || []).items || (companiesRes || []))]);
-      setCompaniesTotalCount((companiesRes || []).totalCount || 0);
-      setLegalEntities((prev) => resetPages ? ((legalRes || []).items || (legalRes || [])) : [...prev, ...((legalRes || []).items || (legalRes || []))]);
-      setLegalEntitiesTotalCount((legalRes || []).totalCount || 0);
+      // 🛡️ Always coerce to arrays — a null / undefined / non-array payload
+      // from the backend must never crash the render below.
+      const companiesList = (Array.isArray(companiesRes?.items) ? companiesRes.items : (Array.isArray(companiesRes) ? companiesRes : [])).filter(item => item && typeof item === "object");
+      const legalList = (Array.isArray(legalRes?.items) ? legalRes.items : (Array.isArray(legalRes) ? legalRes : [])).filter(item => item && typeof item === "object");
+      setCompanies((prev) => resetPages ? companiesList : [...prev, ...companiesList]);
+      setCompaniesTotalCount(Number(companiesRes?.totalCount || 0));
+      setLegalEntities((prev) => resetPages ? legalList : [...prev, ...legalList]);
+      setLegalEntitiesTotalCount(Number(legalRes?.totalCount || 0));
 
       if (activeTab === 'contacts') {
         const res = await crmService.getContacts(ctPage);
-        const rawItems = (res || []).items || (res || []);
-        const normalized = rawItems.map(c => ({ ...c, contactType: normalizeContactTypes(c.contactType) }));
+        const rawItems = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+        const normalized = rawItems.filter(c => c && typeof c === 'object').map(c => ({ ...c, contactType: normalizeContactTypes(c.contactType) }));
         setContacts((prev) => resetPages ? normalized : [...prev, ...normalized]);
-        setContactsTotalCount((res || []).totalCount || 0);
+        setContactsTotalCount(Number(res?.totalCount || 0));
       }
     } catch (err) {
-      setErrorMessage(err || 'Failed to populate operational ledger streams.');
+      setErrorMessage(err?.message || 'Failed to load CRM directory.');
     } finally {
       setIsLoading(false);
     }
@@ -145,8 +151,8 @@ export default function CRMWorkspace() {
 
   const filterBySearch = (items, fieldFns) => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return items;
-    return items.filter((item) =>
+    if (!term) return items || [];
+    return (items || []).filter((item) =>
       fieldFns.some((fn) => String(fn(item) ?? '').toLowerCase().includes(term))
     );
   };
@@ -323,7 +329,7 @@ export default function CRMWorkspace() {
             type="text"
             placeholder="Search this list..."
             value={searchTerm}
-            onChange={(e) => { setSearchTerm(e.target.value); setVisibleCount(PAGE_SIZE); }}
+            onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
           />
         </div>
@@ -488,12 +494,12 @@ export default function CRMWorkspace() {
           </div>
 
           {activeTab === 'companies' && filterBySearch(companies, [
-            (c) => c.businessName, (c) => c.registrationNumber, (c) => c.vatNumber, (c) => c.industryVertical
-          ]).map((comp) => (
+            (c) => c?.businessName, (c) => c?.registrationNumber, (c) => c?.vatNumber, (c) => c?.industryVertical
+          ]).filter(Boolean).map((comp) => (
             <div key={comp.companyId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center hover:border-slate-700 transition-colors">
               <div>
                 <h4 className="text-white font-bold text-base tracking-tight flex items-center gap-2"><Building2 size={16} className="text-slate-500" /> {comp.businessName}</h4>
-                <p className="text-xs text-slate-400 mt-1">Reg: {comp.registrationNumber || 'N/A'} • VAT: {comp.vatNumber || 'N/A'} • Credit Limit: R {comp.corporateCreditLimit.toLocaleString()}</p>
+                <p className="text-xs text-slate-400 mt-1">Reg: {comp.registrationNumber || 'N/A'} • VAT: {comp.vatNumber || 'N/A'} • Credit Limit: R {(comp.corporateCreditLimit || 0).toLocaleString()}</p>
                 <p className="text-[11px] text-slate-500 mt-0.5">HQ: {comp.headOfficeAddress || 'Not Provided'}</p>
               </div>
               <Can permission="agencies:edit">
@@ -503,8 +509,8 @@ export default function CRMWorkspace() {
           ))}
 
           {activeTab === 'legalEntities' && filterBySearch(legalEntities, [
-            (e) => e.registeredLegalName, (e) => e.entityTypeClassifier, (e) => e.taxRegistrationIndex, (e) => e.deedsOfficeIdentifier
-          ]).map((ent) => (
+            (e) => e?.registeredLegalName, (e) => e?.entityTypeClassifier, (e) => e?.taxRegistrationIndex, (e) => e?.deedsOfficeIdentifier
+          ]).filter(Boolean).map((ent) => (
             <div key={ent.legalEntityId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center hover:border-slate-700 transition-colors">
               <div>
                 <h4 className="text-white font-bold text-base tracking-tight">{ent.registeredLegalName}</h4>
@@ -518,10 +524,10 @@ export default function CRMWorkspace() {
           ))}
 
           {activeTab === 'contacts' && filterBySearch(contacts, [
-            (c) => c.fullName, (c) => c.contactType, (c) => c.positionJobTitle,
-            (c) => c.emailAddress, (c) => c.phoneNumber,
-            (c) => c.primaryLocation, (c) => c.budgetLimit
-          ]).map((con) => (
+            (c) => c?.fullName, (c) => c?.contactType, (c) => c?.positionJobTitle,
+            (c) => c?.emailAddress, (c) => c?.phoneNumber,
+            (c) => c?.primaryLocation, (c) => c?.budgetLimit
+          ]).filter(Boolean).map((con) => (
             <div key={con.contactId} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex justify-between items-center hover:border-slate-700 transition-colors">
               <div>
                 <h4 className="text-white font-bold text-base tracking-tight">{con.fullName}</h4>

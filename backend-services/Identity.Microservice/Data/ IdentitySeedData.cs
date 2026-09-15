@@ -356,10 +356,12 @@ namespace Identity.Microservice.Data
             // without ever reassigning a user's primary key value. Passwords are stored
             // as the plain verifier AuthController.Login compares ("Plain-text comparison
             // for local testing build").
+            await SeedAgencyHierarchyAsync(context);
+
             var roleSeedUsers = new[]
             {
                 new { Email = platformAdminEmail, UserId = "USR-ADMIN-PLAT", FullName = "Platform Administrator", SystemRole = "PlatformAdmin", TenantId = "TEN-001" },
-                new { Email = agencyAdminEmail,   UserId = "USR-ADMIN-AGY",  FullName = "Agency Administrator",     SystemRole = "AgencyAdmin",   TenantId = "TEN-001" },
+                new { Email = agencyAdminEmail,   UserId = "USR-ADMIN-AGY",  FullName = "Agency Administrator",     SystemRole = "AgencyAdmin",   TenantId = "TEN-0001" },
                 new { Email = "broker@agency.local",          UserId = "USR-BROKER-01",  FullName = "Sales Broker",             SystemRole = "Broker",         TenantId = "TEN-001" },
                 new { Email = "owner@agency.local",           UserId = "USR-OWNER-01",   FullName = "Property Owner",          SystemRole = "Owner",          TenantId = "TEN-001" },
                 new { Email = "tenant@agency.local",          UserId = "USR-TENANT-01",  FullName = "Rental Tenant",           SystemRole = "Tenant",         TenantId = "TEN-001" }
@@ -515,6 +517,15 @@ namespace Identity.Microservice.Data
                 new Permission { Key = "amenities:create", Description = "Can create amenity types", IsActive = true, Module = "Amenities" },
                 new Permission { Key = "amenities:edit", Description = "Can edit amenity types", IsActive = true, Module = "Amenities" },
                 new Permission { Key = "amenities:delete", Description = "Can delete amenity types", IsActive = true, Module = "Amenities" },
+                new Permission { Key = "leads:view", Description = "leads view", IsActive = true, Module = "leads" },
+                new Permission { Key = "leads:create", Description = "leads create", IsActive = true, Module = "leads" },
+                new Permission { Key = "leads:edit", Description = "leads edit", IsActive = true, Module = "leads" },
+                new Permission { Key = "leads:delete", Description = "leads delete", IsActive = true, Module = "leads" },
+                new Permission { Key = "deals:view", Description = "deals view", IsActive = true, Module = "deals" },
+                new Permission { Key = "deals:create", Description = "deals create", IsActive = true, Module = "deals" },
+                new Permission { Key = "deals:edit", Description = "deals edit", IsActive = true, Module = "deals" },
+                new Permission { Key = "deals:delete", Description = "deals delete", IsActive = true, Module = "deals" },
+                new Permission { Key = "billing:edit", Description = "billing edit", IsActive = true, Module = "billing" },
                 // System Administration
                 new Permission { Key = "system:roles:manage", Description = "Can manage system roles", IsActive = true, Module = "System" },
                 new Permission { Key = "system:permissions:manage", Description = "Can manage permissions", IsActive = true, Module = "System" },
@@ -590,7 +601,7 @@ namespace Identity.Microservice.Data
             }
 
             // AgencyAdmin gets agency, user, billing, and valuation permissions
-            foreach (var key in new[] { "agencies:create", "agencies:view", "agencies:edit", "agencies:delete", "users:create", "users:view", "users:edit", "users:delete", "properties:view", "units:view", "billing:view", "billing:export", "valuations:bypass" })
+            foreach (var key in new[] { "agencies:create", "agencies:view", "agencies:edit", "agencies:delete", "users:create", "users:view", "users:edit", "users:delete", "properties:view", "units:view", "billing:view", "billing:export", "valuations:bypass", "leads:view", "leads:create", "leads:edit", "leads:delete", "deals:view", "deals:create", "deals:edit", "deals:delete", "billing:edit", "properties:create", "properties:edit", "units:create", "units:edit" })
             {
                 AssignIfExists(agencyAdminRole.RoleDefId, key);
             }
@@ -656,6 +667,38 @@ namespace Identity.Microservice.Data
 
             // Apply the historical trial concession once; retain configured pricing and paid state.
             await TrialExtensionHelper.ApplyAsync(context);
+        }
+
+        private static async Task SeedAgencyHierarchyAsync(IdentityDbContext context)
+        {
+            var existingTenants = await context.TenantAgencies.ToDictionaryAsync(tenant => tenant.TenantId);
+            foreach (var trackedTenant in context.TenantAgencies.Local)
+                existingTenants.TryAdd(trackedTenant.TenantId, trackedTenant);
+
+            for (var agencyIndex = 1; agencyIndex <= 1000; agencyIndex++)
+            {
+                var tenantId = $"TEN-{agencyIndex:0000}";
+                string? parentTenantId = agencyIndex <= 8 ? null
+                    : agencyIndex % 50 == 0 ? "TEN-0001" : $"TEN-{(agencyIndex % 8) + 1:0000}";
+                if (existingTenants.TryGetValue(tenantId, out var existingTenant))
+                {
+                    if (agencyIndex == 1000 && existingTenant.AgencyName == "Agency 1000" && existingTenant.ParentTenantId == null)
+                        existingTenant.ParentTenantId = parentTenantId;
+                    continue;
+                }
+                context.TenantAgencies.Add(new TenantAgency
+                {
+                    TenantId = tenantId,
+                    AgencyName = $"Agency {agencyIndex}",
+                    ContactEmail = $"agency{agencyIndex}@realestate.local",
+                    ParentTenantId = parentTenantId,
+                    IsTrial = true,
+                    TrialStartDate = DateTime.UtcNow,
+                    TrialEndDate = DateTime.UtcNow.AddMonths(2),
+                    OperationalStatus = "Active",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
         }
 
     }

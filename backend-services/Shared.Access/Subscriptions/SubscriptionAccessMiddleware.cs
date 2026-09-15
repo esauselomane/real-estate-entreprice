@@ -42,6 +42,18 @@ public sealed class SubscriptionAccessMiddleware(RequestDelegate next)
                 await UnavailableAsync(context);
                 return;
             }
+            if (context.User.IsInRole("AgencyAdmin") || context.User.IsInRole("Admin") || context.User.IsInRole("Manager"))
+            {
+                using var scopeRequest = new HttpRequestMessage(HttpMethod.Get, $"{identityUrl!.TrimEnd('/')}/api/auth/visible-tenants");
+                scopeRequest.Headers.TryAddWithoutValidation("Authorization", context.Request.Headers.Authorization.ToString());
+                using var scopeResponse = await client.SendAsync(scopeRequest, context.RequestAborted);
+                if (!scopeResponse.IsSuccessStatusCode)
+                {
+                    await UnavailableAsync(context);
+                    return;
+                }
+                context.Items["VisibleTenantIds"] = await scopeResponse.Content.ReadFromJsonAsync<List<string>>(cancellationToken: context.RequestAborted) ?? [];
+            }
             if (status.RequiresUpgrade.Value)
             {
                 context.Response.StatusCode = StatusCodes.Status402PaymentRequired;

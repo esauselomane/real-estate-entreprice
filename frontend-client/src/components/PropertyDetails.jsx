@@ -5,7 +5,7 @@ import {
    ExternalLink, Image, Plus, Trash2, Layers,
     Building, Check, Loader2, AlertCircle, FileSignature, Wrench, FolderLock, Pencil,
     X, Save, Upload, Download, History, ChevronDown, ChevronUp, Calendar,
-    ParkingMeter, Ship, Wind, Heart, Wifi, Zap, Shield
+    ParkingMeter, Ship, Wind, Heart, Wifi, Zap, Shield, FileUp
   } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import { crmService } from '../services/crmService.js';
@@ -134,6 +134,165 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const [unitDocUploading, setUnitDocUploading] = useState(false);
   const [unitDocError, setUnitDocError] = useState('');
   const [unitDocSuccess, setUnitDocSuccess] = useState('');
+
+  // 📜 SOLE MANDATE EDITING (Task 7) — expose the Sole Mandate toggle / field
+  // in a highly visible "Listing Details" editing panel in the right sidebar so
+  // users can open / close / renew the mandate without hunting through menus.
+  const [mandateForm, setMandateForm] = useState({ startDate: '', endDate: '' });
+  const [mandateError, setMandateError] = useState('');
+  const [mandateSuccess, setMandateSuccess] = useState('');
+  const [mandateBusy, setMandateBusy] = useState(false);
+  const [showMandatePanel, setShowMandatePanel] = useState(false);
+
+  const loadMandates = async () => {
+    try {
+      const list = await propertyService.listSoleMandates(property.propertyId);
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const openSoleMandate = async (event) => {
+    event.preventDefault();
+    if (!mandateForm.startDate || !mandateForm.endDate) {
+      setMandateError('Start and end dates are required.');
+      return;
+    }
+    if (new Date(mandateForm.endDate) <= new Date(mandateForm.startDate)) {
+      setMandateError('End date must be after the start date.');
+      return;
+    }
+    setMandateBusy(true);
+    setMandateError('');
+    setMandateSuccess('');
+    try {
+      await propertyService.createSoleMandate(property.propertyId, {
+        startDate: new Date(mandateForm.startDate).toISOString(),
+        endDate: new Date(mandateForm.endDate).toISOString()
+      });
+      setMandateForm({ startDate: '', endDate: '' });
+      setMandateSuccess('Sole mandate opened.');
+      setTimeout(() => setMandateSuccess(''), 2500);
+      // Refresh the property row so the active-mandate banner updates.
+      const updated = await propertyService.getPropertyById(propertyId);
+      setProperty(updated);
+    } catch (err) {
+      setMandateError((err && err.message) || 'Could not open sole mandate.');
+    } finally {
+      setMandateBusy(false);
+    }
+  };
+
+  const closeSoleMandate = async () => {
+    const mandates = await loadMandates();
+    const active = mandates.find(m => m.isActive);
+    if (!active) {
+      setMandateError('No active sole mandate to close.');
+      return;
+    }
+    if (!window.confirm('Close the active sole mandate? The property will no longer be under exclusive mandate.')) return;
+    setMandateBusy(true);
+    setMandateError('');
+    setMandateSuccess('');
+    try {
+      await propertyService.closeSoleMandate(property.propertyId, active.mandateId);
+      setMandateSuccess('Sole mandate closed.');
+      setTimeout(() => setMandateSuccess(''), 2500);
+      const updated = await propertyService.getPropertyById(propertyId);
+      setProperty(updated);
+    } catch (err) {
+      setMandateError((err && err.message) || 'Could not close sole mandate.');
+    } finally {
+      setMandateBusy(false);
+    }
+  };
+
+  // 📄 PROPERTY-LEVEL DEEDS & VERIFICATION VAULT — upload / delete verification
+  // documents directly on the property page (Task 1). Mirrors the unit document
+  // vault pattern so the UI is consistent.
+  const [verificationDocForm, setVerificationDocForm] = useState({ name: '', description: '', file: null });
+  const [verificationDocUploading, setVerificationDocUploading] = useState(false);
+  const [verificationDocDeleting, setVerificationDocDeleting] = useState(null);
+  const [verificationDocError, setVerificationDocError] = useState('');
+  const [verificationDocSuccess, setVerificationDocSuccess] = useState('');
+
+  // Parse the verification documents array stored as JSON on the property row.
+  const parseVerificationDocs = () => {
+    if (!property || !property.verificationDocumentsJson) return [];
+    try { const documents = JSON.parse(property.verificationDocumentsJson); return Array.isArray(documents) ? documents : []; }
+    catch { return []; }
+  };
+
+  const resetVerificationDocForm = () => setVerificationDocForm({ name: '', description: '', file: null });
+
+  const uploadVerificationDocument = async (event) => {
+    event.preventDefault();
+    if (!verificationDocForm.file || !verificationDocForm.name.trim()) {
+      setVerificationDocError('A document name and file are required.');
+      return;
+    }
+    if (verificationDocForm.file.size > 10 * 1024 * 1024 || !/\.(pdf|png|jpe?g|tiff?|gif|docx?|txt)$/i.test(verificationDocForm.file.name)) {
+      setVerificationDocError('Choose a supported document no larger than 10 MB.');
+      return;
+    }
+    setVerificationDocUploading(true);
+    setVerificationDocError('');
+    setVerificationDocSuccess('');
+    try {
+      await propertyService.uploadPropertyDocument(property.propertyId, verificationDocForm.file, {
+        name: verificationDocForm.name.trim(),
+        description: verificationDocForm.description.trim()
+      });
+      // Refresh the property row so the new document appears in the vault.
+      const updated = await propertyService.getPropertyById(propertyId);
+      setProperty(updated);
+      setVerificationDocSuccess('Verification document uploaded to the deeds vault.');
+      setTimeout(() => setVerificationDocSuccess(''), 2500);
+      resetVerificationDocForm();
+    } catch (err) {
+      setVerificationDocError((err && err.message) || 'Could not upload this verification document.');
+    } finally {
+      setVerificationDocUploading(false);
+    }
+  };
+
+  const downloadVerificationDocument = async (index, name) => {
+    try {
+      const blob = await propertyService.downloadPropertyDocument(property.propertyId, index);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = name;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      setVerificationDocError('Could not download this verification document. Please retry.');
+    }
+  };
+
+  const deleteVerificationDocument = async (index) => {
+    const docs = parseVerificationDocs();
+    const target = docs[index];
+    const label = (typeof target === 'string' && target.startsWith('data:'))
+      ? `document #${index + 1}`
+      : (target || `document #${index + 1}`);
+    if (!window.confirm(`Are you sure you want to delete "${label}" from the property's deeds vault?`)) return;
+    setVerificationDocDeleting(index);
+    setVerificationDocError('');
+    setVerificationDocSuccess('');
+    try {
+      await propertyService.deletePropertyDocument(property.propertyId, index);
+      const updated = await propertyService.getPropertyById(propertyId);
+      setProperty(updated);
+      setVerificationDocSuccess('Verification document removed.');
+      setTimeout(() => setVerificationDocSuccess(''), 1500);
+    } catch (err) {
+      setVerificationDocError((err && err.message) || 'Could not remove this verification document.');
+    } finally {
+      setVerificationDocDeleting(null);
+    }
+  };
 
    // New Sub-Unit form state
    const [showAddUnitForm, setShowAddUnitForm] = useState(false);
@@ -1686,33 +1845,198 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               </div>
 
             </div>
+
+            {/* 📜 SOLE MANDATE EDITING PANEL (Task 7) — visible, intuitive location
+                inside the Listing Details / Status editing panel so users can
+                open / close / renew the mandate without hunting through menus. */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <FileSignature size={15} className="text-amber-400" /> Sole Mandate
+                </h4>
+                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${
+                  property.activeSoleMandate
+                    ? 'bg-amber-950 text-amber-400 border-amber-900'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}>
+                  {property.activeSoleMandate ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+
+              {property.activeSoleMandate && (
+                <div className="mb-3 p-2.5 bg-amber-950/30 border border-amber-900/60 rounded-xl text-[11px] text-amber-200">
+                  Active mandate from <strong>{property.activeSoleMandate.startDate?.slice(0, 10)}</strong> to <strong>{property.activeSoleMandate.endDate?.slice(0, 10)}</strong>.
+                </div>
+              )}
+
+              {mandateSuccess && (
+                <div className="p-2 mb-2 rounded-lg text-[11px] bg-emerald-950/40 border border-emerald-900 text-emerald-300">{mandateSuccess}</div>
+              )}
+              {mandateError && (
+                <div className="p-2 mb-2 rounded-lg text-[11px] bg-red-950/40 border border-red-900 text-red-300">{mandateError}</div>
+              )}
+
+              <Can permission="properties:edit">
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowMandatePanel(v => !v)}
+                    className="text-xs font-bold text-amber-300 border border-amber-900 rounded-lg px-3 py-1.5 hover:bg-amber-950 transition-colors cursor-pointer"
+                  >
+                    {showMandatePanel ? 'Collapse' : (property.activeSoleMandate ? 'Renew / Open new mandate' : 'Open sole mandate')}
+                  </button>
+
+                  {showMandatePanel && (
+                    <form onSubmit={openSoleMandate} className="space-y-2.5 animate-fade-in">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Start date</label>
+                          <input
+                            type="date"
+                            value={mandateForm.startDate}
+                            onChange={e => setMandateForm({ ...mandateForm, startDate: e.target.value })}
+                            className="w-full px-2 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">End date</label>
+                          <input
+                            type="date"
+                            value={mandateForm.endDate}
+                            onChange={e => setMandateForm({ ...mandateForm, endDate: e.target.value })}
+                            className="w-full px-2 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          disabled={mandateBusy}
+                          className="flex-1 py-2 bg-amber-600 disabled:opacity-60 text-white rounded-lg text-xs font-bold"
+                        >
+                          {mandateBusy ? 'Working…' : 'Open mandate'}
+                        </button>
+                        {property.activeSoleMandate && (
+                          <button
+                            type="button"
+                            onClick={closeSoleMandate}
+                            disabled={mandateBusy}
+                            className="flex-1 py-2 bg-red-700 disabled:opacity-60 text-white rounded-lg text-xs font-bold"
+                          >
+                            Close mandate
+                          </button>
+                        )}
+                      </div>
+                    </form>
+                  )}
+                </div>
+              </Can>
+            </div>
           </div>
 
-          {/* Verification Legal File Attachments */}
+          {/* Verification Legal File Attachments — with Add / Delete actions (Task 1) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
             <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
               <FileText size={16} className="text-blue-500" /> Deeds & Verification Vault
             </h4>
-            <div className="space-y-2">
-              {(JSON.parse(property.verificationDocumentsJson || '[]')).map((doc, idx) => {
-                const isDataUrl = doc.startsWith('data:');
-                const href = isDataUrl ? doc : `/api/properties/${property.propertyId}/documents/${idx}`;
-                let displayName = doc;
-                if (isDataUrl) {
-                  var mimeMatch = doc.match(/data:([^;]+);/);
-                  var ext = mimeMatch ? mimeMatch[1].split('/').pop()?.toUpperCase() : 'FILE';
-                  displayName = `Verification document ${idx + 1}.${ext}`;
-                } else {
-                  displayName = doc.split('/').pop()?.split('\\').pop() || doc;
-                }
-                return (
-                  <div key={idx} className="flex items-center gap-3 p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 group hover:border-slate-700 transition-colors">
-                    <FileText size={14} className="text-slate-500 group-hover:text-blue-400" />
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="truncate flex-1 font-medium text-blue-400 hover:text-blue-300 underline decoration-dotted underline-offset-2">{displayName}</a>
+
+            {/* Success / error banners */}
+            {verificationDocSuccess && (
+              <div className="p-2.5 mb-3 rounded-xl text-xs bg-emerald-950/40 border border-emerald-900 text-emerald-300">
+                {verificationDocSuccess}
+              </div>
+            )}
+            {verificationDocError && (
+              <div className="p-2.5 mb-3 rounded-xl text-xs bg-red-950/40 border border-red-900 text-red-300">
+                {verificationDocError}
+              </div>
+            )}
+
+            {/* Add-document upload form — gated by properties:edit so tenants/owners can't mutate deeds files */}
+            <Can permission="properties:edit">
+              <form onSubmit={uploadVerificationDocument} className="mb-4 p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Document name</label>
+                    <input
+                      required
+                      type="text"
+                      value={verificationDocForm.name}
+                      onChange={e => setVerificationDocForm({ ...verificationDocForm, name: e.target.value })}
+                      placeholder="e.g. Title Deed - Erf 123"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
+                    />
                   </div>
-                );
-              })}
-              {!JSON.parse(property.verificationDocumentsJson || '[]').length && <p className="text-xs text-slate-500">No verification documents are stored for this property.</p>}
+                  <div>
+                    <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">Description</label>
+                    <input
+                      type="text"
+                      value={verificationDocForm.description}
+                      onChange={e => setVerificationDocForm({ ...verificationDocForm, description: e.target.value })}
+                      placeholder="Optional note"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+                <label className="block text-[10px] uppercase text-slate-500 font-bold mb-1">
+                  Actual document
+                  <input
+                    required
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.gif,.doc,.docx,.txt"
+                    onChange={e => setVerificationDocForm({ ...verificationDocForm, file: e.target.files?.[0] || null })}
+                    className="mt-1 w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
+                  />
+                  <span className="text-[10px] text-slate-500 block mt-1">
+                    {verificationDocForm.file?.name || 'No file chosen'} · Max 10 MB · PDF / image / doc
+                  </span>
+                </label>
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={verificationDocUploading || verificationDocDeleting !== null}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 disabled:opacity-60 text-white rounded-xl text-xs font-bold"
+                  >
+                    <FileUp size={13} />{verificationDocUploading ? 'Uploading…' : 'Save to vault'}
+                  </button>
+                </div>
+              </form>
+            </Can>
+
+            {/* Stored documents list — with delete actions (Task 1) */}
+            <div className="space-y-2">
+              {parseVerificationDocs().length === 0 ? (
+                <p className="text-xs text-slate-500">No verification documents are stored for this property.</p>
+              ) : (
+                parseVerificationDocs().map((doc, idx) => {
+                  const isDataUrl = typeof doc === 'string' && doc.startsWith('data:');
+                  let displayName = typeof doc === "string" ? doc : `Verification document ${idx + 1}`;
+                  if (isDataUrl) {
+                    const mimeMatch = doc.match(/data:([^;]+);/);
+                    const ext = mimeMatch ? mimeMatch[1].split('/').pop()?.toUpperCase() : 'FILE';
+                    displayName = `Verification document ${idx + 1}.${ext}`;
+                  } else if (typeof doc === 'string') {
+                    displayName = doc.split('/').pop()?.split('\\').pop() || doc;
+                  }
+                  return (
+                    <div key={idx} className="flex items-center gap-3 p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 group hover:border-slate-700 transition-colors">
+                      <FileText size={14} className="text-slate-500 group-hover:text-blue-400" />
+                      <button type="button" onClick={() => downloadVerificationDocument(idx, displayName)} className="truncate text-left flex-1 font-medium text-blue-400 hover:text-blue-300 underline decoration-dotted underline-offset-2">{displayName}</button>
+                      <Can permission="properties:edit">
+                        <button
+                          type="button"
+                          onClick={() => deleteVerificationDocument(idx)}
+                          disabled={verificationDocUploading || verificationDocDeleting !== null}
+                          title="Delete document"
+                          className="p-1.5 text-slate-500 hover:text-red-400 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                          {verificationDocDeleting === idx ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                        </button>
+                      </Can>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 

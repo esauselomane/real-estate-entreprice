@@ -114,7 +114,7 @@ namespace Identity.Microservice.Controllers
             bool isPermittedCreator;
             if (callerRole == "PlatformAdmin")
                 isPermittedCreator = true;           // Platform admin may provision ANY role, including AgencyAdmin
-            else if (callerRole == "AgencyAdmin" && roleDef.IsAgencyScoped)
+            else if (callerRole == "AgencyAdmin" && !roleDef.IsPlatformScoped && new[] { "AgencyAdmin", "Broker", "Owner", "Tenant" }.Contains(roleDef.Name))
                 isPermittedCreator = true;            // Agency admin may only provision agency-scoped roles (Broker/Owner/Tenant)
             else
                 isPermittedCreator = false;
@@ -177,6 +177,38 @@ namespace Identity.Microservice.Controllers
                 userId = newUser.UserId,
                 boundTenantId = newUser.TenantId
             });
+        }
+
+        [Authorize]
+        [HttpGet("visible-tenants")]
+        public async Task<IActionResult> GetVisibleTenants()
+        {
+            var tenantId = User.FindFirst("TenantId")?.Value;
+            if (GetCurrentCanonicalRole() == "AgencyAdmin")
+                return Ok(await GetAgencySubtreeTenantIdsAsync(tenantId));
+            return Ok(string.IsNullOrWhiteSpace(tenantId) ? new List<string>() : new List<string> { tenantId });
+        }
+
+        [Authorize]
+        [HttpPost("agency-tenants")]
+        public async Task<IActionResult> CreateAgencyTenant(CreateAgencyTenantRequest request)
+        {
+            var role = GetCurrentCanonicalRole();
+            if (role is not ("AgencyAdmin" or "PlatformAdmin")) return Forbid();
+            var parentId = role == "AgencyAdmin" ? User.FindFirst("TenantId")?.Value : request.ParentTenantId;
+            var parent = await _dbContext.TenantAgencies.FirstOrDefaultAsync(tenant => tenant.TenantId == parentId);
+            if (role == "AgencyAdmin" && parent == null) return Forbid();
+            if (await _dbContext.TenantAgencies.AnyAsync(tenant => tenant.TenantId == request.TenantId)) return Conflict();
+            var tenant = new TenantAgency
+            {
+                TenantId = request.TenantId, AgencyName = request.AgencyName, ContactEmail = request.ContactEmail,
+                ParentTenantId = parentId, IsTrial = parent?.IsTrial ?? true,
+                TrialStartDate = parent?.TrialStartDate ?? DateTime.UtcNow,
+                TrialEndDate = parent?.TrialEndDate ?? DateTime.UtcNow.AddMonths(2)
+            };
+            _dbContext.TenantAgencies.Add(tenant);
+            await _dbContext.SaveChangesAsync();
+            return Ok(new { tenant.TenantId });
         }
 
         // --- 📨 ENDPOINT C: SELF-SERVICE PASSWORD RECOVERY RECONCILIATION ---
@@ -247,7 +279,7 @@ namespace Identity.Microservice.Controllers
             if (target == null) return NotFound(new { message = "Target account not found." });
 
             // An agency admin can only disable users inside their own tenant.
-            if (callerRole == "AgencyAdmin" && target.TenantId != callerTenantId) return Forbid();
+            if (callerRole == "AgencyAdmin" && !(await GetAgencySubtreeTenantIdsAsync(callerTenantId)).Contains(target.TenantId)) return Forbid();
 
             // Never disable yourself, and never disable an administrative peer/superior.
             if (target.UserId == callerUserId) return BadRequest(new { message = "You cannot disable your own account." });
@@ -292,9 +324,10 @@ namespace Identity.Microservice.Controllers
             else
                 _logger.LogInformation("GetUsers: listing tenant {TenantId} users by {CallerUserId}", callerTenantId, callerUserId);
 
+            var visibleTenants = await GetAgencySubtreeTenantIdsAsync(callerTenantId);
             var users = callerRole == "PlatformAdmin"
                 ? await _userRepository.Query().ToListAsync()
-                : await _userRepository.Query().Where(u => u.TenantId == callerTenantId).ToListAsync();
+                : await _userRepository.Query().Where(u => visibleTenants.Contains(u.TenantId)).ToListAsync();
 
             return Ok(users.Select(u => new
             {
@@ -322,12 +355,14 @@ namespace Identity.Microservice.Controllers
             var target = await _userRepository.Query().FirstOrDefaultAsync(u => u.UserId == userId);
             if (target == null) return NotFound(new { message = "Target account not found." });
 
-            if (callerRole == "AgencyAdmin" && target.TenantId != callerTenantId) return Forbid();
+            if (callerRole == "AgencyAdmin" && !(await GetAgencySubtreeTenantIdsAsync(callerTenantId)).Contains(target.TenantId)) return Forbid();
+
+            if (callerRole == "AgencyAdmin" && target.SystemRole is "PlatformAdmin" or "SuperAdmin") return Forbid();
 
             var roleDef = await _systemRoleRepository.Query().FirstOrDefaultAsync(r => r.Name == request.SystemRole && r.IsActive);
             if (roleDef == null) return BadRequest(new { message = "Unsupported account role." });
 
-            bool permitted = callerRole == "PlatformAdmin" || (callerRole == "AgencyAdmin" && roleDef.IsAgencyScoped);
+            bool permitted = callerRole == "PlatformAdmin" || (callerRole == "AgencyAdmin" && !roleDef.IsPlatformScoped && new[] { "AgencyAdmin", "Broker", "Owner", "Tenant" }.Contains(roleDef.Name));
             if (!permitted) return Forbid();
 
             if (target.UserId == callerUserId) return BadRequest(new { message = "You cannot change your own role." });
@@ -527,24 +562,7 @@ namespace Identity.Microservice.Controllers
                 .Where(a => !string.IsNullOrWhiteSpace(a.ParentTenantId))
                 .GroupBy(a => a.ParentTenantId!)
                 .ToDictionary(g => g.Key, g => g.Select(x => x.TenantId).ToList());
-            var queue = new Queue<string>();
-            queue.Enqueue(rootTenantId);
-            while (queue.Count > 0)
-            {
-                var current = queue.Dequeue();
-                if (byParent.TryGetValue(current, out var children))
-                {
-                    foreach (var child in children)
-                    {
-                        if (!result.Contains(child))
-                        {
-                            result.Add(child);
-                            queue.Enqueue(child);
-                        }
-                    }
-                }
-            }
-            return result;
+            return AgencyTenantScope.GetSubtree(rootTenantId, byParent);
         }
     }
 }

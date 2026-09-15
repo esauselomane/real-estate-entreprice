@@ -413,8 +413,23 @@ namespace CRM.Microservice.Controllers
             return Ok(roster);
         }
         [HttpPost("agencies")]
-        public async Task<IActionResult> CreateAgency([FromBody] AgencyRecord agency)
+        public async Task<IActionResult> CreateAgency([FromBody] CreateAgencyRequest request)
         {
+            var agency = new AgencyRecord
+            {
+                AgencyId = "AG-" + Guid.NewGuid().ToString("N"),
+                Name = request.Name,
+                TradingName = request.TradingName,
+                RegistrationNumber = request.RegistrationNumber,
+                CompanyLogoUrl = request.CompanyLogoUrl,
+                ContactEmail = request.ContactEmail,
+                HeadquartersAddress = request.HeadquartersAddress,
+                BrokerageLicense = request.BrokerageLicense,
+                ParentAgencyId = request.ParentAgencyId,
+                IsTrial = request.IsTrial,
+                TrialStartDate = request.TrialStartDate,
+                TrialEndDate = request.TrialEndDate
+            };
             var caller = User?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "Unknown";
             if (!await PermissionCheck.HasPermissionAsync("agencies:create"))
             {
@@ -422,11 +437,14 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            if (GetCurrentCanonicalRole() != "PlatformAdmin")
+            if (agency == null || string.IsNullOrWhiteSpace(agency.Name)) return BadRequest(new { message = "Agency name is required." });
+            var callerRole = GetCurrentCanonicalRole();
+            if (callerRole is not ("AgencyAdmin" or "PlatformAdmin")) return Forbid();
+            if (callerRole == "AgencyAdmin")
             {
-                Logger.LogWarning("CreateAgency: forbidden — caller {Caller} role {Role} cannot provision agencies",
-                    caller, GetCurrentCanonicalRole());
-                return Forbid();
+                var ownAgency = await AgencyRepository.Query().FirstOrDefaultAsync(record => record.TenantId == GetCurrentTenant());
+                if (ownAgency == null) return Conflict(new { message = "Your agency record is missing. Contact platform administration to link your tenant to its agency." });
+                agency.ParentAgencyId = ownAgency.AgencyId;
             }
 
             if (agency == null || string.IsNullOrWhiteSpace(agency.Name))
@@ -437,7 +455,7 @@ namespace CRM.Microservice.Controllers
 
             if (string.IsNullOrWhiteSpace(agency.AgencyId))
                 agency.AgencyId = "TEN-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
-            agency.TenantId = GetCurrentTenant();
+            agency.TenantId = "TEN-" + Guid.NewGuid().ToString("N");
             agency.CreatedAt = DateTime.UtcNow;
 
             if (!string.IsNullOrWhiteSpace(agency.ParentAgencyId))
@@ -449,6 +467,16 @@ namespace CRM.Microservice.Controllers
                     return BadRequest(new { message = $"ParentAgencyId '{agency.ParentAgencyId}' not found." });
                 }
             }
+
+            var parentTenantId = await AgencyRepository.Query().Where(record => record.AgencyId == agency.ParentAgencyId).Select(record => record.TenantId).FirstOrDefaultAsync();
+            var identityUrl = HttpContext.RequestServices.GetRequiredService<IConfiguration>()["Identity:BaseUrl"];
+            using var client = HttpClient.CreateClient();
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", Request.Headers.Authorization.ToString());
+            using var response = await client.PostAsJsonAsync($"{identityUrl?.TrimEnd('/')}/api/auth/agency-tenants", new
+            {
+                agency.TenantId, AgencyName = agency.Name, agency.ContactEmail, ParentTenantId = parentTenantId
+            });
+            if (!response.IsSuccessStatusCode) return StatusCode(502, new { message = "Could not provision the agency tenant. No CRM agency was created." });
 
             AgencyRepository.Add(agency);
             await DbContext.SaveChangesAsync();
@@ -467,7 +495,9 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
+            var visibleTenantIds = await GetVisibleTenantIdsAsync(null);
             var agency = await AgencyRepository.Query()
+                .Where(record => visibleTenantIds.Contains(record.TenantId))
                 .Include(a => a.Contacts)
                 .FirstOrDefaultAsync(a => a.AgencyId == agencyId);
             if (agency == null) return NotFound(new { message = "Agency record not found." });
@@ -482,6 +512,8 @@ namespace CRM.Microservice.Controllers
             agency.IsTrial = updatedAgency.IsTrial;
             agency.TrialStartDate = updatedAgency.TrialStartDate;
             agency.TrialEndDate = updatedAgency.TrialEndDate;
+            if (GetCurrentCanonicalRole() == "AgencyAdmin" && updatedAgency.ParentAgencyId != agency.ParentAgencyId)
+                return BadRequest(new { message = "Only a platform administrator can change the agency hierarchy." });
             if (!string.IsNullOrWhiteSpace(updatedAgency.ParentAgencyId))
             {
                 if (updatedAgency.ParentAgencyId == agencyId)
@@ -1378,7 +1410,7 @@ namespace CRM.Microservice.Controllers
             var callerId = GetCurrentUserId();
             var tenantIds = await GetVisibleTenantIdsAsync(null);
              var n = await NotificationRepository.Query().FirstOrDefaultAsync(x => x.NotificationId == notificationId
-                 && (x.UserId == callerId || tenantIds.Contains(x.TenantId)));
+                 && (x.UserId == callerId || (string.IsNullOrEmpty(x.UserId) && tenantIds.Contains(x.TenantId))));
             if (n == null) return NotFound(new { message = "Notification not found." });
             n.IsRead = true;
             await DbContext.SaveChangesAsync();

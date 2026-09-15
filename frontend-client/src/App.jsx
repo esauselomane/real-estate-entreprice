@@ -4,6 +4,7 @@ import PropertySearch from './components/PropertySearch.jsx';
 import PropertyDetails from './components/PropertyDetails.jsx';
 import ClientDetails from './components/ClientDetails.jsx';
 import CRMWorkspace from './components/CRMWorkspace.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import PropertyMapWorkspace from './components/PropertyMapWorkspace.jsx';
 import OwnersTenantsWorkspace from './components/OwnersTenantsWorkspace.jsx';
 import ReportsWorkspace from './components/ReportsWorkspace.jsx';
@@ -269,13 +270,18 @@ export default function App() {
           <PropertySearch onSelectProperty={selectProperty} />
         )}
 
-        {currentView === 'crm' && activeBrochureDealTarget ? (
-          <BrochureBuilderWorkspace 
-            dealData={activeBrochureDealTarget} 
-            onBack={clearBrochureDealTarget} 
+{currentView === 'crm' && activeBrochureDealTarget ? (
+          <BrochureBuilderWorkspace
+            dealData={activeBrochureDealTarget}
+            onBack={clearBrochureDealTarget}
           />
         ) : currentView === 'crm' ? (
-          <CRMWorkspace />
+          // 🛡️ CRM Directory is wrapped in an Error Boundary so a null /
+          // undefined data payload or a hook failure can never crash the
+          // whole app — the rest of the workspace keeps working.
+          <ErrorBoundary>
+            <CRMWorkspace />
+          </ErrorBoundary>
         ) : currentView === 'leads' ? (
           <LeadsPage />
         ) : currentView === 'deals' ? (

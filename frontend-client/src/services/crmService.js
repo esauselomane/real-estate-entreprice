@@ -268,10 +268,7 @@ export const crmService = {
 
   createAgency: async (payload) => {
     try {
-      const response = await apiClient.post('/crm/agencies', {
-        ...payload,
-        tenantId: crmService._resolveWriteTenantId() || payload.tenantId || 'TEN-001'
-      });
+      const response = await apiClient.post('/crm/agencies', { ...payload, trialStartDate: payload.trialStartDate || null, trialEndDate: payload.trialEndDate || null });
       return response.data;
     } catch (error) {
       throw normalizeError(error.response?.data?.message, 'Agency creation failed.');

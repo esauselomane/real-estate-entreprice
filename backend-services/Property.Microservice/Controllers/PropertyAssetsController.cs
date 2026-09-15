@@ -899,7 +899,8 @@ public class PropertyAssetsController : PropertyControllerBase
     [HttpGet("{propertyId:int}/documents/{index:int}")]
     public async Task<IActionResult> GetPropertyDocument(int propertyId, int index)
     {
-        var property = await PropertyRepository.Query()
+        if (!await PermissionCheck.HasPermissionAsync("properties:view")) return Forbid();
+        var property = await ApplyPropertyVisibility(PropertyRepository.Query())
             .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
         if (property == null) return NotFound(new { message = "Property not found." });
 
@@ -943,5 +944,84 @@ public class PropertyAssetsController : PropertyControllerBase
             : "application/octet-stream";
 
         return File(bytes, contentType, fileName);
+    }
+
+    // ➕ Upload a new verification document into the property's deeds vault.
+    // The document is stored as a base64 data URL inside VerificationDocumentsJson
+    // so it survives in a single row without needing a separate file table.
+    [HttpPost("{propertyId:int}/documents")]
+    public async Task<IActionResult> UploadPropertyDocument(int propertyId, [FromForm] UploadPropertyDocumentDto dto)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("properties:edit")) return Forbid();
+        var property = await ApplyPropertyVisibility(PropertyRepository.Query())
+            .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
+        if (property == null) return NotFound(new { message = "Property not found." });
+
+        if (dto.File == null || dto.File.Length == 0)
+            return BadRequest(new { message = "A file is required." });
+
+        // 🛡️ Enforce file validation — size and format limits.
+        const long maxBytes = 10 * 1024 * 1024; // 10 MB
+        if (dto.File.Length > maxBytes)
+            return BadRequest(new { message = $"File exceeds the 10 MB size limit. Selected file is {dto.File.Length / (1024.0 * 1024.0):0.0} MB." });
+
+        var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".gif", ".doc", ".docx", ".txt"
+        };
+        var ext = Path.GetExtension(dto.File.FileName);
+        if (string.IsNullOrEmpty(ext) || !allowedExtensions.Contains(ext))
+            return BadRequest(new { message = $"File type '{ext}' is not supported. Allowed: {string.Join(", ", allowedExtensions)}." });
+
+        // Convert the file to a base64 data URL so the document is embedded
+        // directly in the property row (no separate file-table plumbing).
+        string dataUrl;
+        await using (var stream = new MemoryStream())
+        {
+            await dto.File.CopyToAsync(stream);
+            var base64 = Convert.ToBase64String(stream.ToArray());
+            var contentType = ext.ToLowerInvariant() switch
+            {
+                ".pdf" => "application/pdf", ".png" => "image/png",
+                ".jpg" or ".jpeg" => "image/jpeg", ".tif" or ".tiff" => "image/tiff",
+                ".gif" => "image/gif", ".txt" => "text/plain",
+                ".doc" => "application/msword",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                _ => "application/octet-stream"
+            };
+            dataUrl = $"data:{contentType};base64,{base64}";
+        }
+
+        var docs = string.IsNullOrWhiteSpace(property.VerificationDocumentsJson)
+            ? new List<string>()
+            : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.VerificationDocumentsJson) ?? new List<string>());
+
+        docs.Add(dataUrl);
+        property.VerificationDocumentsJson = System.Text.Json.JsonSerializer.Serialize(docs);
+        await DbContext.SaveChangesAsync();
+
+        return Ok(new { message = "Verification document uploaded.", index = docs.Count - 1 });
+    }
+
+    // ❌ Delete a verification document from the property's deeds vault.
+    [HttpDelete("{propertyId:int}/documents/{index:int}")]
+    public async Task<IActionResult> DeletePropertyDocument(int propertyId, int index)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("properties:edit")) return Forbid();
+        var property = await ApplyPropertyVisibility(PropertyRepository.Query())
+            .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
+        if (property == null) return NotFound(new { message = "Property not found." });
+
+        var docs = string.IsNullOrWhiteSpace(property.VerificationDocumentsJson)
+            ? new List<string>()
+            : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.VerificationDocumentsJson) ?? new List<string>());
+
+        if (index < 0 || index >= docs.Count) return NotFound(new { message = "Document not found." });
+
+        docs.RemoveAt(index);
+        property.VerificationDocumentsJson = System.Text.Json.JsonSerializer.Serialize(docs);
+        await DbContext.SaveChangesAsync();
+
+        return Ok(new { message = "Verification document removed." });
     }
 }

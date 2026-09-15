@@ -262,7 +262,11 @@ export default function LeadsPage() {
   });
 
   const stageCounts = LEAD_STAGES.reduce((acc, stage) => { acc[stage] = Number(stageAggregates[stage] || 0); return acc; }, {});
-  const chartData = LEAD_STAGES.map((stage) => ({ name: stage.replace(/([A-Z])/g, ' $1').trim(), value: stageCounts[stage], color: LEAD_STAGE_COLORS[stage] })).filter((d) => d.value > 0);
+  // 📊 Render EVERY active lead stage on the chart — including stages with a
+  // zero count — so the pipeline always shows the full funnel. Filtering out
+  // zero-value stages made the chart "missing" stages and hid the fact that
+  // the pipeline has gaps (e.g. no leads in Negotiation yet).
+  const chartData = [...new Set([...LEAD_STAGES, ...Object.keys(stageAggregates)])].map((stage) => ({ name: stage.replace(/([A-Z])/g, ' $1').trim(), value: Number(stageAggregates[stage] || 0), color: LEAD_STAGE_COLORS[stage] || '#64748b' }));
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -306,10 +310,10 @@ export default function LeadsPage() {
         {chartData.length === 0 ? (
           <p className="text-xs text-slate-500 text-center py-8">No leads yet. Create your first lead above.</p>
         ) : (
-          <ResponsiveContainer width="100%" height={250}>
+          <ResponsiveContainer width="100%" height={Math.max(250, chartData.length * 36)}>
             <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <XAxis type="number" hide />
-              <YAxis dataKey="name" type="category" tick={{ fontSize: 11, fill: '#94a3b8' }} width={140} />
+              <YAxis interval={0} dataKey="name" type="category" tick={{ fontSize: 11, fill: '#94a3b8' }} width={140} />
               <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#cbd5e1', fontSize: 11 }} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
               <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                 {chartData.map((entry, index) => (<Cell key={index} fill={entry.color} />))}

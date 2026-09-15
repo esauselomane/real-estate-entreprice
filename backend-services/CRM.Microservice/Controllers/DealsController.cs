@@ -468,8 +468,7 @@ public class DealsController : CRMControllerBase
             IQueryable<BrochureCard> query = BrochureCardRepository.Query()
                 .Where(c => !c.IsDeleted &&
                             (c.Status == BrochureCardStatus.Active || c.Status == BrochureCardStatus.Generating));
-            if (visibleTenants.Count > 0)
-                query = query.Where(c => visibleTenants.Contains(c.TenantId));
+            query = query.Where(c => visibleTenants.Contains(c.TenantId));
             if (isBroker) query = query.Where(c => c.BrokerAgentId == callerName);
 
             var cards = await query.Select(c => new

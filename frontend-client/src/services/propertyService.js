@@ -428,6 +428,41 @@ export const propertyService = {
     }
   },
 
+  // --- 📄 DEEDS & VERIFICATION DOCUMENT VAULT (property-level) ---
+
+    // Upload a new verification document into the property's deeds vault.
+    // The file is sent as multipart/form-data so the backend can enforce
+    // size and format limits server-side.
+    downloadPropertyDocument: async (propertyId, index) => {
+      const response = await apiClient.get(`/properties/${propertyId}/documents/${index}`, { responseType: 'blob' });
+      return response.data;
+    },
+
+    uploadPropertyDocument: async (propertyId, file, { name, description } = {}) => {
+      try {
+        const formData = new FormData();
+        formData.append('File', file);
+        if (name) formData.append('Name', name);
+        if (description) formData.append('Description', description);
+        const response = await apiClient.post(`/properties/${propertyId}/documents`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        return response.data;
+      } catch (error) {
+        throw new Error(toMessage(error.response?.data?.message, 'Failed to upload verification document.'));
+      }
+    },
+
+    // Delete a verification document from the property's deeds vault.
+    deletePropertyDocument: async (propertyId, index) => {
+      try {
+        const response = await apiClient.delete(`/properties/${propertyId}/documents/${index}`);
+        return response.data;
+      } catch (error) {
+        throw new Error(toMessage(error.response?.data?.message, 'Failed to delete verification document.'));
+      }
+    },
+
   // --- 🔗 EXTERNAL PORTAL SYNDICATION CHECKBOX TRACKER TOGGLE ---
   togglePortalSyndication: async (propertyId, platformId, syndicateStatus) => {
     try {

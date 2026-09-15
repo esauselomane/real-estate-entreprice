@@ -185,6 +185,7 @@ export const authService = {
     logout: () => {
      localStorage.removeItem('user_session_jwt');
      localStorage.removeItem('user_profile_data');
+     localStorage.removeItem('active_tenant_override');
      window.location.reload(); // Instantly hard resets the active canvas back to the login screen gate
     }
   };
