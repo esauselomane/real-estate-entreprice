@@ -51,13 +51,16 @@ builder.Services.AddHttpClient<PayFastGateway>(client =>
 });
 
 // Payment Services
-builder.Services.AddScoped<IPaymentGateway, PeachPaymentsGateway>();
-builder.Services.AddScoped<IPaymentGateway, PayFastGateway>();
+builder.Services.AddScoped<IPaymentGateway>(ResolvePeachGateway);
+builder.Services.AddScoped<IPaymentGateway>(ResolvePayFastGateway);
+builder.Services.Configure<PaymentSettings>(builder.Configuration.GetSection("Payments"));
 builder.Services.AddScoped<IPaymentGatewayFactory, PaymentGatewayFactory>();
 builder.Services.AddScoped<PaymentOrchestrationService>();
+builder.Services.AddHostedService<BillingNotificationWorker>();
 
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<Identity.Microservice.Services.Accounts.PasswordRecoveryService>();
 
 builder.Services.AddAuthorization(options =>
 {
@@ -146,3 +149,6 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "identity" }));
 app.Run();
+
+static IPaymentGateway ResolvePeachGateway(IServiceProvider services) => services.GetRequiredService<PeachPaymentsGateway>();
+static IPaymentGateway ResolvePayFastGateway(IServiceProvider services) => services.GetRequiredService<PayFastGateway>();

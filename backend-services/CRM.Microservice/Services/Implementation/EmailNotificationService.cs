@@ -1,3 +1,4 @@
+using CRM.Microservice.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Net;
@@ -7,58 +8,31 @@ namespace CRM.Microservice.Services.Implementation
 {
     public interface IEmailNotificationService
     {
-        Task SendBrochureGeneratedEmailAsync(string toEmail, string toName, string brokerName, string dealId, string dealAddress, string generatedAt, string clientName, string marketClass, int unitCount, string downloadUrl, string supportEmail, CancellationToken ct = default);
+        Task SendReminderEmailAsync(string toEmail, string toName, string title, string body, string agencyName, string? agencyLogoUrl, CancellationToken cancellationToken = default);
+        Task SendBrochureGeneratedEmailAsync(string toEmail, string toName, string brokerName, string dealId, string dealAddress, string generatedAt, string clientName, string marketClass, int unitCount, string downloadUrl, string supportEmail, CancellationToken ct = default, string agencyName = "Your agency", string? agencyLogoUrl = null);
     }
 
     public class EmailNotificationService : IEmailNotificationService
     {
         private readonly IConfiguration _configuration;
         private readonly ILogger<EmailNotificationService> _logger;
-        private readonly string _templateRoot;
         private readonly EmailSettings _emailSettings;
 
         public EmailNotificationService(IConfiguration configuration, ILogger<EmailNotificationService> logger)
         {
             _configuration = configuration;
             _logger = logger;
-            _templateRoot = configuration["Email:TemplatesRootPath"] ?? Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "templates");
             _emailSettings = configuration.GetSection("Email").Get<EmailSettings>() ?? new EmailSettings();
         }
 
-        public async Task SendBrochureGeneratedEmailAsync(string toEmail, string toName, string brokerName, string dealId, string dealAddress, string generatedAt, string clientName, string marketClass, int unitCount, string downloadUrl, string supportEmail, CancellationToken ct = default)
+        public async Task SendBrochureGeneratedEmailAsync(string toEmail, string toName, string brokerName, string dealId, string dealAddress, string generatedAt, string clientName, string marketClass, int unitCount, string downloadUrl, string supportEmail, CancellationToken ct = default, string agencyName = "Your agency", string? agencyLogoUrl = null)
         {
             try
             {
-                var templatePath = Path.Combine(_templateRoot, "notification", "brochure-generated.html");
-                string htmlBody;
-
-                if (File.Exists(templatePath))
-                {
-                    htmlBody = await File.ReadAllTextAsync(templatePath, ct);
-                    htmlBody = htmlBody
-                        .Replace("{{broker_name}}", brokerName)
-                        .Replace("{{deal_id}}", dealId)
-                        .Replace("{{deal_address}}", dealAddress)
-                        .Replace("{{generated_at}}", generatedAt)
-                        .Replace("{{client_name}}", clientName)
-                        .Replace("{{market_class}}", marketClass)
-                        .Replace("{{unit_count}}", unitCount.ToString())
-                        .Replace("{{download_url}}", downloadUrl)
-                        .Replace("{{support_email}}", supportEmail);
-
-                    // Handle conditional market class
-                    if (string.IsNullOrEmpty(marketClass))
-                        htmlBody = htmlBody.Replace("{{#if market_class}}", "").Replace("{{/if}}", "").Replace("{{market_class}}", "");
-                    else
-                        htmlBody = htmlBody.Replace("{{#if market_class}}", "").Replace("{{/if}}", "");
-                }
-                else
-                {
-                    _logger.LogWarning("Brochure email template not found at {TemplatePath}", templatePath);
-                    htmlBody = $"<h1>Brochure Generated</h1><p>Hi {toName},</p><p>Your brochure for deal {dealId} ({dealAddress}) is ready. <a href=\"{downloadUrl}\">Download here</a>.</p>";
-                }
-
-                await SendEmailAsync(toEmail, toName, "Brochure Generated — " + dealAddress, htmlBody, ct);
+                var applicationUrl = _configuration["Frontend:BaseUrl"] ?? "http://localhost:5173";
+                var body = $"<p>The brochure for <strong>{Shared.Presentation.Email.EmailLayout.Encode(clientName)}</strong> is ready to review.</p><p>Deal reference: {Shared.Presentation.Email.EmailLayout.Encode(dealId)}<br>Prepared: {Shared.Presentation.Email.EmailLayout.Encode(generatedAt)}<br>Selected units: {unitCount}</p><p>Sign in to your workspace to review and download the document before sharing it with your client.</p>";
+                var content = new Shared.Presentation.Email.EmailContent(agencyName, "Your property brochure is ready", $"Hello {toName},", body, "Open agency workspace", applicationUrl, agencyLogoUrl);
+                await SendEmailAsync(toEmail, toName, content, ct);
             }
             catch (Exception ex)
             {
@@ -66,22 +40,33 @@ namespace CRM.Microservice.Services.Implementation
             }
         }
 
-        private async Task SendEmailAsync(string toEmail, string toName, string subject, string htmlBody, CancellationToken ct)
+        public async Task SendReminderEmailAsync(string toEmail, string toName, string title, string body, string agencyName, string? agencyLogoUrl, CancellationToken cancellationToken = default)
+        {
+            var encodedBody = Shared.Presentation.Email.EmailLayout.Encode(body).Replace("\n", "<br>");
+            var content = new Shared.Presentation.Email.EmailContent(agencyName, title, $"Hello {toName},",
+                $"<p>{encodedBody}</p><p>Please review this reminder in your agency workspace.</p>",
+                "Review reminder", _configuration["Frontend:BaseUrl"], agencyLogoUrl);
+            try
+            {
+                await SendEmailAsync(toEmail, toName, content, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Reminder email delivery failed for {Recipient}", toEmail);
+            }
+        }
+
+        private async Task SendEmailAsync(string toEmail, string toName, Shared.Presentation.Email.EmailContent content, CancellationToken ct)
         {
             if (string.IsNullOrEmpty(_emailSettings.Host))
             {
-                _logger.LogInformation("[EMAIL SIMULATION]: {Subject} -> {RecipientName} ({Email})", subject, toName, toEmail);
+                _logger.LogInformation("[EMAIL SIMULATION]: {Subject} -> {RecipientName} ({Email})", content.Subject, toName, toEmail);
                 return;
             }
 
-            using var message = new MailMessage(_emailSettings.FromAddress, toEmail)
-            {
-                Subject = subject,
-                Body = htmlBody,
-                IsBodyHtml = true,
-                From = new MailAddress(_emailSettings.FromAddress, _emailSettings.FromName)
-            };
-            message.ReplyToList.Add(new MailAddress(_emailSettings.SupportEmail, "Support"));
+            using var message = Shared.Presentation.Email.EmailLayout.CreateMessage(_emailSettings.FromAddress, toEmail, content);
+            if (MailAddress.TryCreate(_emailSettings.SupportEmail, out var supportAddress))
+                message.ReplyToList.Add(supportAddress);
 
             using var client = new SmtpClient();
             client.Host = _emailSettings.Host;
@@ -97,16 +82,4 @@ namespace CRM.Microservice.Services.Implementation
         }
     }
 
-    public class EmailSettings
-    {
-        public string Host { get; set; } = string.Empty;
-        public int Port { get; set; } = 587;
-        public bool EnableSsl { get; set; } = true;
-        public string Username { get; set; } = string.Empty;
-        public string Password { get; set; } = string.Empty;
-        public string FromAddress { get; set; } = string.Empty;
-        public string FromName { get; set; } = "Real Estate Enterprise";
-        public string SupportEmail { get; set; } = string.Empty;
-        public string TemplatesRootPath { get; set; } = string.Empty;
-    }
 }

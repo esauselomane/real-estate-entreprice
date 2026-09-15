@@ -699,15 +699,10 @@ public class PropertyAssetsController : PropertyControllerBase
         [FromQuery] string? linkedBrokerId = null)
     {
         var tenantIds = ParseTenantList(tenantId);
-        IQueryable<PropertyAsset> q;
-        if (tenantIds.Count == 0)
-        {
-            q = PropertyRepository.Query().Where(p => p.IsForSale || p.IsForRent);
-        }
-        else
-        {
-            q = PropertyRepository.Query().Where(p => tenantIds.Contains(p.TenantId) && (p.IsForSale || p.IsForRent));
-        }
+        var q = ApplyPropertyVisibility(PropertyRepository.Query())
+            .Where(property => property.IsForSale || property.IsForRent);
+        if (tenantIds.Count > 0)
+            q = q.Where(property => tenantIds.Contains(property.TenantId));
         var count = await q.CountAsync();
         if (count == 0) return Ok(new { activeListings = 0, averageDom = 0 });
         var avg = await q.Select(p => (double)EF.Functions.DateDiffDay(p.CreatedAt, DateTime.UtcNow)).AverageAsync();
@@ -721,7 +716,7 @@ public class PropertyAssetsController : PropertyControllerBase
     public async Task<IActionResult> GetSoleMandatesCount([FromQuery] string? tenantId = null)
     {
         var tenantIds = ParseTenantList(tenantId);
-        IQueryable<PropertyAsset> query = PropertyRepository.Query()
+        IQueryable<PropertyAsset> query = ApplyPropertyVisibility(PropertyRepository.Query())
             .Where(p => p.SoleMandates.Any(sm => sm.IsActive));
 
         if (tenantIds.Count > 0)
@@ -733,7 +728,7 @@ public class PropertyAssetsController : PropertyControllerBase
         return Ok(new { totalSoleMandates = count });
     }
 
-    // 📈 Property growth over the last N months for the AgencyGlance charts.
+    // Cumulative property count at each month end; current month is counted to date.
     // Accepts the same tenantId formats as sole-mandates.
     [HttpGet("stats/growth")]
     public async Task<IActionResult> GetPropertiesGrowth(
@@ -741,27 +736,23 @@ public class PropertyAssetsController : PropertyControllerBase
         [FromQuery] int months = 6)
     {
         var tenantIds = ParseTenantList(tenantId);
-        var cutoff = DateTime.UtcNow.AddMonths(-months).Date;
-
-        IQueryable<PropertyAsset> query = PropertyRepository.Query()
-            .Where(p => p.CreatedAt >= cutoff);
-
+        months = Math.Clamp(months, 1, 24);
+        var now = DateTime.UtcNow;
+        var firstMonth = new DateTime(now.Year, now.Month, 1).AddMonths(1 - months);
+        var query = ApplyPropertyVisibility(PropertyRepository.Query());
         if (tenantIds.Count > 0)
-        {
-            query = query.Where(p => tenantIds.Contains(p.TenantId));
-        }
+            query = query.Where(property => tenantIds.Contains(property.TenantId));
 
-        var monthly = await query
-            .GroupBy(p => new { Year = p.CreatedAt.Year, Month = p.CreatedAt.Month })
-            .Select(g => new
-            {
-                Year = g.Key.Year,
-                Month = g.Key.Month,
-                PropertyCount = g.Count()
-            })
-            .OrderBy(x => x.Year)
-            .ThenBy(x => x.Month)
-            .ToListAsync();
+        // Include records created before the visible window. Historical totals
+        // describe surviving records, since deleted-property history is not stored.
+        var monthly = new List<PropertyCountAtMonth>();
+        for (var index = 0; index < months; index++)
+        {
+            var month = firstMonth.AddMonths(index);
+            var endExclusive = month.AddMonths(1);
+            var count = await query.CountAsync(property => property.CreatedAt < endExclusive && property.CreatedAt <= now);
+            monthly.Add(new PropertyCountAtMonth(month.Year, month.Month, count));
+        }
 
         return Ok(monthly);
     }
@@ -908,7 +899,8 @@ public class PropertyAssetsController : PropertyControllerBase
     [HttpGet("{propertyId:int}/documents/{index:int}")]
     public async Task<IActionResult> GetPropertyDocument(int propertyId, int index)
     {
-        var property = await PropertyRepository.Query()
+        if (!await PermissionCheck.HasPermissionAsync("properties:view")) return Forbid();
+        var property = await ApplyPropertyVisibility(PropertyRepository.Query())
             .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
         if (property == null) return NotFound(new { message = "Property not found." });
 
@@ -952,5 +944,84 @@ public class PropertyAssetsController : PropertyControllerBase
             : "application/octet-stream";
 
         return File(bytes, contentType, fileName);
+    }
+
+    // ➕ Upload a new verification document into the property's deeds vault.
+    // The document is stored as a base64 data URL inside VerificationDocumentsJson
+    // so it survives in a single row without needing a separate file table.
+    [HttpPost("{propertyId:int}/documents")]
+    public async Task<IActionResult> UploadPropertyDocument(int propertyId, [FromForm] UploadPropertyDocumentDto dto)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("properties:edit")) return Forbid();
+        var property = await ApplyPropertyVisibility(PropertyRepository.Query())
+            .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
+        if (property == null) return NotFound(new { message = "Property not found." });
+
+        if (dto.File == null || dto.File.Length == 0)
+            return BadRequest(new { message = "A file is required." });
+
+        // 🛡️ Enforce file validation — size and format limits.
+        const long maxBytes = 10 * 1024 * 1024; // 10 MB
+        if (dto.File.Length > maxBytes)
+            return BadRequest(new { message = $"File exceeds the 10 MB size limit. Selected file is {dto.File.Length / (1024.0 * 1024.0):0.0} MB." });
+
+        var allowedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".gif", ".doc", ".docx", ".txt"
+        };
+        var ext = Path.GetExtension(dto.File.FileName);
+        if (string.IsNullOrEmpty(ext) || !allowedExtensions.Contains(ext))
+            return BadRequest(new { message = $"File type '{ext}' is not supported. Allowed: {string.Join(", ", allowedExtensions)}." });
+
+        // Convert the file to a base64 data URL so the document is embedded
+        // directly in the property row (no separate file-table plumbing).
+        string dataUrl;
+        await using (var stream = new MemoryStream())
+        {
+            await dto.File.CopyToAsync(stream);
+            var base64 = Convert.ToBase64String(stream.ToArray());
+            var contentType = ext.ToLowerInvariant() switch
+            {
+                ".pdf" => "application/pdf", ".png" => "image/png",
+                ".jpg" or ".jpeg" => "image/jpeg", ".tif" or ".tiff" => "image/tiff",
+                ".gif" => "image/gif", ".txt" => "text/plain",
+                ".doc" => "application/msword",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                _ => "application/octet-stream"
+            };
+            dataUrl = $"data:{contentType};base64,{base64}";
+        }
+
+        var docs = string.IsNullOrWhiteSpace(property.VerificationDocumentsJson)
+            ? new List<string>()
+            : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.VerificationDocumentsJson) ?? new List<string>());
+
+        docs.Add(dataUrl);
+        property.VerificationDocumentsJson = System.Text.Json.JsonSerializer.Serialize(docs);
+        await DbContext.SaveChangesAsync();
+
+        return Ok(new { message = "Verification document uploaded.", index = docs.Count - 1 });
+    }
+
+    // ❌ Delete a verification document from the property's deeds vault.
+    [HttpDelete("{propertyId:int}/documents/{index:int}")]
+    public async Task<IActionResult> DeletePropertyDocument(int propertyId, int index)
+    {
+        if (!await PermissionCheck.HasPermissionAsync("properties:edit")) return Forbid();
+        var property = await ApplyPropertyVisibility(PropertyRepository.Query())
+            .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
+        if (property == null) return NotFound(new { message = "Property not found." });
+
+        var docs = string.IsNullOrWhiteSpace(property.VerificationDocumentsJson)
+            ? new List<string>()
+            : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.VerificationDocumentsJson) ?? new List<string>());
+
+        if (index < 0 || index >= docs.Count) return NotFound(new { message = "Document not found." });
+
+        docs.RemoveAt(index);
+        property.VerificationDocumentsJson = System.Text.Json.JsonSerializer.Serialize(docs);
+        await DbContext.SaveChangesAsync();
+
+        return Ok(new { message = "Verification document removed." });
     }
 }

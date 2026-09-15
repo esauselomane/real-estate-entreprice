@@ -1,5 +1,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
+COPY ["backend-services/Shared.Presentation/", "backend-services/Shared.Presentation/"]
+COPY ["frontend-client/public/logo.jpg", "frontend-client/public/logo.jpg"]
 
 COPY ["backend-services/Identity.Microservice/Identity.Microservice.csproj", "backend-services/Identity.Microservice/"]
 COPY ["backend-services/Identity.Microservice/appsettings.json", "backend-services/Identity.Microservice/"]

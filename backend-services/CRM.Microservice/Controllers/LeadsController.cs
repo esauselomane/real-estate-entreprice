@@ -57,7 +57,8 @@ public class LeadsController : CRMControllerBase
         [FromQuery] decimal? budgetMin,
         [FromQuery] decimal? budgetMax,
         [FromQuery] string? propertyType,
-        [FromQuery] int limit = 3)
+        [FromQuery] int limit = 3,
+        [FromQuery] string? tenantId = null)
     {
         if (!await PermissionCheck.HasPermissionAsync("leads:view"))
         {
@@ -65,7 +66,10 @@ public class LeadsController : CRMControllerBase
             return Forbid();
         }
 
-        var tenantId = GetCurrentTenant();
+        tenantId = string.IsNullOrWhiteSpace(tenantId) || tenantId == "__all__" ? GetCurrentTenant() : tenantId;
+        var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
+        if (!visibleTenants.Contains(tenantId)) return Forbid();
+        limit = Math.Clamp(limit, 1, 3);
         var currentUserId = GetCurrentUserId();
 
         var suggested = await BrokerScoreService.GetSuggestedBrokersAsync(

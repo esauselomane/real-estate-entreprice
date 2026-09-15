@@ -115,6 +115,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<Shared.Access.Subscriptions.SubscriptionAccessMiddleware>();
 
 app.MapControllers();
 

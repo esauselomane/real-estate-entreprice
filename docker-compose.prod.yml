@@ -101,6 +101,7 @@ services:
       - "${PROPERTY_PORT:-5002}:5002"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      - Identity__BaseUrl=http://identity-service:5001
       - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=${PROPERTY_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
       - Jwt__Secret=${JWT_SECRET}
       - Jwt__Issuer=${JWT_ISSUER}
@@ -130,6 +131,8 @@ services:
       - "${CRM_PORT:-5003}:5003"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      - GoogleMaps__ApiKey=${GoogleMaps__ApiKey:-}
+      - Identity__BaseUrl=http://identity-service:5001
       - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=${CRM_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;
       - Jwt__Secret=${JWT_SECRET}
       - Jwt__Issuer=${JWT_ISSUER}
@@ -291,6 +294,8 @@ services:
     build:
       context: .
       dockerfile: frontend-client/Dockerfile
+      args:
+        VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY:-}
       args:
         - VITE_API_BASE_URL=${NEXT_PUBLIC_GATEWAY_URL}
     container_name: realestate-frontend-client

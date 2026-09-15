@@ -172,10 +172,20 @@ export const authService = {
       }
     },
 
+    resetPassword: async (token, newPassword, confirmPassword) => {
+      try {
+        const response = await apiClient.post('/auth/reset-password', { token, newPassword, confirmPassword });
+        return response.data;
+      } catch (error) {
+        throw new Error(error.response?.data?.message || 'Unable to reset password. Please request a new link.');
+      }
+    },
+
     // --- 👤 LOCAL ACCOUNT STATUS CLEARING ---
     logout: () => {
      localStorage.removeItem('user_session_jwt');
      localStorage.removeItem('user_profile_data');
+     localStorage.removeItem('active_tenant_override');
      window.location.reload(); // Instantly hard resets the active canvas back to the login screen gate
     }
   };

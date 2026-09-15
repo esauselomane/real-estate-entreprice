@@ -71,7 +71,7 @@ export function AuthProvider({ children }) {
       dispatch({
         type: 'RESTORE_SESSION',
         payload: {
-          profile: { ...parsedProfile, role: normalizeRole(parsedProfile.role) },
+          profile: { ...parsedProfile, originalRole: parsedProfile.originalRole || parsedProfile.role, role: normalizeRole(parsedProfile.role) },
           role: normalizeRole(parsedProfile.role),
         },
       });
@@ -90,7 +90,7 @@ export function AuthProvider({ children }) {
       dispatch({ type: 'LOGIN_START' });
       try {
         const loginPayload = await authService.login(email, password);
-        const normalizedProfile = { ...loginPayload.profile, role: normalizeRole(loginPayload.profile.role) };
+        const normalizedProfile = { ...loginPayload.profile, originalRole: loginPayload.profile.role, role: normalizeRole(loginPayload.profile.role) };
         dispatch({
           type: 'LOGIN_SUCCESS',
           payload: { profile: normalizedProfile, role: normalizedProfile.role },

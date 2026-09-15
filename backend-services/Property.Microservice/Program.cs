@@ -371,6 +371,7 @@ using (var serviceScope = app.Services.CreateScope())
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<Shared.Access.Subscriptions.SubscriptionAccessMiddleware>();
 
 // 7. MAP TARGET REST API ENDPOINT CONTROLLERS
 app.MapControllers();

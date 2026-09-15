@@ -88,21 +88,9 @@ public abstract class PropertyControllerBase : ControllerBase
     protected bool IsReadOnlyRole() => ReadOnlyRoles.Contains(GetCurrentCanonicalRole() ?? string.Empty);
 
     /// <summary>
-    /// Apply role + tenant scoping to a PropertyAsset queryable so search / look-ups
-    /// only surface properties a role is entitled to see. When the caller is a
-    /// PlatformAdmin/AgencyAdmin and supplies ?tenantId=<id>, that override is
-    /// honored in place of the JWT-bound tenantId (the JWT tenant itself is
-    /// never mutated). The override value is a real TenantId drawn from the
-    /// AgencyRecord.TenantId of the selected agency.
+    /// Applies role and tenant visibility. Agency administrators may filter only within
+    /// the tenant hierarchy verified by Identity; platform administrators may view all agencies.
     /// </summary>
-    /// <remarks>
-    /// Subtree support: the override may also be a comma-separated list
-    /// of TenantIds (e.g. ?tenantId=TEN-0001,TEN-0010,TEN-0100). This is
-    /// how the CRM hands a parent-agency's full subtree down to the
-    /// property service for dashboard aggregation — the property service
-    /// doesn't know about agency hierarchy on its own, so the CRM expands
-    /// the subtree and the property service filters on the resulting set.
-    /// </remarks>
     protected IQueryable<PropertyAsset> ApplyPropertyVisibility(IQueryable<PropertyAsset> query)
     {
         var role = GetCurrentCanonicalRole();
@@ -112,6 +100,18 @@ public abstract class PropertyControllerBase : ControllerBase
             && overrideTenantId != "__all__";
 
         if (role == "PlatformAdmin" && !usingOverride) return query;
+
+        if (role == "AgencyAdmin")
+        {
+            var allowedTenantIds = HttpContext.Items["VisibleTenantIds"] as List<string>
+                ?? new List<string> { User.FindFirst("TenantId")?.Value ?? string.Empty };
+            if (usingOverride)
+            {
+                var requestedTenantIds = overrideTenantId!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                allowedTenantIds = allowedTenantIds.Intersect(requestedTenantIds, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            return query.Where(property => allowedTenantIds.Contains(property.TenantId));
+        }
 
         if (usingOverride)
         {
@@ -164,31 +164,7 @@ public abstract class PropertyControllerBase : ControllerBase
         var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrWhiteSpace(userTenantId) && role != "PlatformAdmin") return null;
 
-        var overrideTenantId = HttpContext?.Request?.Query["tenantId"].ToString();
-        var usingOverride = (role == "PlatformAdmin" || role == "AgencyAdmin")
-            && !string.IsNullOrWhiteSpace(overrideTenantId)
-            && overrideTenantId != "__all__";
-        var effectiveTenantId = usingOverride ? overrideTenantId : userTenantId;
-
-        var isPlatformAdmin = role == "PlatformAdmin";
-        var propertyQuery = PropertyRepository.Query().Where(p => p.PropertyId == propertyId);
-        if (usingOverride)
-        {
-            var tenantIds = overrideTenantId
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (tenantIds.Count == 1) propertyQuery = propertyQuery.Where(p => p.TenantId == tenantIds[0]);
-            else if (tenantIds.Count > 1) propertyQuery = propertyQuery.Where(p => tenantIds.Contains(p.TenantId));
-        }
-        else if (!isPlatformAdmin)
-        {
-            propertyQuery = propertyQuery.Where(p => p.TenantId == userTenantId);
-        }
-
-        if (role == "Owner" && !string.IsNullOrWhiteSpace(userId))
-            propertyQuery = propertyQuery.Where(p => p.LinkedOwnerId == userId);
+        var propertyQuery = ApplyPropertyVisibility(PropertyRepository.Query()).Where(p => p.PropertyId == propertyId);
 
         var propertyExists = await propertyQuery.AnyAsync();
         if (!propertyExists) return null;

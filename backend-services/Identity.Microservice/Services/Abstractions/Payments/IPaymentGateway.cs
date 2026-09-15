@@ -13,6 +13,9 @@ namespace Identity.Microservice.Services.Abstractions.Payments
         /// </summary>
         PaymentGateway GatewayType { get; }
 
+        /// <summary>Whether this provider and environment support customer card management.</summary>
+        bool SupportsPortal { get; }
+
         /// <summary>
         /// Create a checkout session for subscription signup.
         /// </summary>

@@ -20,6 +20,8 @@ namespace Identity.Microservice.Models
         [Required]
         public string PayloadJson { get; set; } = string.Empty;
 
+        public Identity.Microservice.Services.Abstractions.Payments.PaymentGateway? Gateway { get; set; }
+
         public bool Processed { get; set; } = false;
 
         public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;

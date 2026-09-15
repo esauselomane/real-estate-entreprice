@@ -1,3 +1,4 @@
+import BrokerSuggestions from './leads/BrokerSuggestions.jsx';
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { UserPlus, Search, Loader2, X } from 'lucide-react';
@@ -51,7 +52,6 @@ export default function LeadsPage() {
   const [editSelectedContact, setEditSelectedContact] = useState(null);
   const [showEditContactDropdown, setShowEditContactDropdown] = useState(false);
   const [editSelectedBrokers, setEditSelectedBrokers] = useState([]);
-  const [suggestedBrokers, setSuggestedBrokers] = useState([]);
   const [leadForm, setLeadForm] = useState({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', leadType: 'ForSale', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedBrokerIds: [] });
   const [selectedBrokers, setSelectedBrokers] = useState([]);
   const [errorMessage, setErrorMessage] = useState('');
@@ -87,32 +87,11 @@ export default function LeadsPage() {
 
   useEffect(() => { loadData(1); }, [activeTenantId]);
 
-  const fetchSuggestedBrokers = async () => {
-    if (!isLeadFormOpen) return;
-    try {
-      const budget = parseFloat(leadForm.estimatedBudget) || 0;
-      const suggestions = await crmService.getSuggestedBrokers({
-        area: leadForm.preferredArea || undefined,
-        budgetMin: budget > 0 ? budget : undefined,
-        propertyType: leadForm.propertyInterestClass || undefined
-      });
-      setSuggestedBrokers(suggestions || []);
-    } catch {
-      setSuggestedBrokers([]);
-    }
-  };
-
   const handleOpenLeadForm = () => {
     clearContact();
     setLeadForm({ clientName: '', contactEmail: '', contactPhone: '', propertyInterestClass: 'Residential', preferredArea: '', estimatedBudget: '', commissionType: 'Percent', commissionValue: '', allocatedBrokerIds: [] });
     setSelectedBrokers([]);
   };
-
-  useEffect(() => {
-    if (!isLeadFormOpen) return;
-    const timer = setTimeout(() => { fetchSuggestedBrokers(); }, 500);
-    return () => clearTimeout(timer);
-  }, [isLeadFormOpen, leadForm.preferredArea, leadForm.estimatedBudget, leadForm.propertyInterestClass]);
 
   const handleLeadPageChange = (newPage) => {
     if (newPage < 1) return;
@@ -283,7 +262,11 @@ export default function LeadsPage() {
   });
 
   const stageCounts = LEAD_STAGES.reduce((acc, stage) => { acc[stage] = Number(stageAggregates[stage] || 0); return acc; }, {});
-  const chartData = LEAD_STAGES.map((stage) => ({ name: stage.replace(/([A-Z])/g, ' $1').trim(), value: stageCounts[stage], color: LEAD_STAGE_COLORS[stage] })).filter((d) => d.value > 0);
+  // 📊 Render EVERY active lead stage on the chart — including stages with a
+  // zero count — so the pipeline always shows the full funnel. Filtering out
+  // zero-value stages made the chart "missing" stages and hid the fact that
+  // the pipeline has gaps (e.g. no leads in Negotiation yet).
+  const chartData = [...new Set([...LEAD_STAGES, ...Object.keys(stageAggregates)])].map((stage) => ({ name: stage.replace(/([A-Z])/g, ' $1').trim(), value: Number(stageAggregates[stage] || 0), color: LEAD_STAGE_COLORS[stage] || '#64748b' }));
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -293,7 +276,7 @@ export default function LeadsPage() {
           <p className="text-xs text-slate-400 mt-1">Tenant-scoped leads • {leadTotalCount} total</p>
         </div>
         <Can permission="leads:create">
-          <button type="button" onClick={() => { const opening = !isLeadFormOpen; setIsLeadFormOpen(!isLeadFormOpen); if (opening) { handleOpenLeadForm(); fetchSuggestedBrokers(); } }} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all">
+          <button type="button" onClick={() => { const opening = !isLeadFormOpen; setIsLeadFormOpen(!isLeadFormOpen); if (opening) { handleOpenLeadForm(); } }} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all">
             <UserPlus size={14} /> New Lead
           </button>
         </Can>
@@ -327,10 +310,10 @@ export default function LeadsPage() {
         {chartData.length === 0 ? (
           <p className="text-xs text-slate-500 text-center py-8">No leads yet. Create your first lead above.</p>
         ) : (
-          <ResponsiveContainer width="100%" height={250}>
+          <ResponsiveContainer width="100%" height={Math.max(250, chartData.length * 36)}>
             <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <XAxis type="number" hide />
-              <YAxis dataKey="name" type="category" tick={{ fontSize: 11, fill: '#94a3b8' }} width={140} />
+              <YAxis interval={0} dataKey="name" type="category" tick={{ fontSize: 11, fill: '#94a3b8' }} width={140} />
               <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#cbd5e1', fontSize: 11 }} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
               <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                 {chartData.map((entry, index) => (<Cell key={index} fill={entry.color} />))}
@@ -379,51 +362,7 @@ export default function LeadsPage() {
             <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">{leadForm.commissionType === 'Percent' ? '% Commission' : 'Amount (R)'}</label><input required type="number" value={leadForm.commissionValue} onChange={(e) => setLeadForm({ ...leadForm, commissionValue: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
             <div className="space-y-1 lg:col-span-3">
               <label className="text-[10px] text-slate-400 uppercase">Allocated Brokers</label>
-              {suggestedBrokers.length > 0 && (
-                <div className="mb-3">
-                  <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-2 block">Suggested Brokers (Top Matches)</label>
-                  <div className="space-y-1">
-                    {suggestedBrokers.map((sb) => {
-                      const bgClass = sb.matchScore >= 85 ? 'bg-gradient-to-r from-green-950/40 to-emerald-950/40 border-green-800'
-                        : sb.matchScore >= 60 ? 'bg-slate-900/60 border-slate-700'
-                        : 'bg-slate-900/40 border-slate-800';
-                      const labelClass = sb.matchScore >= 85 ? 'text-green-400'
-                        : sb.matchScore >= 60 ? 'text-amber-400'
-                        : 'text-slate-400';
-                      const label = sb.matchScore >= 85 ? 'Top Match — Most likely to close'
-                        : sb.matchScore >= 60 ? 'Good Match'
-                        : 'Fair Match';
-                      return (
-                        <button
-                          key={sb.brokerId}
-                          type="button"
-                          onClick={() => {
-                            const brokerObj = brokers.find((b) => b.brokerId === sb.brokerId) || { brokerId: sb.brokerId, fullName: sb.brokerName, email: '' };
-                            if (!selectedBrokers.find((b) => b.brokerId === sb.brokerId)) {
-                              setSelectedBrokers([...selectedBrokers, brokerObj]);
-                            }
-                          }}
-                          className={`w-full text-left p-2.5 border rounded-xl transition-all ${bgClass} hover:border-blue-700/50`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="font-semibold text-xs text-white">{sb.brokerName}</div>
-                              <div className={`text-[10px] ${labelClass}`}>{label} — Score: {sb.matchScore.toFixed(1)}</div>
-                              <div className="text-[10px] text-slate-500 mt-0.5">
-                                Conv: {sb.conversionRate.toFixed(0)}% • Avg days: {sb.avgDaysToClose.toFixed(0)} • Avg deal: R {Number(sb.avgDealValue || 0).toLocaleString()}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xs font-bold text-blue-400">{sb.matchScore.toFixed(1)}</div>
-                              <div className="text-[10px] text-slate-500">match score</div>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+              {selectedBrokers.length === 0 && <BrokerSuggestions tenantId={activeTenantId} onSelect={broker => setSelectedBrokers([broker])} />}
               <BrokerPicker
                 multi
                 value={selectedBrokers}
@@ -578,6 +517,7 @@ export default function LeadsPage() {
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">{editForm.commissionType === 'Percent' ? '% Commission' : 'Amount (R)'}</label><input required type="number" value={editForm.commissionValue} onChange={(e) => setEditForm({ ...editForm, commissionValue: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1 md:col-span-2">
                   <label className="text-[10px] text-slate-400 uppercase">Allocated Brokers</label>
+                  {editSelectedBrokers.length === 0 && <BrokerSuggestions tenantId={editingLead.tenantId || activeTenantId} onSelect={broker => setEditSelectedBrokers([broker])} />}
                   <BrokerPicker
                     multi
                     value={editSelectedBrokers}

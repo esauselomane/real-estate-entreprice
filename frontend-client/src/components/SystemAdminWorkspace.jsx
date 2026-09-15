@@ -10,13 +10,16 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
+import SubscriptionPackagesAdmin from './subscriptions/SubscriptionPackagesAdmin.jsx';
 import AmenityTypesWorkspace from './AmenityTypesWorkspace.jsx';
 
 export default function SystemAdminWorkspace({ defaultTab }) {
-  const { userRole: currentUserRole } = useAuth();
+  const { userRole: currentUserRole, activeProfile } = useAuth();
+  const canManageSubscriptionPackages = activeProfile?.originalRole === 'SuperAdmin';
   const { hasPermission } = usePermission();
   const { activeTenantId, activeAgency, isAllTenants } = useTenant();
   const isSuperAdmin = currentUserRole === 'PlatformAdmin';
+  const canManageAgencies = isSuperAdmin || currentUserRole === 'AgencyAdmin';
   const [activeTab, setActiveTab] = useState(defaultTab || (isSuperAdmin ? 'agencies' : 'users'));
 
   const [agencies, setAgencies] = useState([]);
@@ -111,7 +114,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
   useEffect(() => { loadData(); }, [activeTenantId]);
 
   // Roles an admin may assign: PlatformAdmin gets the full palette; AgencyAdmin only agency-scoped roles.
-  const assignableRoles = isSuperAdmin ? ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] : ['Broker', 'Owner', 'Tenant'];
+  const assignableRoles = isSuperAdmin ? ['PlatformAdmin', 'AgencyAdmin', 'Broker', 'Owner', 'Tenant'] : ['AgencyAdmin', 'Broker', 'Owner', 'Tenant'];
 
   const handleRoleSubmit = async (e) => {
     e.preventDefault();
@@ -140,7 +143,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
 
   const handleRoleDelete = async (role) => {
     if (!isSuperAdmin) return;
-    if (!window.confirm(`Deactivate role "R{role.name}"? This is non-destructive.`)) return;
+    if (!window.confirm(`Deactivate role "${role.name}"? This is non-destructive.`)) return;
     try {
       await systemRolesService.deleteSystemRole(role.roleDefId);
       await loadRoles();
@@ -364,13 +367,15 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     <div className="space-y-6 animate-fade-in">
       {error && <div className="p-3 rounded-xl border border-red-900 bg-red-950/40 text-red-300 text-xs">{error}</div>}
 
+      {canManageSubscriptionPackages && <button onClick={() => setActiveTab('subscription-packages')} className="px-4 py-2 rounded-xl bg-blue-600 text-white">Subscription packages</button>}
+      {activeTab === 'subscription-packages' && canManageSubscriptionPackages && <SubscriptionPackagesAdmin />}
       {/* 🎛️ DRILL-NAVIGATION MENU */}
       <div className="flex gap-2 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl shadow-xl overflow-x-auto">
-        {isSuperAdmin && (
+        {canManageAgencies && (
         <button
           onClick={() => setActiveTab('agencies')}
           type="button"
-          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
             activeTab === 'agencies' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
           }`}
         >
@@ -380,7 +385,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
         <button
           onClick={() => setActiveTab('users')}
           type="button"
-          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+          className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
             activeTab === 'users' ? 'bg-violet-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
           }`}
         >
@@ -390,7 +395,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
           <button
             onClick={() => setActiveTab('amenities')}
             type="button"
-            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
               activeTab === 'amenities' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
             }`}
           >
@@ -401,7 +406,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
            <button
              onClick={() => setActiveTab('reports')}
              type="button"
-             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+             className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
                activeTab === 'reports' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
              }`}
            >
@@ -412,7 +417,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
             <button
               onClick={() => setActiveTab('captured-leads')}
               type="button"
-              className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+              className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
                 activeTab === 'captured-leads' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
               }`}
             >
@@ -424,7 +429,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
               <button
                 onClick={() => setActiveTab('import')}
                 type="button"
-                className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer R{
+                className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
                   activeTab === 'import' ? 'bg-orange-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
                 }`}
               >
@@ -450,7 +455,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
         <>
           <div className="grid gap-6 xl:grid-cols-2">
             {/* 🏢 AGENCY FORM — visible to PlatformAdmin only. AgencyAdmin cannot add agencies. */}
-            {isSuperAdmin ? (
+            {canManageAgencies ? (
               <form onSubmit={handleAgencySubmit} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
                 <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px]">
                   <Building2 size={14} className="text-blue-500" /> {editingAgency ? 'Edit Agency' : 'Add Agency'}
@@ -466,7 +471,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   {/* 🖼️ LOGO: either paste a URL or upload a file (stored as a data-URI on the agency record) */}
                   <div className="flex items-center gap-1">
                     <label className="text-[10px] text-slate-400">Logo</label>
-                    <label className={`text-[10px] px-2 py-1 rounded-md border R{agencyForm.companyLogoUrl ? 'bg-slate-950 text-blue-400 border-blue-900' : 'bg-slate-950 text-slate-500 border-slate-700 cursor-pointer hover:text-white'}`}>
+                    <label className={`text-[10px] px-2 py-1 rounded-md border ${agencyForm.companyLogoUrl ? 'bg-slate-950 text-blue-400 border-blue-900' : 'bg-slate-950 text-slate-500 border-slate-700 cursor-pointer hover:text-white'}`}>
                       {agencyForm.companyLogoUrl ? <span>Change</span> : <span>Upload</span>}
                       <input type="file" accept="image/*" hidden onChange={handleLogoUpload} />
                     </label>
@@ -487,8 +492,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                    )}
 
                   {/* 🧬 PARENT AGENCY — PlatformAdmin may nest this agency under an existing parent to model a sub-brand / branch */}
-                  <select value={agencyForm.parentAgencyId} onChange={(e) => setAgencyForm({ ...agencyForm, parentAgencyId: e.target.value })} className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
-                    <option value="">(No parent — top-level agency)</option>
+                  <select disabled={!isSuperAdmin} value={agencyForm.parentAgencyId} onChange={(e) => setAgencyForm({ ...agencyForm, parentAgencyId: e.target.value })} className="col-span-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white">
+                    <option value="">{isSuperAdmin ? '(No parent — top-level agency)' : 'Parent: your agency (assigned automatically)'}</option>
                     {agencies.filter(a => !editingAgency || a.agencyId !== editingAgency.agencyId).map(a => (
                       <option key={a.agencyId} value={a.agencyId}>{a.name} ({a.agencyId})</option>
                     ))}
@@ -718,7 +723,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                           {u.accountStatus !== 'Disabled' && (
                             <Can permission="users:edit">
                               <button type="button" onClick={async () => {
-                                if (!confirm(`Deactivate user "R{u.fullName}"? They will be unable to sign in.`)) return;
+                                if (!confirm(`Deactivate user "${u.fullName}"? They will be unable to sign in.`)) return;
                                 try {
                                   await authService.disableUser(u.userId);
                                   setSystemUsers((prev) => prev.map((x) => (x.userId === u.userId ? { ...x, accountStatus: 'Disabled' } : x)));
@@ -788,18 +793,18 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                 <div className="grid grid-cols-3 gap-3 mb-4 text-center">
                   <div><div className="text-xl font-bold text-white">{reportOverview.totalLeads}</div><div className="text-[10px] text-slate-500">Leads</div></div>
                   <div><div className="text-xl font-bold text-white">{reportOverview.totalDeals}</div><div className="text-[10px] text-slate-500">Deals</div></div>
-                  <div><div className="text-sm font-bold text-emerald-400">R{Number(reportOverview.totalRevenue || 0).toLocaleString()}</div><div className="text-[10px] text-slate-500">Revenue</div></div>
+                  <div><div className="text-sm font-bold text-emerald-400">${Number(reportOverview.totalRevenue || 0).toLocaleString()}</div><div className="text-[10px] text-slate-500">Revenue</div></div>
                 </div>
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={reportOverview.monthlyBreakdown || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis dataKey="Period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }} />
                     <Legend wrapperStyle={{ fontSize: '10px', color: '#94a3b8' }} />
-                    <Line type="monotone" dataKey="Leads" stroke="#38bdf8" strokeWidth={2} name="Leads" />
-                    <Line type="monotone" dataKey="Deals" stroke="#a78bfa" strokeWidth={2} name="Deals" />
-                    <Line type="monotone" dataKey="Revenue" stroke="#4ade80" strokeWidth={2} name="Revenue" />
+                    <Line type="monotone" dataKey="leads" stroke="#38bdf8" strokeWidth={2} name="Leads" />
+                    <Line type="monotone" dataKey="deals" stroke="#a78bfa" strokeWidth={2} name="Deals" />
+                    <Line type="monotone" dataKey="revenue" stroke="#4ade80" strokeWidth={2} name="Revenue" />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -814,9 +819,9 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   <BarChart data={commissionByStage} layout="vertical" margin={{ top: 5, right: 20, left: 80, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                     <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-                    <YAxis type="category" dataKey="Period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                    <YAxis type="category" dataKey="period" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                     <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }} />
-                    <Bar dataKey="Revenue" fill="#4ade80" name="Commission" />
+                    <Bar dataKey="revenue" fill="#4ade80" name="Commission" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -847,8 +852,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                         <td className="py-1 text-slate-400">{idx + 1}</td>
                         <td className="py-1 text-white">{b.agent}</td>
                         <td className="py-1 text-right text-slate-300">{b.deals}</td>
-                        <td className="py-1 text-right text-slate-300">R{Number(b.totalValue || 0).toLocaleString()}</td>
-                        <td className="py-1 text-right text-emerald-400">R{Number(b.totalCommission || 0).toLocaleString()}</td>
+                        <td className="py-1 text-right text-slate-300">${Number(b.totalValue || 0).toLocaleString()}</td>
+                        <td className="py-1 text-right text-emerald-400">${Number(b.totalCommission || 0).toLocaleString()}</td>
                         <td className="py-1 text-right text-slate-300">{b.won}</td>
                       </tr>
                     ))}

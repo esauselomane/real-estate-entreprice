@@ -4,6 +4,31 @@ import { crmService } from '../services/crmService.js';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 
 /**
+ * Robust date formatter for notification timestamps. Returns a human-readable
+ * relative label ("Just now", "5 min ago", "Yesterday", "2 days ago") and
+ * falls back gracefully when the raw value is null, undefined, or an
+ * unparseable ISO string — instead of rendering the literal "Invalid Date".
+ */
+const formatNotificationTime = (value) => {
+  if (!value) return 'Just now';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Just now';
+
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMin = Math.floor(diffMs / 60_000);
+  const diffHr = Math.floor(diffMs / 3_600_000);
+  const diffDay = Math.floor(diffMs / 86_400_000);
+
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin} min ago`;
+  if (diffHr < 24) return `${diffHr} hr ago`;
+  if (diffDay === 1) return 'Yesterday';
+  if (diffDay < 7) return `${diffDay} days ago`;
+  return date.toLocaleDateString('en-ZA', { month: 'short', day: 'numeric' });
+};
+
+/**
  * Top-bar notification bell for per-user notifications (created by the
  * "Remind Agent" action on the broker dashboard, or by system events).
  * Polls the CRM service every 30s and shows the unread count as a badge.
@@ -22,17 +47,17 @@ export default function NotificationsBell() {
     setIsLoading(true);
     try {
       const data = await crmService.getNotifications({ limit: 25 });
-      const newItems = data.items || [];
+      const newItems = Array.isArray(data?.items) ? data.items.filter(Boolean) : [];
 
       // Cache seen IDs so notifications that were just shown (but not yet
       // explicitly dismissed) are not re-flashed on the next poll cycle.
       newItems.forEach((n) => {
-        if (n.IsRead) {
-          seenIdsRef.current.add(n.NotificationId);
+        if (n.isRead) {
+          seenIdsRef.current.add(n.notificationId);
         }
       });
 
-      setItems(newItems);
+      setItems(newItems.filter(item => !item.isRead && !seenIdsRef.current.has(item.notificationId)));
       setUnreadCount(data.unreadCount || 0);
     } catch {
       // soft-fail — bell badge is non-critical
@@ -48,7 +73,11 @@ export default function NotificationsBell() {
   }, []);
 
   useEffect(() => {
-    if (isOpen) load();
+    if (isOpen) {
+      // Mark all as read the moment the dropdown opens so the badge
+      // disappears and the list reflects the consumed state.
+      load();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
@@ -63,22 +92,26 @@ export default function NotificationsBell() {
   }, []);
 
    const handleClick = async (n) => {
-    // Optimistically mark as seen/ read locally to avoid re-flash on next poll.
-    seenIdsRef.current.add(n.NotificationId);
-    setItems((prev) => prev.map((x) => x.NotificationId === n.NotificationId ? { ...x, IsRead: true } : x));
-    setUnreadCount((prev) => Math.max(0, prev - 1));
-
-    if (!n.IsRead) {
+    if (!n.isRead) {
       try {
-        await crmService.markNotificationRead(n.NotificationId);
-      } catch { /* ignore */ }
+        await crmService.markNotificationRead(n.notificationId);
+        seenIdsRef.current.add(n.notificationId);
+        setItems(previous => previous.filter(item => item.notificationId !== n.notificationId));
+        setUnreadCount(previous => Math.max(0, previous - 1));
+      } catch {
+        return; // Leave it unread when persistence fails, so it can be retried.
+      }
     }
-    if (n.LinkType === 'deal') {
+    if (n.linkType === 'deal') {
       navigateTo('crm');
-      setBrochureDealTarget({ dealId: Number(n.LinkId), autoOpen: true });
-    } else if (n.LinkType === 'property') {
+      setBrochureDealTarget({ dealId: Number(n.linkId), autoOpen: true });
+    } else if (n.linkType === 'brochure') {
+      navigateTo('deals');
+    } else if (n.linkType === 'property') {
       navigateTo('search');
     }
+    // 🛎️ Close the dropdown immediately on click so the notification is
+    // visually consumed — it should not linger as "still open".
     setIsOpen(false);
   };
 
@@ -109,17 +142,17 @@ export default function NotificationsBell() {
           ) : (
             <ul className="divide-y divide-slate-800">
               {items.map((n) => (
-                <li key={n.NotificationId}>
+                <li key={n.notificationId}>
                   <button
                     type="button"
                     onClick={() => handleClick(n)}
-                    className={`w-full text-left p-3 hover:bg-slate-800/60 cursor-pointer flex items-start gap-2 ${!n.IsRead ? 'bg-slate-800/30' : ''}`}
+                    className={`w-full text-left p-3 hover:bg-slate-800/60 cursor-pointer flex items-start gap-2 ${!n.isRead ? 'bg-slate-800/30' : ''}`}
                   >
-                    <div className={`w-2 h-2 mt-1.5 rounded-full ${!n.IsRead ? 'bg-blue-400' : 'bg-slate-700'}`} />
+                    <div className={`w-2 h-2 mt-1.5 rounded-full ${!n.isRead ? 'bg-blue-400' : 'bg-slate-700'}`} />
                     <div className="flex-1 min-w-0">
-                      <div className="text-xs font-semibold text-white truncate">{n.Title}</div>
-                      {n.Body && <div className="text-[11px] text-slate-400 truncate">{n.Body}</div>}
-                      <div className="text-[10px] text-slate-500 mt-0.5">{new Date(n.CreatedAt).toLocaleString('en-ZA')}</div>
+                      <div className="text-xs font-semibold text-white truncate">{n.title}</div>
+                      {n.body && <div className="text-[11px] text-slate-400 truncate">{n.body}</div>}
+                      <div className="text-[10px] text-slate-500 mt-0.5">{formatNotificationTime(n.createdAt)}</div>
                     </div>
                     <ChevronRight size={12} className="text-slate-600 mt-1" />
                   </button>

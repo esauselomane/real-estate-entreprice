@@ -22,7 +22,10 @@ namespace CRM.Microservice.Services.BackgroundJobs
         string MarketClass,
         decimal TenantInstallationAllowance,
         List<BrochureSubUnitJob> SubUnits
-    );
+    )
+    {
+        public IReadOnlyList<CRM.Microservice.DTOs.DealBrokerContactDto> Brokers { get; init; } = [];
+    }
 
     public record BrochureSubUnitJob
     {

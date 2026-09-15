@@ -77,9 +77,8 @@ namespace CRM.Microservice.Controllers
             var totalDeals = await DealRepository.CountAsync(d => visibleTenants.Contains(d.TenantId));
             var closedDeals = await DealRepository.CountAsync(d => d.DealStage == DealWorkflowStage.ClosedWon && visibleTenants.Contains(d.TenantId));
 
-            var totalRealisedCommission = await DealRepository.Query()
-                .Where(d => visibleTenants.Contains(d.TenantId) && d.DealStage == DealWorkflowStage.ClosedWon)
-                .SumAsync(d => d.RealisedCommission ?? 0m);
+            var closedRecords = await DealRepository.Query().Where(deal => visibleTenants.Contains(deal.TenantId) && deal.DealStage == DealWorkflowStage.ClosedWon).ToListAsync();
+            var totalRealisedCommission = closedRecords.Sum(Services.Reporting.CommissionCalculator.Realised);
 
             var soleMandateCount = await _propertyCountService.GetTotalSoleMandatesAsync(visibleTenants, HttpContext);
 
@@ -136,7 +135,7 @@ namespace CRM.Microservice.Controllers
             // Contact persons for the agency
             var contactPersons = await _contactPersonRepository.Query()
                 .AsNoTracking()
-                .Where(c => c.AgencyId == agency.AgencyId)
+                .Where(c => c.AgencyId == agencyDetails.AgencyId)
                 .Select(c => new ContactPersonDto
                 {
                     FullName = c.FullName,

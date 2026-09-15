@@ -46,6 +46,11 @@ namespace CRM.Microservice.Services.Implementation
                 ["CrmHygiene"] = _configuration.GetValue<decimal>("BrokerScoring:Weights:CrmHygiene", 0.05m)
             };
 
+            _weights["PropertyType"] = 0m;
+            var totalWeight = _weights.Values.Sum(weight => Math.Max(0m, weight));
+            if (totalWeight <= 0m) throw new InvalidOperationException("Broker scoring requires at least one positive weight.");
+            foreach (var key in _weights.Keys.ToList()) _weights[key] = Math.Max(0m, _weights[key]) / totalWeight;
+
             _priceBands = new List<PriceBand>
             {
                 new("R0-R500K",        0,       500_000),
@@ -65,12 +70,14 @@ namespace CRM.Microservice.Services.Implementation
             if (!brokers.Any())
                 return new List<BrokerPerformanceMetrics>();
 
+            var allDeals = await _dbContext.DealRecords.AsNoTracking().Where(deal => deal.TenantId == tenantId).ToListAsync();
+            var allLeads = await _dbContext.LeadRecords.AsNoTracking().Where(lead => lead.TenantId == tenantId).ToListAsync();
             var metricDate = DateTime.UtcNow.Date;
 
             var metrics = new List<BrokerPerformanceMetrics>();
             foreach (var broker in brokers)
             {
-                var metric = await ComputeSingleBrokerMetricsAsync(broker, tenantId, metricDate);
+                var metric = await ComputeSingleBrokerMetricsAsync(broker, tenantId, metricDate, allDeals, allLeads);
                 metrics.Add(metric);
             }
 
@@ -78,28 +85,17 @@ namespace CRM.Microservice.Services.Implementation
         }
 
         private async Task<BrokerPerformanceMetrics> ComputeSingleBrokerMetricsAsync(
-            BrokerRecord broker, string tenantId, DateTime metricDate)
+            BrokerRecord broker, string tenantId, DateTime metricDate, IReadOnlyList<DealRecord> allDeals, IReadOnlyList<LeadRecord> allLeads)
         {
             var brokerId = broker.BrokerId;
 
-            var deals = await _dbContext.DealRecords
-                .AsNoTracking()
-                .Where(d => d.TenantId == tenantId)
-                .Where(d => d.AllocatedBrokerIds.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                    .Any(b => string.Equals(b.Trim(), brokerId, StringComparison.OrdinalIgnoreCase)))
-                .ToListAsync();
-
-            var leads = await _dbContext.LeadRecords
-                .AsNoTracking()
-                .Where(l => l.TenantId == tenantId)
-                .Where(l => l.AllocatedBrokerIds.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                    .Any(b => string.Equals(b.Trim(), brokerId, StringComparison.OrdinalIgnoreCase)))
-                .ToListAsync();
+            var deals = allDeals.Where(deal => IsAssigned(deal.AllocatedBrokerIds, brokerId)).ToList();
+            var leads = allLeads.Where(lead => IsAssigned(lead.AllocatedBrokerIds, brokerId)).ToList();
 
             var (conversionRate, avgDaysToClose, avgDealValue, avgCommission) = ComputeDealMetrics(deals, leads);
             var stageVelocityScore = await ComputeStageVelocityScoreAsync(deals);
             var (geoScore, geoDetails) = ComputeGeoSpecializationScore(deals, leads);
-            var propertyTypeScore = ComputePropertyTypeScore(deals);
+            var propertyTypeScore = new Dictionary<string, decimal>(); // Deal records do not store a reliable property type.
             var priceBandScore = ComputePriceBandScore(deals);
             var hygieneScore = await ComputeCrmHygieneScoreAsync(brokerId, tenantId, leads);
 
@@ -107,6 +103,7 @@ namespace CRM.Microservice.Services.Implementation
                 conversionRate, avgDaysToClose, avgCommission, stageVelocityScore, geoScore,
                 propertyTypeScore, priceBandScore, hygieneScore);
 
+            if (leads.Count == 0 && deals.Count == 0) overallScore = 0m;
             var totalLeads = leads.Count;
             var dealsWon = deals.Count(d => d.DealStage == DealWorkflowStage.ClosedWon);
 
@@ -135,15 +132,11 @@ namespace CRM.Microservice.Services.Implementation
             ComputeDealMetrics(List<DealRecord> deals, List<LeadRecord> leads)
         {
             var totalLeads = leads.Count;
-            if (totalLeads == 0)
-                return (0, 0, 0, 0);
 
             var dealsWon = deals.Where(d => d.DealStage == DealWorkflowStage.ClosedWon).ToList();
-            var conversionRate = totalLeads > 0 ? (decimal)dealsWon.Count / totalLeads * 100 : 0;
+            var conversionRate = totalLeads > 0 ? (decimal)leads.Count(lead => lead.IsConvertedToDeal) / totalLeads * 100 : 0;
             var avgDealValue = dealsWon.Any() ? dealsWon.Average(d => d.TransactionValue) : 0;
-            var avgCommission = dealsWon.Any() && dealsWon.Any(d => d.RealisedCommission.HasValue)
-                ? dealsWon.Where(d => d.RealisedCommission.HasValue).Average(d => d.RealisedCommission!.Value)
-                : 0;
+            var avgCommission = dealsWon.Count > 0 ? dealsWon.Average(Reporting.CommissionCalculator.Realised) : 0m;
 
             var closedDealsWithDates = dealsWon
                 .Where(d => d.LastStageUpdatedAt > d.CreatedAt)
@@ -267,8 +260,8 @@ namespace CRM.Microservice.Services.Implementation
             var activityCount = await _dbContext.OperationalRecords
                 .AsNoTracking()
                 .CountAsync(o => o.TenantId == tenantId &&
-                    (o.Title.Contains(brokerId, StringComparison.OrdinalIgnoreCase) ||
-                     o.Details.Contains(brokerId, StringComparison.OrdinalIgnoreCase)));
+                    (o.Title.Contains(brokerId) ||
+                     o.Details.Contains(brokerId)));
 
             if (activityCount < 5)
                 score -= 20;
@@ -288,7 +281,7 @@ namespace CRM.Microservice.Services.Implementation
         {
             var daysToCloseScore = avgDaysToClose > 0
                 ? Math.Max(0, 100 - (avgDaysToClose / 30) * 100)
-                : 100;
+                : 0;
 
             var commissionScore = 0m;
             if (avgCommission > 0)
@@ -319,53 +312,22 @@ namespace CRM.Microservice.Services.Implementation
             string? area,
             string currentUserId = "")
         {
-            var metricsDtos = await GetLatestMetricsFromRepoAsync(tenantId);
+            var metricsDtos = (await ComputeAllBrokerMetricsAsync(tenantId)).Select(ToPerformanceDto).ToList();
 
             if (!metricsDtos.Any())
                 return new List<SuggestedBrokerDto>();
 
             var brokers = await _brokerRepository.Query()
                 .AsNoTracking()
-                .Where(b => b.TenantId == tenantId)
+                .Where(b => b.TenantId == tenantId && b.Status == "Active")
                 .ToDictionaryAsync(b => b.BrokerId, b => b);
 
             var results = new List<SuggestedBrokerDto>();
 
             foreach (var dto in metricsDtos)
             {
-                if (string.Equals(dto.BrokerId, currentUserId, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var geoMatch = 1.0m;
-                if (!string.IsNullOrWhiteSpace(area) && dto.GeoSpecializationScore > 0)
-                {
-                    var areaScore = dto.GeoSpecializationScore;
-                    geoMatch = areaScore > 0 ? areaScore / 100 : 0.5m;
-                }
-
-                var priceBandScore = 0m;
-                var priceMatch = 1.0m;
-                if (budgetMin.HasValue && dto.PriceBandScore.Any())
-                {
-                    foreach (var band in _priceBands)
-                    {
-                        if (budgetMin >= band.Min && budgetMin < band.Max)
-                        {
-                            priceBandScore = dto.PriceBandScore.GetValueOrDefault(band.Label, 0);
-                            priceMatch = priceBandScore > 0 ? priceBandScore / 100 : 0.5m;
-                            break;
-                        }
-                    }
-                }
-
-                var propertyMatch = 1.0m;
-                if (!string.IsNullOrWhiteSpace(propertyType) && dto.PropertyTypeScore.Any())
-                {
-                    propertyMatch = dto.PropertyTypeScore.GetValueOrDefault(propertyType, 0) > 0 ? 0.8m : 0.5m;
-                }
-
-                var rawScore = dto.OverallScore;
-                var adjustedScore = rawScore * geoMatch * priceMatch * propertyMatch;
+                if (!brokers.ContainsKey(dto.BrokerId)) continue;
+                var adjustedScore = Math.Clamp(dto.OverallScore, 0m, 100m);
 
                 var label = GetScoreLabel(adjustedScore);
                 var brokerName = brokers.TryGetValue(dto.BrokerId, out var broker) ? broker.FullName : dto.BrokerId;
@@ -375,7 +337,7 @@ namespace CRM.Microservice.Services.Implementation
                     BrokerId = dto.BrokerId,
                     BrokerName = brokerName,
                     MatchScore = Math.Round(adjustedScore, 2),
-                    Label = label,
+                    Label = dto.TotalLeadsAssigned == 0 && dto.TotalDealsWon == 0 ? "Insufficient history" : label,
                     ConversionRate = dto.LeadToDealConversionRate,
                     AvgDaysToClose = dto.AvgDaysToClose,
                     AvgDealValue = dto.AvgDealValue,
@@ -387,9 +349,20 @@ namespace CRM.Microservice.Services.Implementation
 
             return results
                 .OrderByDescending(r => r.MatchScore)
+                .ThenBy(r => r.BrokerId, StringComparer.Ordinal)
                 .Take(3)
                 .ToList();
         }
+
+        private static bool IsAssigned(string allocation, string brokerId) => allocation
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Contains(brokerId, StringComparer.OrdinalIgnoreCase);
+
+        private static BrokerPerformanceDto ToPerformanceDto(BrokerPerformanceMetrics metric) => new()
+        {
+            BrokerId = metric.BrokerId, OverallScore = metric.OverallScore,
+            LeadToDealConversionRate = metric.LeadToDealConversionRate, AvgDaysToClose = metric.AvgDaysToClose,
+            AvgDealValue = metric.AvgDealValue, TotalLeadsAssigned = metric.TotalLeadsAssigned, TotalDealsWon = metric.TotalDealsWon
+        };
 
         private async Task<List<BrokerPerformanceDto>> GetLatestMetricsFromRepoAsync(string tenantId)
         {

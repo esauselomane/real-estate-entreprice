@@ -15,12 +15,15 @@ namespace CRM.Microservice.Services.BackgroundJobs
         private readonly IJobQueue<BrochureGenerationJob> _jobQueue;
         private readonly string _generatedBrochuresPath;
 
+        private readonly string? _googleMapsApiKey;
+
         public BrochureGenerationBackgroundService(
             ILogger<BrochureGenerationBackgroundService> logger,
             IServiceScopeFactory scopeFactory,
             IJobQueue<BrochureGenerationJob> jobQueue,
             IConfiguration configuration)
         {
+            _googleMapsApiKey = configuration["GoogleMaps:ApiKey"];
             _logger = logger;
             _scopeFactory = scopeFactory;
             _jobQueue = jobQueue;
@@ -103,7 +106,7 @@ namespace CRM.Microservice.Services.BackgroundJobs
                                     unitCount: card.Lines?.Count ?? 0,
                                     downloadUrl: downloadUrl,
                                     supportEmail: "support@realestate.com",
-                                    ct: stoppingToken);
+                                    ct: stoppingToken, agencyName: job.CompanyName, agencyLogoUrl: job.CompanyLogoUrl);
                             }
                         }
                         catch (Exception ex)
@@ -162,12 +165,17 @@ namespace CRM.Microservice.Services.BackgroundJobs
                 var logoBytes = !string.IsNullOrEmpty(job.CompanyLogoUrl) ? await DownloadImageBytesAsync(job.CompanyLogoUrl) : null;
                 var logoDataUrl = logoBytes != null ? $"data:image/png;base64,{Convert.ToBase64String(logoBytes)}" : string.Empty;
 
+                var mapUrl = CRM.Microservice.Services.Brochures.GoogleBrochureMapHelper.BuildUrl(
+                    subUnits.Select(unit => ((double)unit.Latitude, (double)unit.Longitude)), _googleMapsApiKey);
+                var mapBytes = mapUrl == null ? null : await DownloadImageBytesAsync(mapUrl);
+                if (mapUrl != null && mapBytes == null) throw new InvalidOperationException("Google map could not be loaded. Check GoogleMaps configuration and API access.");
+                var mapDataUrl = mapBytes == null ? string.Empty : "data:image/png;base64," + Convert.ToBase64String(mapBytes);
                 var html = BuildBrochureHtml(
                     job.BrokerName, job.BrokerEmail, job.BrokerPhone,
                     job.CompanyName, logoDataUrl,
                     job.ClientName, job.ClientEmail, job.ClientPhone,
                     job.MarketClass, job.TenantInstallationAllowance,
-                    subUnits);
+                    subUnits, job.Brokers, mapDataUrl);
 
                 byte[] compiledDocumentBytes;
                 using (var page = await browser.NewPageAsync())
@@ -176,7 +184,7 @@ namespace CRM.Microservice.Services.BackgroundJobs
                     await page.SetContentAsync(html);
                     await page.WaitForNetworkIdleAsync(new WaitForNetworkIdleOptions { Timeout = 120000 });
                     await page.EvaluateExpressionAsync("document.fonts.ready");
-                    await page.EvaluateExpressionAsync("window.brochureReady || true");
+                    await page.EvaluateExpressionAsync("Promise.all(Array.from(document.images).map(image => image.decode()))");
                     compiledDocumentBytes = await page.PdfDataAsync(new PdfOptions
                     {
                         Format = PuppeteerSharp.Media.PaperFormat.A4,
@@ -230,7 +238,7 @@ namespace CRM.Microservice.Services.BackgroundJobs
             string companyName, string logoDataUrl,
             string clientName, string clientEmail, string clientPhone,
             string marketClass, decimal tenantAllowance,
-            List<BrochureSubUnit> subUnits)
+            List<BrochureSubUnit> subUnits, IReadOnlyList<CRM.Microservice.DTOs.DealBrokerContactDto> brokers, string mapDataUrl)
         {
             var logoHtml = string.IsNullOrEmpty(logoDataUrl)
                 ? $"<div style=\"width:60px;height:60px;background:#1E293B;border:1px solid #334155;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#0F172A;font-weight:bold;font-size:14px;\">{EscapeHtml(companyName.Split(' ').Select(w => w.Length > 0 ? w[0].ToString() : string.Empty).Take(3).Aggregate("", (a, b) => a + b))}</div>"
@@ -246,9 +254,7 @@ namespace CRM.Microservice.Services.BackgroundJobs
                 </div>
                 <div style=""border-top: 1px solid #334155; padding-top: 20px; margin-bottom: 30px;"">
                   <p style=""font-size: 11px; color: #94A3B8; margin: 0 0 4px 0;"">PREPARED BY:</p>
-                  <p style=""font-size: 16px; font-weight: bold; margin: 0;"">{EscapeHtml(brokerName)}</p>
-                  <p style=""font-size: 11px; color: #94A3B8; margin: 4px 0 0 0;"">{EscapeHtml(brokerEmail)}</p>
-                  <p style=""font-size: 11px; color: #94A3B8; margin: 4px 0 0 0;"">{EscapeHtml(brokerPhone)}</p>
+                  {CRM.Microservice.Services.Brochures.BrokerCoverHelper.Render(brokers)}
                 </div>
                 <div style=""border-top: 1px solid #334155; padding-top: 20px;"">
                   <p style=""font-size: 11px; color: #94A3B8; margin: 0 0 4px 0;"">PREPARED FOR:</p>
@@ -259,30 +265,10 @@ namespace CRM.Microservice.Services.BackgroundJobs
               </div>
             </div>";
 
-            var mapPageHtml = $@"
-            <div style=""font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0F172A; page-break-after: always; padding: 24px;"">
-              <h2 style=""font-size: 18px; font-weight: bold; margin: 0 0 20px 0; padding-bottom: 10px; border-bottom: 1px solid #E2E8F0;"">LOCATION & MAPPING</h2>
-              <p style=""font-size: 12px; color: #334155; margin: 0 0 16px 0;"">All units included in this proposal:</p>
-              <div id=""map"" style=""width: 100%; height: 500px; border: 1px solid #94A3B8; border-radius: 6px;""></div>
-              <script src=""https://unpkg.com/leaflet@1.9.4/dist/leaflet.js""></script>
-              <link rel=""stylesheet"" href=""https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"" />
-              <script>
-                var map = L.map('map').setView([0, 0], 2);
-                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                  attribution: '&copy; OpenStreetMap contributors',
-                  maxZoom: 19
-                }}).addTo(map);
-                var markers = [];
-                {string.Join("", subUnits.Select((u, i) => $"markers.push(L.marker([{u.Latitude}, {u.Longitude}]).addTo(map).bindPopup('<b>{EscapeHtml(u.UnitNumber)}</b><br>{EscapeHtml(u.UnitDescription)}'));"))}
-                if (markers.length > 0) {{
-                  var group = new L.featureGroup(markers);
-                  map.addLayer(group);
-                  map.fitBounds(group.getBounds().pad(0.2));
-                  map.setZoom(map.getZoom() - 1);
-                }}
-                setTimeout(function() {{ window.brochureReady = true; }}, 1000);
-              </script>
-            </div>";
+            var mapContent = string.IsNullOrEmpty(mapDataUrl)
+                ? "<p>Map unavailable: configure Google Maps and ensure the selected properties have coordinates.</p>"
+                : $"<img src=\"{mapDataUrl}\" alt=\"Selected property locations enclosed by a dotted circle\" style=\"width:100%;height:auto\" />";
+            var mapPageHtml = $"<section style=\"page-break-after:always;padding:24px\"><h2>LOCATION &amp; MAPPING</h2><p>Selected property locations</p>{mapContent}</section>";
 
             var unitPagesHtml = subUnits.Select(unit =>
             {

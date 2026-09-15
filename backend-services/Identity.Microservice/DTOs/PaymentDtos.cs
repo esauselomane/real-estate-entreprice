@@ -1,9 +1,13 @@
+using Identity.Microservice.Services.Abstractions.Payments;
+
 namespace Identity.Microservice.DTOs
 {
     public record CreateCheckoutSessionRequest
     {
         public string PricingPackageCode { get; init; } = string.Empty;
         public string BillingCycle { get; init; } = "monthly";
+        public string? TenantId { get; init; }
+        public string IdempotencyKey { get; init; } = string.Empty;
         public string SuccessUrl { get; init; } = string.Empty;
         public string CancelUrl { get; init; } = string.Empty;
     }
@@ -11,6 +15,8 @@ namespace Identity.Microservice.DTOs
     public record CreateCheckoutSessionResponse
     {
         public string CheckoutUrl { get; init; } = string.Empty;
+        public string Method { get; init; } = "GET";
+        public IReadOnlyDictionary<string, string>? FormFields { get; init; }
         public string SessionId { get; init; } = string.Empty;
         public DateTime ExpiresAt { get; init; }
     }
@@ -18,6 +24,7 @@ namespace Identity.Microservice.DTOs
     public record CreatePortalSessionRequest
     {
         public string ReturnUrl { get; init; } = string.Empty;
+        public string? TenantId { get; init; }
     }
 
     public record CreatePortalSessionResponse
@@ -39,6 +46,9 @@ namespace Identity.Microservice.DTOs
         public int DaysUntilExpiry { get; init; }
         public bool CanUpgrade { get; init; }
         public bool IsTrial { get; init; }
+        public bool RequiresUpgrade { get; init; }
+        public bool CanManageBilling { get; init; }
+        public PaymentGateway? Gateway { get; init; }
     }
 
     public record WebhookEventDto

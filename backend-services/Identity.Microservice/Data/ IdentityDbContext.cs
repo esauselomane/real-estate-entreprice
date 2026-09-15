@@ -14,6 +14,7 @@ namespace Identity.Microservice.Data
 
         // Map data models directly to real database structural tables
         public DbSet<TenantAgency> TenantAgencies { get; set; }
+        public DbSet<PasswordRecoveryToken> PasswordRecoveryTokens { get; set; }
         public DbSet<UserAccount> UserAccounts { get; set; }
         public DbSet<UserAccessClaim> UserAccessClaims { get; set; }
         public DbSet<SystemRoleDefinition> SystemRoles { get; set; }
@@ -25,11 +26,13 @@ namespace Identity.Microservice.Data
         public DbSet<PeachCustomer> PeachCustomers { get; set; }
         public DbSet<Subscription> Subscriptions { get; set; }
         public DbSet<PaymentIntent> PaymentIntents { get; set; }
+        public DbSet<BillingNotification> BillingNotifications { get; set; }
         public DbSet<WebhookEvent> WebhookEvents { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<BillingNotification>().HasIndex(item => item.EventKey).IsUnique();
 
             // Enforce unique structural email parameters inside the user table
             modelBuilder.Entity<UserAccount>()
@@ -65,8 +68,7 @@ namespace Identity.Microservice.Data
                 .IsUnique();
 
             modelBuilder.Entity<Subscription>()
-                .HasIndex(s => s.TenantId)
-                .IsUnique();
+                .HasIndex(s => s.TenantId);
 
             modelBuilder.Entity<Subscription>()
                 .HasIndex(s => s.PeachSubscriptionId)

@@ -1,3 +1,4 @@
+using Identity.Microservice.Services.Accounts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Identity.Microservice.Data;
@@ -53,20 +54,13 @@ namespace Identity.Microservice.Controllers
                 return Unauthorized(new { message = "Invalid credential parameters provided." });
             }
 
-            if (user.PasswordHash != request.Password)
+            if (!AccountPasswordHelper.Verify(user, request.Password))
             {
                 _logger.LogWarning("Login failed: password mismatch for user: {UserId} ({Email})", user.UserId, user.Email);
                 return Unauthorized(new { message = "Invalid credential parameters provided." });
             }
 
-            // 2b. Check trial expiry
-            if (user.IsTrial && user.TrialEndDate.HasValue && DateTime.UtcNow > user.TrialEndDate.Value)
-            {
-                _logger.LogWarning("Login blocked: trial expired for user: {UserId} ({Email}) Agency: {TenantId}",
-                    user.UserId, user.Email, user.TenantId);
-                return Unauthorized(new { message = "Trial Expired. Please contact support to continue." });
-            }
-
+            // Expired trials must still authenticate to reach subscription recovery.
             _logger.LogInformation("Login successful for user: {UserId} ({Email}) Role: {Role} Tenant: {TenantId}",
                 user.UserId, user.Email, user.SystemRole, user.TenantId);
 
@@ -120,7 +114,7 @@ namespace Identity.Microservice.Controllers
             bool isPermittedCreator;
             if (callerRole == "PlatformAdmin")
                 isPermittedCreator = true;           // Platform admin may provision ANY role, including AgencyAdmin
-            else if (callerRole == "AgencyAdmin" && roleDef.IsAgencyScoped)
+            else if (callerRole == "AgencyAdmin" && !roleDef.IsPlatformScoped && new[] { "AgencyAdmin", "Broker", "Owner", "Tenant" }.Contains(roleDef.Name))
                 isPermittedCreator = true;            // Agency admin may only provision agency-scoped roles (Broker/Owner/Tenant)
             else
                 isPermittedCreator = false;
@@ -185,28 +179,54 @@ namespace Identity.Microservice.Controllers
             });
         }
 
+        [Authorize]
+        [HttpGet("visible-tenants")]
+        public async Task<IActionResult> GetVisibleTenants()
+        {
+            var tenantId = User.FindFirst("TenantId")?.Value;
+            if (GetCurrentCanonicalRole() == "AgencyAdmin")
+                return Ok(await GetAgencySubtreeTenantIdsAsync(tenantId));
+            return Ok(string.IsNullOrWhiteSpace(tenantId) ? new List<string>() : new List<string> { tenantId });
+        }
+
+        [Authorize]
+        [HttpPost("agency-tenants")]
+        public async Task<IActionResult> CreateAgencyTenant(CreateAgencyTenantRequest request)
+        {
+            var role = GetCurrentCanonicalRole();
+            if (role is not ("AgencyAdmin" or "PlatformAdmin")) return Forbid();
+            var parentId = role == "AgencyAdmin" ? User.FindFirst("TenantId")?.Value : request.ParentTenantId;
+            var parent = await _dbContext.TenantAgencies.FirstOrDefaultAsync(tenant => tenant.TenantId == parentId);
+            if (role == "AgencyAdmin" && parent == null) return Forbid();
+            if (await _dbContext.TenantAgencies.AnyAsync(tenant => tenant.TenantId == request.TenantId)) return Conflict();
+            var tenant = new TenantAgency
+            {
+                TenantId = request.TenantId, AgencyName = request.AgencyName, ContactEmail = request.ContactEmail,
+                ParentTenantId = parentId, IsTrial = parent?.IsTrial ?? true,
+                TrialStartDate = parent?.TrialStartDate ?? DateTime.UtcNow,
+                TrialEndDate = parent?.TrialEndDate ?? DateTime.UtcNow.AddMonths(2)
+            };
+            _dbContext.TenantAgencies.Add(tenant);
+            await _dbContext.SaveChangesAsync();
+            return Ok(new { tenant.TenantId });
+        }
+
         // --- 📨 ENDPOINT C: SELF-SERVICE PASSWORD RECOVERY RECONCILIATION ---
         [HttpPost("forgot-password")]
-        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
+        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request,
+            [FromServices] PasswordRecoveryService recovery)
         {
-            _logger.LogInformation("Password reset requested for email: {Email}", request.Email);
+            await recovery.RequestAsync(request.Email);
+            return Ok(new { message = "If this email belongs to an active account, a password reset link will be sent." });
+        }
 
-            var userExists = await _userRepository.Query().AnyAsync(u => u.Email == request.Email);
-            
-            if (!userExists)
-            {
-                _logger.LogWarning("Password reset: no active account for email: {Email}", request.Email);
-                return Ok(new { message = "If the account path matches an active profile, a recovery reset link has been dispatched." });
-            }
-
-            _logger.LogInformation("Password reset token generated for email: {Email}", request.Email);
-            var recoveryToken = Guid.NewGuid().ToString();
-            
-            // In a production build, this token would be stored in the database with an expiration time
-            // and sent out via a real SMTP email client service wrapper.
-            Console.WriteLine($"[EMAIL SIMULATION LOG]: Password reset token [{recoveryToken}] issued to {request.Email}");
-
-            return Ok(new { message = "If the account path matches an active profile, a recovery reset link has been dispatched." });
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request,
+            [FromServices] PasswordRecoveryService recovery)
+        {
+            if (!await recovery.ResetAsync(request.Token, request.NewPassword))
+                return BadRequest(new { message = "This password reset link is invalid or expired. Please request a new one." });
+            return Ok(new { message = "Your password has been reset. You can now sign in." });
         }
 
         // --- 🔐 ENDPOINT: SELF-SERVICE PASSWORD CHANGE (any authenticated user, own account only) ---
@@ -220,15 +240,16 @@ namespace Identity.Microservice.Controllers
             var user = await _userRepository.Query().FirstOrDefaultAsync(u => u.UserId == userId);
             if (user == null) return NotFound(new { message = "Caller account not found." });
 
-            // Plain-text verify (matches the local-testing login comparison strategy).
-            if (user.PasswordHash != request.CurrentPassword)
+            // Verify hashed credentials while supporting existing legacy accounts.
+            if (!AccountPasswordHelper.Verify(user, request.CurrentPassword))
                 return Unauthorized(new { message = "Current password is incorrect." });
 
             if (string.IsNullOrEmpty(request.NewPassword) || request.NewPassword.Length < 6)
                 return BadRequest(new { message = "New password must be at least 6 characters." });
 
-            user.PasswordHash = request.NewPassword;
+            user.PasswordHash = AccountPasswordHelper.Hash(user, request.NewPassword);
             await _dbContext.SaveChangesAsync();
+            await _emailService.SendEmailAsync(user.Email, "Your password has been changed", "<p>Your account password was changed successfully.</p><p>If you did not make this change, contact your agency administrator immediately to secure your account.</p>");
             return Ok(new { message = "Password updated successfully." });
         }
 
@@ -258,7 +279,7 @@ namespace Identity.Microservice.Controllers
             if (target == null) return NotFound(new { message = "Target account not found." });
 
             // An agency admin can only disable users inside their own tenant.
-            if (callerRole == "AgencyAdmin" && target.TenantId != callerTenantId) return Forbid();
+            if (callerRole == "AgencyAdmin" && !(await GetAgencySubtreeTenantIdsAsync(callerTenantId)).Contains(target.TenantId)) return Forbid();
 
             // Never disable yourself, and never disable an administrative peer/superior.
             if (target.UserId == callerUserId) return BadRequest(new { message = "You cannot disable your own account." });
@@ -303,9 +324,10 @@ namespace Identity.Microservice.Controllers
             else
                 _logger.LogInformation("GetUsers: listing tenant {TenantId} users by {CallerUserId}", callerTenantId, callerUserId);
 
+            var visibleTenants = await GetAgencySubtreeTenantIdsAsync(callerTenantId);
             var users = callerRole == "PlatformAdmin"
                 ? await _userRepository.Query().ToListAsync()
-                : await _userRepository.Query().Where(u => u.TenantId == callerTenantId).ToListAsync();
+                : await _userRepository.Query().Where(u => visibleTenants.Contains(u.TenantId)).ToListAsync();
 
             return Ok(users.Select(u => new
             {
@@ -333,12 +355,14 @@ namespace Identity.Microservice.Controllers
             var target = await _userRepository.Query().FirstOrDefaultAsync(u => u.UserId == userId);
             if (target == null) return NotFound(new { message = "Target account not found." });
 
-            if (callerRole == "AgencyAdmin" && target.TenantId != callerTenantId) return Forbid();
+            if (callerRole == "AgencyAdmin" && !(await GetAgencySubtreeTenantIdsAsync(callerTenantId)).Contains(target.TenantId)) return Forbid();
+
+            if (callerRole == "AgencyAdmin" && target.SystemRole is "PlatformAdmin" or "SuperAdmin") return Forbid();
 
             var roleDef = await _systemRoleRepository.Query().FirstOrDefaultAsync(r => r.Name == request.SystemRole && r.IsActive);
             if (roleDef == null) return BadRequest(new { message = "Unsupported account role." });
 
-            bool permitted = callerRole == "PlatformAdmin" || (callerRole == "AgencyAdmin" && roleDef.IsAgencyScoped);
+            bool permitted = callerRole == "PlatformAdmin" || (callerRole == "AgencyAdmin" && !roleDef.IsPlatformScoped && new[] { "AgencyAdmin", "Broker", "Owner", "Tenant" }.Contains(roleDef.Name));
             if (!permitted) return Forbid();
 
             if (target.UserId == callerUserId) return BadRequest(new { message = "You cannot change your own role." });
@@ -388,6 +412,7 @@ namespace Identity.Microservice.Controllers
                 BrokerageLicense = request.BrokerageLicense,
                 OperationalStatus = "TrialPending",
                 IsTrial = true,
+                TrialExtensionAppliedAt = DateTime.UtcNow,
                 TrialStartDate = trialStartDate,
                 TrialEndDate = trialEndDate,
                 CreatedAt = DateTime.UtcNow
@@ -402,7 +427,7 @@ namespace Identity.Microservice.Controllers
                 FullName = request.AdminFullName,
                 Email = request.AdminEmail,
                 PasswordHash = string.Empty, // No password until activation
-                SystemRole = "PlatformAdmin", // Agency admin gets PlatformAdmin since it's a trial agency
+                SystemRole = "AgencyAdmin", // Trial registration creates a tenant-scoped administrator
                 AccountStatus = "PendingActivation", // Cannot log in until password is set
                 IsTrial = true,
                 TrialStartDate = trialStartDate,
@@ -480,7 +505,7 @@ namespace Identity.Microservice.Controllers
             }
 
             // Set the password and activate the account
-            user.PasswordHash = request.NewPassword;
+            user.PasswordHash = AccountPasswordHelper.Hash(user, request.NewPassword);
             user.AccountStatus = "Active";
             user.ActivationToken = string.Empty;
             await _dbContext.SaveChangesAsync();
@@ -537,24 +562,7 @@ namespace Identity.Microservice.Controllers
                 .Where(a => !string.IsNullOrWhiteSpace(a.ParentTenantId))
                 .GroupBy(a => a.ParentTenantId!)
                 .ToDictionary(g => g.Key, g => g.Select(x => x.TenantId).ToList());
-            var queue = new Queue<string>();
-            queue.Enqueue(rootTenantId);
-            while (queue.Count > 0)
-            {
-                var current = queue.Dequeue();
-                if (byParent.TryGetValue(current, out var children))
-                {
-                    foreach (var child in children)
-                    {
-                        if (!result.Contains(child))
-                        {
-                            result.Add(child);
-                            queue.Enqueue(child);
-                        }
-                    }
-                }
-            }
-            return result;
+            return AgencyTenantScope.GetSubtree(rootTenantId, byParent);
         }
     }
 }

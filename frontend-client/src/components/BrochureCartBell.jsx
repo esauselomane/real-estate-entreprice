@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, X, Loader2 } from 'lucide-react';
+import { ShoppingCart, X, Loader2 } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 import { useAppUi } from '../contexts/AppUiContext.jsx';
 
 /**
@@ -12,6 +13,11 @@ import { useAppUi } from '../contexts/AppUiContext.jsx';
  * for us, so we just trust the response).
  */
 export default function BrochureCartBell() {
+  const { activeProfile } = useAuth();
+  const seenKey = `brochure-carts-seen:${activeProfile?.id || activeProfile?.userId || activeProfile?.email || 'session'}`;
+  const [seenCards, setSeenCards] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(seenKey) || '{}'); } catch { return {}; }
+  });
   const [carts, setCarts] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -40,7 +46,7 @@ export default function BrochureCartBell() {
     setError('');
     try {
       const list = await crmService.getActiveBrochureCards();
-      setCarts(Array.isArray(list) ? list : []);
+      setCarts(Array.isArray(list) ? list.filter(cart => cart && cart.cardId) : []);
     } catch (err) {
       setError(err?.message || 'Failed to load brochure carts.');
     } finally {
@@ -72,6 +78,9 @@ export default function BrochureCartBell() {
   }, []);
 
   const openCart = (cart) => {
+    const updatedSeenCards = { ...seenCards, [cart.cardId]: cart.createdAt || true };
+    setSeenCards(updatedSeenCards);
+    try { localStorage.setItem(seenKey, JSON.stringify(updatedSeenCards)); } catch { /* Storage may be disabled. */ }
     // The brochure workspace expects a deal-shaped object; we have a card
     // with a `dealId`. Pass the card through with dealId intact and let
     // BrochureBuilderWorkspace resolve the deal via getBrochureCardByDeal.
@@ -81,7 +90,7 @@ export default function BrochureCartBell() {
     setIsOpen(false);
   };
 
-  const badgeCount = carts.length;
+  const badgeCount = carts.filter(cart => seenCards[cart.cardId] !== (cart.createdAt || true)).length;
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -92,7 +101,7 @@ export default function BrochureCartBell() {
         title="Brochure carts"
         aria-label={`Open brochure carts (${badgeCount})`}
       >
-        <Bell size={16} />
+        <ShoppingCart size={16} />
         {badgeCount > 0 && (
           <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center border border-slate-900">
             {badgeCount > 99 ? '99+' : badgeCount}

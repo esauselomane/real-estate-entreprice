@@ -1,5 +1,6 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
+COPY ["backend-services/Shared.Access/", "backend-services/Shared.Access/"]
 
 COPY ["backend-services/Property.Microservice/Property.Microservice.csproj", "backend-services/Property.Microservice/"]
 COPY ["backend-services/Property.Microservice/appsettings.json", "backend-services/Property.Microservice/"]

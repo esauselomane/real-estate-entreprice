@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Check, Loader2, Eye, EyeOff } from 'lucide-react';
 import { authService } from '../services/authService.js';
 
-export default function SetPassword({ activationToken, onPasswordSet }) {
+export default function SetPassword({ activationToken, recoveryToken, onPasswordSet }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [state, setState] = useState('idle'); // idle | submitting | success | error
@@ -10,7 +10,7 @@ export default function SetPassword({ activationToken, onPasswordSet }) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  if (!activationToken) {
+  if (!activationToken && !recoveryToken) {
     return (
       <div className="min-h-screen w-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-zinc-950 p-6">
         <div className="w-full max-w-md bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-8 rounded-2xl shadow-2xl shadow-black/50">
@@ -25,8 +25,8 @@ export default function SetPassword({ activationToken, onPasswordSet }) {
     e.preventDefault();
     setError('');
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (password.length < (recoveryToken ? 8 : 6)) {
+      setError(`Password must be at least ${recoveryToken ? 8 : 6} characters.`);
       return;
     }
     if (password !== confirmPassword) {
@@ -36,7 +36,8 @@ export default function SetPassword({ activationToken, onPasswordSet }) {
 
     setState('submitting');
     try {
-      await authService.setTrialPassword(activationToken, password);
+      if (recoveryToken) await authService.resetPassword(recoveryToken, password, confirmPassword);
+      else await authService.setTrialPassword(activationToken, password);
       setState('success');
       if (onPasswordSet) onPasswordSet();
     } catch (err) {
@@ -84,7 +85,7 @@ export default function SetPassword({ activationToken, onPasswordSet }) {
               <input
                 type={showPassword ? "text" : "password"}
                 required
-                minLength={6}
+                minLength={recoveryToken ? 8 : 6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={state === 'submitting' || state === 'success'}
@@ -110,7 +111,7 @@ export default function SetPassword({ activationToken, onPasswordSet }) {
               <input
                 type={showConfirm ? "text" : "password"}
                 required
-                minLength={6}
+                minLength={recoveryToken ? 8 : 6}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 disabled={state === 'submitting' || state === 'success'}

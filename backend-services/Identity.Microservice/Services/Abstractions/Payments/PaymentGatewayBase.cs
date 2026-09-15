@@ -1,3 +1,4 @@
+using Identity.Microservice.Models;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -29,6 +30,7 @@ namespace Identity.Microservice.Services.Abstractions.Payments
         }
 
         public abstract PaymentGateway GatewayType { get; }
+        public abstract bool SupportsPortal { get; }
 
         public abstract Task<CreateCheckoutResult> CreateCheckoutSessionAsync(CreateCheckoutRequest request, CancellationToken cancellationToken = default);
 

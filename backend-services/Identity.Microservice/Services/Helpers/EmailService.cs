@@ -1,145 +1,46 @@
 using System.Net;
 using System.Net.Mail;
 using Microsoft.Extensions.Options;
-using Identity.Microservice.DTOs;
 using Identity.Microservice.Models;
+using Shared.Presentation.Email;
 
-namespace Identity.Microservice.Services
+namespace Identity.Microservice.Services;
+
+public interface IEmailService
 {
-    public interface IEmailService
+    Task SendPasswordSetupEmailAsync(string toEmail, string toName, string activationLink, string agencyName);
+    Task SendEmailAsync(string toEmail, string subject, string htmlBody);
+}
+
+/// <summary>System-branded account email delivery. The logo is embedded from the application's public asset.</summary>
+public sealed class EmailService(IOptions<EmailSettings> options, ILogger<EmailService> logger) : IEmailService
+{
+    private readonly EmailSettings settings = options.Value;
+
+    public Task SendPasswordSetupEmailAsync(string toEmail, string toName, string activationLink, string agencyName)
     {
-        Task SendPasswordSetupEmailAsync(string toEmail, string toName, string activationLink, string agencyName);
-        Task SendEmailAsync(string toEmail, string subject, string htmlBody);
+        var body = $"<p>Your account for <strong>{EmailLayout.Encode(agencyName)}</strong> is ready. Set your password to securely access your workspace.</p><p>This invitation expires after 48 hours. If you were not expecting it, contact your agency administrator.</p>";
+        return DeliverAsync(toEmail, new EmailContent("Biscove Real Estate Tech", "Welcome — set up your account", $"Hello {toName},", body, "Set your password", activationLink, UseSystemLogo: true));
     }
 
-    public class EmailService : IEmailService
+    public Task SendEmailAsync(string toEmail, string subject, string htmlBody) =>
+        DeliverAsync(toEmail, new EmailContent("Biscove Real Estate Tech", subject, "Hello,", htmlBody, UseSystemLogo: true));
+
+    private async Task DeliverAsync(string recipient, EmailContent content)
     {
-        private readonly EmailSettings _settings;
-        private readonly ILogger<EmailService> _logger;
-        private readonly IWebHostEnvironment _env;
-        private readonly IHttpClientFactory _httpClientFactory;
-
-        public EmailService(
-            IOptions<EmailSettings> settings,
-            ILogger<EmailService> logger,
-            IWebHostEnvironment env,
-            IHttpClientFactory httpClientFactory)
+        if (string.IsNullOrWhiteSpace(settings.Host))
         {
-            _settings = settings.Value;
-            _logger = logger;
-            _env = env;
-            _httpClientFactory = httpClientFactory;
+            logger.LogInformation("Email queued for simulation: {Subject}. SMTP is not configured.", content.Subject);
+            return;
         }
-
-        public async Task SendPasswordSetupEmailAsync(string toEmail, string toName, string activationLink, string agencyName)
+        using var message = EmailLayout.CreateMessage(settings.FromAddress, recipient, content);
+        if (!string.IsNullOrWhiteSpace(settings.SupportEmail)) message.ReplyToList.Add(new MailAddress(settings.SupportEmail));
+        using var client = new SmtpClient(settings.Host, settings.Port)
         {
-            try
-            {
-                var templateRoot = _settings.TemplatesRootPath ?? Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "templates");
-                var templatePath = Path.Combine(templateRoot, "registration", "password-setup.html");
-                string htmlBody;
-                if (File.Exists(templatePath))
-                {
-                    htmlBody = await File.ReadAllTextAsync(templatePath);
-                    htmlBody = htmlBody
-                        .Replace("{{recipient_name}}", toName)
-                        .Replace("{{agency_name}}", agencyName)
-                        .Replace("{{activation_link}}", activationLink)
-                        .Replace("{{support_email}}", _settings.SupportEmail);
-                }
-                else
-                {
-                    _logger.LogWarning("Email template not found at {TemplatePath}, using fallback plain text", templatePath);
-                    htmlBody = $"<h1>Welcome to {agencyName}</h1><p>Hi {toName},</p><p>Your agency account is ready. <a href=\"{activationLink}\">Click here to set your password</a>.</p>";
-                }
-
-                // Send via SMTP
-                if (!string.IsNullOrEmpty(_settings.Host))
-                {
-                    await SendViaSmtpAsync(toEmail, toName, htmlBody, agencyName);
-                    _logger.LogInformation("Password setup email sent via SMTP to {Email} ({Name}) for agency {AgencyName}",
-                        toEmail, toName, agencyName);
-                    return;
-                }
-
-                _logger.LogInformation("No email provider configured. Using fallback simulation log.");
-                await SendFallbackEmailAsync(toEmail, toName, activationLink, agencyName);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to send password setup email to {Email}. Using fallback simulation log.", toEmail);
-                await SendFallbackEmailAsync(toEmail, toName, activationLink, agencyName);
-            }
-        }
-
-        public async Task SendEmailAsync(string toEmail, string subject, string htmlBody)
-        {
-            try
-            {
-                if (!string.IsNullOrEmpty(_settings.Host))
-                {
-                    using var message = new MailMessage(_settings.FromAddress, toEmail)
-                    {
-                        Subject = subject,
-                        Body = htmlBody,
-                        IsBodyHtml = true,
-                        From = new MailAddress(_settings.FromAddress, _settings.FromName)
-                    };
-                    message.ReplyToList.Add(new MailAddress(_settings.SupportEmail, "Support"));
-
-                    using var client = new System.Net.Mail.SmtpClient();
-                    client.Host = _settings.Host;
-                    client.Port = _settings.Port;
-                    client.EnableSsl = _settings.EnableSsl;
-                    client.DeliveryMethod = SmtpDeliveryMethod.Network;
-                    client.UseDefaultCredentials = false;
-                    if (!string.IsNullOrEmpty(_settings.Username))
-                        client.Credentials = new NetworkCredential(_settings.Username, _settings.Password);
-
-                    await client.SendMailAsync(message);
-                    _logger.LogInformation("Email sent via SMTP to {Email} - Subject: {Subject}", toEmail, subject);
-                    return;
-                }
-
-                _logger.LogInformation("No email provider configured. Using fallback simulation log.");
-                _logger.LogInformation("[EMAIL SIMULATION]: {Subject} -> {Email} | Body: {Body}", subject, toEmail, htmlBody);
-                await Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to send email to {Email} - Subject: {Subject}", toEmail, subject);
-            }
-        }
-
-        private async Task SendViaSmtpAsync(string toEmail, string toName, string htmlBody, string agencyName)
-        {
-            using var message = new MailMessage(_settings.FromAddress, toEmail)
-            {
-                Subject = $"Welcome to {agencyName} — Set Your Password",
-                Body = htmlBody,
-                IsBodyHtml = true,
-                From = new MailAddress(_settings.FromAddress, _settings.FromName)
-            };
-            message.ReplyToList.Add(new MailAddress(_settings.SupportEmail, "Support"));
-
-            using var client = new System.Net.Mail.SmtpClient();
-            client.Host = _settings.Host;
-            client.Port = _settings.Port;
-            client.EnableSsl = _settings.EnableSsl;
-            client.DeliveryMethod = SmtpDeliveryMethod.Network;
-            client.UseDefaultCredentials = false;
-            if (!string.IsNullOrEmpty(_settings.Username))
-                client.Credentials = new NetworkCredential(_settings.Username, _settings.Password);
-
-            await client.SendMailAsync(message);
-        }
-
-        private async Task SendFallbackEmailAsync(string toEmail, string toName, string activationLink, string agencyName)
-        {
-            _logger.LogInformation(
-                    "[EMAIL SIMULATION]: Password setup email -> {RecipientName} ({Email}) | Agency: {AgencyName} | Link: {ActivationLink}",
-                    toName, toEmail, agencyName, activationLink);
-            await Task.CompletedTask;
-        }
+            EnableSsl = settings.EnableSsl,
+            Credentials = new NetworkCredential(settings.Username, settings.Password)
+        };
+        try { await client.SendMailAsync(message); }
+        catch (Exception exception) { logger.LogError(exception, "System email delivery failed for {Subject}", content.Subject); }
     }
 }

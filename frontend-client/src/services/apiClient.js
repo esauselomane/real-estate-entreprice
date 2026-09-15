@@ -32,6 +32,9 @@ apiClient.interceptors.response.use(
     const status = error.response?.status;
     const backendMessage = error.response?.data?.message;
     if (backendMessage) error.message = backendMessage;
+    if (status === 402 && error.response?.data?.code === 'subscription_required') {
+      window.dispatchEvent(new CustomEvent('open-billing'));
+    }
     if (status === 401) error.message = 'Your session has expired. Please sign in again.';
     if (status === 403) error.message = 'You do not have permission to view this resource.';
     if (status === 500 || status === 502 || status === 503 || status === 504)

@@ -268,10 +268,7 @@ export const crmService = {
 
   createAgency: async (payload) => {
     try {
-      const response = await apiClient.post('/crm/agencies', {
-        ...payload,
-        tenantId: crmService._resolveWriteTenantId() || payload.tenantId || 'TEN-001'
-      });
+      const response = await apiClient.post('/crm/agencies', { ...payload, trialStartDate: payload.trialStartDate || null, trialEndDate: payload.trialEndDate || null });
       return response.data;
     } catch (error) {
       throw normalizeError(error.response?.data?.message, 'Agency creation failed.');
@@ -360,7 +357,8 @@ export const crmService = {
           budgetMax: filters.budgetMax,
           propertyType: filters.propertyType,
           limit: filters.limit || 3,
-          ...crmService._tenantQueryParams()
+          ...crmService._tenantQueryParams(),
+          ...(filters.tenantId ? { tenantId: filters.tenantId } : {})
         }
       });
       return response.data.brokers || [];
@@ -759,7 +757,7 @@ export const crmService = {
   },
 
   // 📋 Agent performance leaderboard.
-  getBrokerLeaderboard: async (brokerId = null) => {
+  getBrokerPerformanceLeaderboard: async (brokerId = null) => {
     try {
       const params = { ...crmService._tenantQueryParams() };
       if (brokerId) params.brokerId = brokerId;

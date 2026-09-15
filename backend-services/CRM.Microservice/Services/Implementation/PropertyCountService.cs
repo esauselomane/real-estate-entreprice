@@ -29,7 +29,7 @@ public class PropertyCountService : IPropertyCountService
     }
 
     /// <inheritdoc/>
-    public async Task<int> GetTotalSoleMandatesAsync(IReadOnlyList<string> tenantIds, HttpContext httpContext)
+    public async Task<int?> GetTotalSoleMandatesAsync(IReadOnlyList<string> tenantIds, HttpContext httpContext)
     {
         if (tenantIds == null || tenantIds.Count == 0)
             return 0;
@@ -37,7 +37,8 @@ public class PropertyCountService : IPropertyCountService
         var propertyBaseUrl = _configuration["Gateway:BaseUrl"]
             ?? throw new InvalidOperationException("Gateway:BaseUrl is not configured in appsettings.json.");
 
-        using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
+        using var http = _httpClientFactory.CreateClient();
+        http.BaseAddress = new Uri(propertyBaseUrl.TrimEnd('/') + "/");
         var authHeader = httpContext.Request.Headers["Authorization"].FirstOrDefault();
         if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer "))
         {
@@ -64,7 +65,7 @@ public class PropertyCountService : IPropertyCountService
             _logger.LogWarning(ex, "GetTotalSoleMandatesAsync: could not fetch sole mandate count from property service");
         }
 
-        return 0;
+        return null;
     }
 
     /// <inheritdoc/>
@@ -76,7 +77,8 @@ public class PropertyCountService : IPropertyCountService
         var propertyBaseUrl = _configuration["Gateway:BaseUrl"]
             ?? throw new InvalidOperationException("Gateway:BaseUrl is not configured in appsettings.json.");
 
-        using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl) };
+        using var http = _httpClientFactory.CreateClient();
+        http.BaseAddress = new Uri(propertyBaseUrl.TrimEnd('/') + "/");
         var authHeader = httpContext.Request.Headers["Authorization"].FirstOrDefault();
         if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer "))
         {
@@ -92,11 +94,11 @@ public class PropertyCountService : IPropertyCountService
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
-                var points = JsonSerializer.Deserialize<List<PropertyGrowthPoint>>(json, new JsonSerializerOptions
+                var points = JsonSerializer.Deserialize<List<PropertyGrowthBucket>>(json, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 });
-                return points ?? new List<PropertyGrowthPoint>();
+                return points == null ? [] : BuildGrowthPoints(points);
             }
         }
         catch (Exception ex)
@@ -104,10 +106,10 @@ public class PropertyCountService : IPropertyCountService
             _logger.LogWarning(ex, "GetPropertiesGrowthOver6MonthsAsync: could not fetch property growth data from property service");
         }
 
-        return GenerateEmptyGrowthPoints();
+        return [];
     }
 
-    private static IReadOnlyList<PropertyGrowthPoint> GenerateEmptyGrowthPoints()
+    private static IReadOnlyList<PropertyGrowthPoint> BuildGrowthPoints(IReadOnlyList<PropertyGrowthBucket> buckets)
     {
         var now = DateTime.UtcNow;
         var points = new List<PropertyGrowthPoint>();
@@ -117,7 +119,7 @@ public class PropertyCountService : IPropertyCountService
             points.Add(new PropertyGrowthPoint
             {
                 Month = month.ToString("yyyy-MM"),
-                PropertyCount = 0
+                PropertyCount = buckets.Where(bucket => bucket.Year == month.Year && bucket.Month == month.Month).Sum(bucket => bucket.PropertyCount)
             });
         }
         return points;
