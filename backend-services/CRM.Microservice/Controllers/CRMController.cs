@@ -57,7 +57,6 @@ namespace CRM.Microservice.Controllers
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<OperationalRecord> query = OperationalRepository.Query();
-            if (visibleTenants.Count > 0)
                 query = query.Where(r => visibleTenants.Contains(r.TenantId));
             if (!string.IsNullOrWhiteSpace(module)) query = query.Where(r => r.Module == module);
             if (propertyId.HasValue) query = query.Where(r => r.PropertyId == propertyId.Value);
@@ -105,7 +104,8 @@ namespace CRM.Microservice.Controllers
         [HttpPut("operations/{recordId:int}")]
         public async Task<IActionResult> UpdateOperationalRecord(int recordId, [FromBody] OperationalRecord updatedRecord)
         {
-            var record = await OperationalRepository.GetByIdAsync(recordId);
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var record = await OperationalRepository.Query().FirstOrDefaultAsync(item => item.OperationalRecordId == recordId && permittedTenantIds.Contains(item.TenantId));
             if (record == null) return NotFound(new { message = "Operational record not found." });
 
             var permission = (record.Module ?? string.Empty).ToLowerInvariant() switch
@@ -147,7 +147,6 @@ namespace CRM.Microservice.Controllers
                 .AsNoTracking()
                 .Include(c => c.CompanyDetails)
                 .Include(c => c.LegalEntityDetails);
-            if (visibleTenants.Count > 0)
                 query = query.Where(c => visibleTenants.Contains(c.TenantId));
             if (!string.IsNullOrEmpty(contactType))
             {
@@ -196,7 +195,6 @@ namespace CRM.Microservice.Controllers
                 .AsNoTracking()
                 .Include(c => c.CompanyDetails)
                 .Include(c => c.LegalEntityDetails);
-            if (visibleTenants.Count > 0)
                 query = query.Where(c => visibleTenants.Contains(c.TenantId));
             if (!string.IsNullOrEmpty(request.ContactType))
             {
@@ -300,7 +298,7 @@ namespace CRM.Microservice.Controllers
         }
 
         [HttpPut("contacts/{contactId}")]
-        public async Task<IActionResult> UpdateContact(string contactId, [FromBody] Contact updatedContact)
+        public async Task<IActionResult> UpdateContact(string contactId, [FromBody] UpdateContactRequest updatedContact)
         {
             if (!await PermissionCheck.HasPermissionAsync("users:edit"))
             {
@@ -308,8 +306,14 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var existing = await ContactRepository.GetByIdAsync(contactId);
+            var visibleTenants = await GetVisibleTenantIdsAsync(null);
+            var existing = await ContactRepository.Query().FirstOrDefaultAsync(contact => contact.ContactId == contactId && visibleTenants.Contains(contact.TenantId));
             if (existing == null) return NotFound(new { message = "Contact record not found." });
+            var companyId = string.IsNullOrWhiteSpace(updatedContact.AssociatedCompanyId) ? null : updatedContact.AssociatedCompanyId;
+            var company = companyId == null ? null : await DbContext.CRMCompanies.FirstOrDefaultAsync(company => company.CompanyId == companyId && company.TenantId == existing.TenantId);
+            if (companyId != null && company == null) return BadRequest(new { message = "The company must belong to the contact's agency." });
+            if (!string.IsNullOrWhiteSpace(updatedContact.AgencyId) && !await AgencyRepository.Query().AnyAsync(agency => agency.AgencyId == updatedContact.AgencyId && agency.TenantId == existing.TenantId))
+                return BadRequest(new { message = "The agency must match the contact's tenant." });
 
             existing.ContactType = updatedContact.ContactType;
             existing.FullName = updatedContact.FullName;
@@ -322,9 +326,9 @@ namespace CRM.Microservice.Controllers
             existing.PropertyTypeInterests = updatedContact.PropertyTypeInterests;
             existing.AreaInterestIds = updatedContact.AreaInterestIds;
             existing.Notes = updatedContact.Notes;
-            existing.AssociatedCompanyId = updatedContact.AssociatedCompanyId;
-            existing.AssociatedLegalEntityId = updatedContact.AssociatedLegalEntityId;
-            existing.AgencyId = updatedContact.AgencyId;
+            existing.AssociatedCompanyId = companyId;
+            existing.AssociatedLegalEntityId = company?.AssociatedLegalEntityId;
+            existing.AgencyId = string.IsNullOrWhiteSpace(updatedContact.AgencyId) ? null : updatedContact.AgencyId;
             existing.IsAgencyAdmin = updatedContact.IsAgencyAdmin;
 
             await DbContext.SaveChangesAsync();
@@ -345,7 +349,6 @@ namespace CRM.Microservice.Controllers
                 page, callerRole, tenantId ?? "(default)", visibleTenants.Count);
 
             IQueryable<AgencyRecord> query = AgencyRepository.Query();
-            if (visibleTenants.Count > 0)
             {
                 query = query.Where(a => visibleTenants.Contains(a.TenantId));
             }
@@ -388,7 +391,6 @@ namespace CRM.Microservice.Controllers
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<AgencyRecord> query = AgencyRepository.Query();
-            if (visibleTenants.Count > 0)
             {
                 query = query.Where(a => visibleTenants.Contains(a.TenantId));
             }
@@ -537,7 +539,8 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var exists = await AgencyRepository.Query().AnyAsync(a => a.AgencyId == agencyId);
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var exists = await AgencyRepository.Query().AnyAsync(a => a.AgencyId == agencyId && permittedTenantIds.Contains(a.TenantId));
             if (!exists) return NotFound(new { message = "Agency not found." });
             var contacts = await ContactRepository.Query()
                 .Where(c => c.AgencyId == agencyId)
@@ -554,13 +557,15 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var agency = await AgencyRepository.Query().FirstOrDefaultAsync(a => a.AgencyId == agencyId);
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var agency = await AgencyRepository.Query().FirstOrDefaultAsync(a => a.AgencyId == agencyId && permittedTenantIds.Contains(a.TenantId));
             if (agency == null) return NotFound(new { message = "Agency not found." });
             if (string.IsNullOrWhiteSpace(contact.FullName))
                 return BadRequest(new { message = "Contact full name is required." });
 
             contact.ContactId = "CON-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
             contact.AgencyId = agencyId;
+            contact.TenantId = agency.TenantId;
             contact.CreatedAt = DateTime.UtcNow;
             ContactRepository.Add(contact);
             await DbContext.SaveChangesAsync();
@@ -575,7 +580,8 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var existing = await ContactRepository.GetByIdAsync(contactId);
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var existing = await ContactRepository.Query().FirstOrDefaultAsync(contact => contact.ContactId == contactId && permittedTenantIds.Contains(contact.TenantId));
             if (existing == null) return NotFound(new { message = "Contact not found." });
             ContactRepository.Remove(existing);
             await DbContext.SaveChangesAsync();
@@ -592,7 +598,8 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var contact = await ContactRepository.Query().FirstOrDefaultAsync(c => c.ContactId == contactId);
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var contact = await ContactRepository.Query().FirstOrDefaultAsync(c => c.ContactId == contactId && permittedTenantIds.Contains(c.TenantId));
             if (contact == null) return NotFound(new { message = "Contact not found." });
 
             var broker = new BrokerRecord
@@ -624,7 +631,6 @@ namespace CRM.Microservice.Controllers
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<BrokerRecord> query = BrokerRepository.Query();
-            if (visibleTenants.Count > 0)
                 query = query.Where(b => visibleTenants.Contains(b.TenantId));
             var ordered = query.OrderBy(b => b.AgencyId).ThenBy(b => b.FullName);
             var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
@@ -652,8 +658,11 @@ namespace CRM.Microservice.Controllers
 
              if (string.IsNullOrWhiteSpace(broker.BrokerId))
                 broker.BrokerId = "BRK-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
-            // 🔐 Tenant taken from the caller's JWT, never from the request body.
-            broker.TenantId = GetCurrentTenant();
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            if (string.IsNullOrWhiteSpace(broker.TenantId)) broker.TenantId = GetCurrentTenant();
+            if (!permittedTenantIds.Contains(broker.TenantId)) return Forbid();
+            if (!await AgencyRepository.Query().AnyAsync(agency => agency.AgencyId == broker.AgencyId && agency.TenantId == broker.TenantId))
+                return BadRequest(new { message = "The broker agency must match the selected tenant." });
             broker.CreatedAt = DateTime.UtcNow;
             BrokerRepository.Add(broker);
             await DbContext.SaveChangesAsync();
@@ -669,7 +678,8 @@ namespace CRM.Microservice.Controllers
                 return Forbid();
             }
 
-            var broker = await BrokerRepository.GetByIdAsync(brokerId);
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var broker = await BrokerRepository.Query().FirstOrDefaultAsync(item => item.BrokerId == brokerId && permittedTenantIds.Contains(item.TenantId));
             if (broker == null) return NotFound(new { message = "Broker record not found." });
             broker.AgencyId = updatedBroker.AgencyId;
             broker.FullName = updatedBroker.FullName;
@@ -707,7 +717,7 @@ namespace CRM.Microservice.Controllers
                 return NotFound(new { message = "Contact record not found." });
             }
 
-            if (visibleTenants.Count > 0 && !visibleTenants.Contains(contact.TenantId))
+            if (!visibleTenants.Contains(contact.TenantId))
             {
                 Logger.LogWarning("GetContactById: ContactId={ContactId} outside visible tenants", contactId);
                 return Forbid();
@@ -731,7 +741,6 @@ namespace CRM.Microservice.Controllers
 
             IQueryable<LeadRecord> leadsQuery = LeadRepository.Query().Where(l => !l.IsConvertedToDeal);
             IQueryable<DealRecord> dealsQuery = DealRepository.Query();
-            if (visibleTenants.Count > 0)
             {
                 leadsQuery = leadsQuery.Where(l => visibleTenants.Contains(l.TenantId));
                 dealsQuery = dealsQuery.Where(d => visibleTenants.Contains(d.TenantId));
@@ -793,7 +802,6 @@ namespace CRM.Microservice.Controllers
                 .Where(l => !isBroker || l.AllocatedBrokerIds == callerId || l.AllocatedBrokerIds.StartsWith(callerId + ",") || (l.AllocatedBrokerIds.Contains("," + callerId + ",") || l.AllocatedBrokerIds.EndsWith("," + callerId)));
             IQueryable<DealRecord> baseDealQuery = DealRepository.Query()
                 .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || (d.AllocatedBrokerIds.Contains("," + callerId + ",") || d.AllocatedBrokerIds.EndsWith("," + callerId)));
-            if (visibleTenants.Count > 0)
             {
                 baseLeadQuery = baseLeadQuery.Where(l => visibleTenants.Contains(l.TenantId));
                 baseDealQuery = baseDealQuery.Where(d => visibleTenants.Contains(d.TenantId));
@@ -846,7 +854,6 @@ namespace CRM.Microservice.Controllers
                 .Where(d => (d.CreatedAt >= yearStart && d.CreatedAt < yearEnd) || (d.LastStageUpdatedAt >= yearStart && d.LastStageUpdatedAt < yearEnd))
                 .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || (d.AllocatedBrokerIds.Contains("," + callerId + ",") || d.AllocatedBrokerIds.EndsWith("," + callerId)));
             if (visibleTenants.Count == 0) return Ok(new CRMReportOverview());
-            if (visibleTenants.Count > 0)
             {
                 tenantLeadsQuery = tenantLeadsQuery.Where(l => visibleTenants.Contains(l.TenantId));
                 tenantDealsQuery = tenantDealsQuery.Where(d => visibleTenants.Contains(d.TenantId));
@@ -880,7 +887,6 @@ namespace CRM.Microservice.Controllers
 
             IQueryable<DealRecord> query = DealRepository.Query()
                 .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || (d.AllocatedBrokerIds.Contains("," + callerId + ",") || d.AllocatedBrokerIds.EndsWith("," + callerId)));
-            if (visibleTenants.Count > 0)
                 query = query.Where(d => visibleTenants.Contains(d.TenantId));
 
             var deals = await query.ToListAsync();
@@ -907,7 +913,6 @@ namespace CRM.Microservice.Controllers
             var callerId = GetCurrentUserId();
             IQueryable<DealRecord> query = DealRepository.Query()
                 .Where(d => !isBroker || d.AllocatedBrokerIds == callerId || d.AllocatedBrokerIds.StartsWith(callerId + ",") || (d.AllocatedBrokerIds.Contains("," + callerId + ",") || d.AllocatedBrokerIds.EndsWith("," + callerId)));
-            if (visibleTenants.Count > 0)
                 query = query.Where(d => visibleTenants.Contains(d.TenantId));
 
             // Pull per-deal data so we can apply the commission formula in
@@ -963,8 +968,9 @@ namespace CRM.Microservice.Controllers
 
             var scopeRecords = await deals.ToListAsync();
             var gci = scopeRecords.Sum(CommissionCalculator.Realised);
-            var configuredShare = HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetValue<decimal?>("Brokerage:CompanySharePercent");
-            var companyShare = configuredShare is >= 0 and <= 100 ? configuredShare : null;
+            // Current reporting rule: all broker commission is attributed to the company.
+            // Agency retention percentages are outside the current billing scope.
+            decimal? companyShare = 100m;
             decimal? companyDollar = companyShare.HasValue ? Math.Round(gci * companyShare.Value / 100m, 2) : null;
 
             // Active listings: call the property service to count
@@ -979,7 +985,8 @@ namespace CRM.Microservice.Controllers
                 var propertyBaseUrl = HttpContext.RequestServices
                     .GetRequiredService<IConfiguration>()["Gateway:BaseUrl"]
                     ?? throw new InvalidOperationException("Gateway:BaseUrl is not configured in appsettings.json.");
-                using var http = new HttpClient { BaseAddress = new Uri(propertyBaseUrl.TrimEnd('/') + "/") };
+                using var http = HttpClient.CreateClient();
+                http.BaseAddress = new Uri(propertyBaseUrl.TrimEnd('/') + "/");
                 var authHeader = HttpContext.Request.Headers["Authorization"].FirstOrDefault();
                 if (!string.IsNullOrEmpty(authHeader))
                     http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authHeader.Replace("Bearer ", ""));
@@ -992,6 +999,10 @@ namespace CRM.Microservice.Controllers
                     var obj = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(raw);
                     activeListings = obj.GetProperty("activeListings").GetInt32();
                     averageDom = obj.GetProperty("averageDom").GetDouble();
+                }
+                else
+                {
+                    Logger.LogWarning("GetBrokerMetrics: property metrics request returned HTTP {StatusCode}", (int)resp.StatusCode);
                 }
             }
             catch (Exception ex)
@@ -1082,7 +1093,8 @@ namespace CRM.Microservice.Controllers
                 effectiveBrokerId = callerId;
             }
 
-            var query = BrokerTargetRepository.Query();
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(tenantId);
+            var query = BrokerTargetRepository.Query().Where(target => permittedTenantIds.Contains(target.TenantId));
             if (!string.IsNullOrEmpty(effectiveBrokerId))
                 query = query.Where(t => t.BrokerId == effectiveBrokerId);
             if (year.HasValue)
@@ -1121,6 +1133,13 @@ namespace CRM.Microservice.Controllers
             string effectiveBrokerId = request.BrokerId ?? callerId;
             if (role == "Broker" && effectiveBrokerId != callerId)
                 return Forbid();
+
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var broker = await BrokerRepository.Query().FirstOrDefaultAsync(record => record.BrokerId == effectiveBrokerId && permittedTenantIds.Contains(record.TenantId));
+            if (broker == null) return NotFound(new { message = "Broker record not found in your agencies." });
+            tenantId = broker.TenantId;
+            if (request.Month is < 1 or > 12 || request.Year is < 2000 or > 9999)
+                return BadRequest(new { message = "A valid target month and year are required." });
 
             if (request.TargetCommission < 0)
                 return BadRequest(new { message = "Target commission must be non-negative." });

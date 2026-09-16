@@ -39,3 +39,6 @@ appsettings.local.json
 *.db-wal
 *.mdf
 *.ldf
+# Maps implementation and setup documentation are source, not credentials.
+!frontend-client/src/components/maps/GoogleAddressPicker.jsx
+!docs/maps/google-maps.md

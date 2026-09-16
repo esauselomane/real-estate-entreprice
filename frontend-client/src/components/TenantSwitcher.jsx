@@ -1,3 +1,4 @@
+import NameAvatar from './NameAvatar.jsx';
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Building2, Globe, Loader2, AlertCircle, X } from 'lucide-react';
 import { useTenant } from '../contexts/TenantContext.jsx';
@@ -68,7 +69,7 @@ export default function TenantSwitcher() {
         }`}
         title="Switch active tenant for reports and admin views"
       >
-        {isAllTenants ? <Globe size={14} className="text-blue-300" /> : <Building2 size={14} className="text-blue-300" />}
+        {isAllTenants ? <Globe size={14} className="text-blue-300" /> : <NameAvatar name={buttonLabel} src={activeAgency?.companyLogoUrl} />}
         <div className="flex flex-col items-start leading-tight min-w-[140px] max-w-[220px]">
           <span className="text-xs font-bold truncate w-full text-left">{buttonLabel}</span>
           <span className="text-[10px] text-slate-400 truncate w-full text-left">{subtitle}</span>
@@ -136,7 +137,7 @@ export default function TenantSwitcher() {
             )}
 
             {filtered.map((agency) => {
-              const isActive = activeTenantId === agency.agencyId;
+              const isActive = activeTenantId === agency.tenantId;
               return (
                 <button
                   key={agency.agencyId}
@@ -146,7 +147,7 @@ export default function TenantSwitcher() {
                     isActive ? 'bg-blue-950/40 text-blue-200' : 'text-slate-200'
                   }`}
                 >
-                  <Building2 size={12} className="text-slate-400" />
+                  <NameAvatar name={agency.tradingName || agency.name} src={agency.companyLogoUrl} />
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold truncate">{agency.tradingName || agency.name}</div>
                     <div className="text-[10px] text-slate-500 truncate">

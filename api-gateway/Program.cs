@@ -23,11 +23,13 @@ var crmPort = Environment.GetEnvironmentVariable("CRM_PORT") ?? "5003";
 var developerHost = Environment.GetEnvironmentVariable("DEVELOPER_HOST") ?? "developer-api";
 var developerPort = Environment.GetEnvironmentVariable("DEVELOPER_PORT") ?? "5006";
 
+var downstreamScheme = Environment.GetEnvironmentVariable("DOWNSTREAM_SCHEME") ?? "http";
+
 var ocelotJson = $@"{{
   ""Routes"": [
     {{
       ""DownstreamPathTemplate"": ""/api/auth/{{everything}}"",
-      ""DownstreamScheme"": ""http"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
       ""DownstreamHostAndPorts"": [
         {{
           ""Host"": ""{identityHost}"",
@@ -39,7 +41,7 @@ var ocelotJson = $@"{{
     }},
     {{
       ""DownstreamPathTemplate"": ""/api/properties/{{everything}}"",
-      ""DownstreamScheme"": ""http"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
       ""DownstreamHostAndPorts"": [
         {{
           ""Host"": ""{propertyHost}"",
@@ -51,7 +53,7 @@ var ocelotJson = $@"{{
     }},
     {{
       ""DownstreamPathTemplate"": ""/api/crm/{{everything}}"",
-      ""DownstreamScheme"": ""http"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
       ""DownstreamHostAndPorts"": [
         {{
           ""Host"": ""{crmHost}"",
@@ -63,7 +65,7 @@ var ocelotJson = $@"{{
     }},
     {{
       ""DownstreamPathTemplate"": ""/api/system/{{everything}}"",
-      ""DownstreamScheme"": ""http"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
       ""DownstreamHostAndPorts"": [
         {{
           ""Host"": ""{identityHost}"",
@@ -75,7 +77,7 @@ var ocelotJson = $@"{{
     }},
     {{
       ""DownstreamPathTemplate"": ""/api/payments/{{everything}}"",
-      ""DownstreamScheme"": ""http"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
       ""DownstreamHostAndPorts"": [
         {{
           ""Host"": ""{identityHost}"",
@@ -87,7 +89,7 @@ var ocelotJson = $@"{{
     }},
     {{
       ""DownstreamPathTemplate"": ""/api/developer/{{everything}}"",
-      ""DownstreamScheme"": ""http"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
       ""DownstreamHostAndPorts"": [
         {{
           ""Host"": ""{developerHost}"",
@@ -96,6 +98,30 @@ var ocelotJson = $@"{{
       ],
       ""UpstreamPathTemplate"": ""/gateway/developer/{{everything}}"",
       ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
+    }},
+    {{
+      ""DownstreamPathTemplate"": ""/api/user/{{everything}}"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
+      ""DownstreamHostAndPorts"": [
+        {{
+          ""Host"": ""{identityHost}"",
+          ""Port"": {identityPort}
+        }}
+      ],
+      ""UpstreamPathTemplate"": ""/gateway/user/{{everything}}"",
+      ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
+    }},
+    {{
+      ""DownstreamPathTemplate"": ""/profiles/{{everything}}"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
+      ""DownstreamHostAndPorts"": [
+        {{
+          ""Host"": ""{identityHost}"",
+          ""Port"": {identityPort}
+        }}
+      ],
+      ""UpstreamPathTemplate"": ""/gateway/profiles/{{everything}}"",
+      ""UpstreamHttpMethod"": [ ""Get"" ]
     }}
   ],
   ""GlobalConfiguration"": {{

@@ -180,6 +180,18 @@ namespace Identity.Microservice.Controllers
         }
 
         [Authorize]
+        [HttpGet("tenant-roster")]
+        public async Task<IActionResult> GetTenantRoster()
+        {
+            if (GetCurrentCanonicalRole() != "PlatformAdmin") return Forbid();
+            var tenants = await _tenantRepository.Query()
+                .OrderBy(tenant => tenant.AgencyName)
+                .Select(tenant => new { tenant.TenantId, Name = tenant.AgencyName })
+                .ToListAsync();
+            return Ok(tenants);
+        }
+
+        [Authorize]
         [HttpGet("visible-tenants")]
         public async Task<IActionResult> GetVisibleTenants()
         {

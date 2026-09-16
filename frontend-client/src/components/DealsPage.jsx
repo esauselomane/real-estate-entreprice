@@ -89,7 +89,11 @@ export default function DealsPage() {
       setStageAggregates(boards.aggregates?.dealStage || {});
       setDealPage(pageToLoad);
       setBrokers(brokersRes || []);
-      setContacts(contactsRes || []);
+      const resolvedContacts = Array.isArray(contactsRes) ? [...contactsRes] : [];
+      const knownIds = new Set(resolvedContacts.map(contact => contact.contactId));
+      const participantIds = [...new Set((boards.verifiedDeals || []).flatMap(deal => [deal.buyerClientId, deal.sellerClientId]).filter(Boolean))];
+      const missingContacts = await Promise.all(participantIds.filter(id => !knownIds.has(id)).map(id => crmService.getContact(id).catch(() => null)));
+      setContacts([...resolvedContacts, ...missingContacts.filter(Boolean)]);
       setActiveCards(cardsRes || []);
     } catch (err) {
       setErrorMessage(toErrorString(err, 'Failed to load deals.'));
@@ -364,7 +368,7 @@ export default function DealsPage() {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 font-medium">Buyer: <span className="text-blue-400 font-semibold">{contacts.find((c) => c.contactId === deal.buyerClientId)?.fullName || deal.buyerClientId}</span> • Seller: <span className="text-purple-400 font-semibold">{contacts.find((c) => c.contactId === deal.sellerClientId)?.fullName || deal.sellerClientId}</span></p>
+                  <p className="text-xs text-slate-400 font-medium">Buyer: <span className="text-blue-400 font-semibold">{contacts.find((c) => c.contactId === deal.buyerClientId)?.fullName || (deal.buyerClientId ? 'Contact unavailable' : 'Not assigned')}</span> • Seller: <span className="text-purple-400 font-semibold">{contacts.find((c) => c.contactId === deal.sellerClientId)?.fullName || (deal.sellerClientId ? 'Contact unavailable' : 'Not assigned')}</span></p>
                   {deal.commissionValue > 0 && (
                     <p className="text-[10px] text-slate-500 mt-1">
                       💰 Commission: {deal.commissionType === 'Percent' ? `${deal.commissionValue}%` : `R ${deal.commissionValue.toLocaleString()}`}

@@ -1,3 +1,4 @@
+import apiClient from '../services/apiClient.js';
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { crmService } from '../services/crmService.js';
 import { useAuth } from './AuthContext.jsx';
@@ -78,11 +79,15 @@ export function TenantProvider({ children }) {
     let cancelled = false;
     setAgenciesLoading(true);
     setAgenciesError('');
-    crmService
-      .getAgenciesRoster()
-      .then((rows) => {
+    Promise.all([crmService.getAgenciesRoster(undefined, true), isSuperAdmin ? apiClient.get('/auth/tenant-roster').then(response => response.data) : Promise.resolve([])])
+      .then(([rows, tenants]) => {
         if (cancelled) return;
-        setAgencies(Array.isArray(rows) ? rows : []);
+        const roster = Array.isArray(rows) ? [...rows] : [];
+        const represented = new Set(roster.map(row => row.tenantId));
+        for (const tenant of tenants) {
+          if (!represented.has(tenant.tenantId)) roster.push({ agencyId: tenant.tenantId, tenantId: tenant.tenantId, name: tenant.name, parentAgencyId: tenant.tenantId });
+        }
+        setAgencies(roster);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -94,7 +99,7 @@ export function TenantProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [canSwitch, activeProfile]);
+  }, [canSwitch, activeProfile, isSuperAdmin]);
 
   const visibleAgencies = useMemo(() => agencies, [agencies]);
 
@@ -151,7 +156,9 @@ export function TenantProvider({ children }) {
       // user picks a child, resolve its subtree on-demand — for a child
       // agency the server returns just the one row, so it's a single
       // quick call.
-      if (found.parentAgencyId && !subtreeCacheRef.current[found.agencyId]) {
+      if (found.agencyId === found.tenantId) {
+        setSubtreeCache(previous => ({ ...previous, [found.agencyId]: [found.tenantId] }));
+      } else if (found.parentAgencyId && !subtreeCacheRef.current[found.agencyId]) {
         crmService
           .getAgenciesRoster(found.agencyId)
           .then((rows) => {
@@ -215,7 +222,7 @@ export function TenantProvider({ children }) {
     if (!canSwitch || !agencies || agencies.length === 0) return undefined;
     let cancelled = false;
     const missing = agencies
-      .filter((a) => !a.parentAgencyId)
+      .filter((a) => !a.parentAgencyId && a.agencyId === activeAgencyId)
       .map((a) => a.agencyId)
       .filter((id) => id && !subtreeCache[id]);
     if (missing.length === 0) return undefined;
@@ -245,7 +252,7 @@ export function TenantProvider({ children }) {
     // We intentionally don't depend on subtreeCache to avoid an infinite
     // loop — the cache is updated via setSubtreeCache.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canSwitch, agencies]);
+  }, [canSwitch, agencies, activeAgencyId]);
 
   // 💾 Mirror the subtree cache into localStorage so the property service
   // (which lives outside React and reads localStorage directly) can

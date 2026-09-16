@@ -104,8 +104,9 @@ public abstract class CRMControllerBase : ControllerBase
                    ?? User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
         return role switch
         {
-            "SuperAdmin" or "Manager" => "PlatformAdmin",
-            "Admin" or "AgencyAdmin" => "AgencyAdmin",
+            "SuperAdmin" => "PlatformAdmin",
+            "Agent" => "Broker",
+            "Manager" or "Admin" or "AgencyAdmin" => "AgencyAdmin",
             _ => role ?? string.Empty
         };
     }
@@ -234,11 +235,11 @@ public abstract class CRMControllerBase : ControllerBase
         var overrideTenants = await ResolveOverrideSubtreeAsync(overrideAgencyId, role);
         if (overrideTenants == null)
         {
-            Logger.LogWarning("Tenant override unresolved: agencyId {Override} for role {Role} — falling back to base visibility",
+            Logger.LogWarning("Tenant override unresolved: agencyId {Override} for role {Role}",
                 overrideAgencyId, role);
-            return baseVisible;
+            return [];
         }
-        return overrideTenants;
+        return overrideTenants.Intersect(baseVisible, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>

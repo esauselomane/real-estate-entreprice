@@ -36,8 +36,11 @@ function resolveLoggedInTenantId() {
 // logged-in user's tenant so backend filters always see a tenant id.
 function tenantQueryParams() {
   const override = resolveActiveTenantOverride();
-  if (override && override !== '__all__') return { tenantId: override };
-  const fallback = resolveLoggedInTenantId();
+  if (override === '__all__') return {};
+  if (override) return { tenantId: override };
+  const profile = JSON.parse(localStorage.getItem('user_profile_data') || 'null');
+      if (['PlatformAdmin', 'SuperAdmin'].includes(profile?.role)) return {};
+      const fallback = resolveLoggedInTenantId();
   return fallback ? { tenantId: fallback } : {};
 }
 
@@ -135,6 +138,7 @@ export const authService = {
    },
 
     // --- 👤 SELF-ADMIN: profile, out-of-office, picture upload ---
+    profilePictureUrl: (url) => url?.startsWith('/profiles/') ? `${apiClient.defaults.baseURL.replace(/\/$/, '')}${url}` : url,
     getProfile: async () => {
       try {
         const response = await apiClient.get('/user/profile');

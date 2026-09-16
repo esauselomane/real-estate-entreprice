@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { LEAD_STAGES, leadStageName, leadStageChartData } from '../../frontend-client/src/constants/leadWorkflowStages.js';
+const source = readFileSync(new URL('../../backend-services/CRM.Microservice/Models/LeadWorkflowStage.cs', import.meta.url), 'utf8');
+const names = source.match(/enum LeadWorkflowStage\s*\{([^}]+)\}/)[1].split(',').map(value => value.trim()).filter(Boolean);
+assert.deepEqual(LEAD_STAGES, names, 'Frontend stages must match the C# enum and numeric order');
+assert.equal(leadStageName(1), 'AttemptedContact');
+assert.equal(leadStageName(4), 'Qualified');
+assert.equal(leadStageName('ClosedWon'), '');
+const chart = leadStageChartData({ Contacted: 3, Qualified: 7, ClosedWon: 999 });
+assert.equal(chart.length, names.length);
+assert.deepEqual(chart.map(row => row.value), [3, 0, 0, 0, 7]);
+assert.equal(leadStageChartData({ 1: 8 })[1].value, 8);
+console.log('Enum alignment, numeric mapping, zero-count stages and exclusion of deal stages: PASS');

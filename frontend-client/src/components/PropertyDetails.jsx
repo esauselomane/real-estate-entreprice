@@ -1,3 +1,4 @@
+import GoogleAddressPicker from './maps/GoogleAddressPicker.jsx';
 import PropertyStaticMap from './maps/PropertyStaticMap.jsx';
 import { useState, useEffect } from 'react';
 import {
@@ -958,7 +959,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               <div>
                 <h3 className="text-xl font-black text-white tracking-tight">{property.completeAddress}</h3>
                 <p className="text-xs text-blue-400 font-medium uppercase tracking-wider mt-0.5">
-                  {property.portfolioZoning} &bull; {property.propertyTypeDetails?.name || 'Commercial'} Sector
+                  {[property.portfolioZoning, property.propertyTypeDetails?.name].filter(Boolean).join(' • ') || 'Property classification not specified'}
                 </p>
               </div>
               <span className={`text-xs font-bold uppercase px-3 py-1 rounded-lg border ${
@@ -2096,10 +2097,11 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         <div className="fixed inset-0 z-50 p-4 bg-black/70 overflow-y-auto">
           <form onSubmit={handleSaveProperty} className="max-w-3xl mx-auto my-8 bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4">
             <h3 className="text-white font-bold">Edit property details</h3>
+<GoogleAddressPicker onSelect={address => setPropertyForm(previous => ({ ...previous, ...address }))} />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {[
                 ['completeAddress', 'Address'], ['erfSpatialSize', 'Erf size'], ['titleDeedType', 'Title deed type'], ['portfolioZoning', 'Zoning'], ['linkedOwnerId', 'Owner record ID'], ['valuationPrice', 'Valuation'], ['salePrice', 'Sale price'], ['tenantInstallationAllowance', 'TI allowance'], ['latitude', 'Latitude'], ['longitude', 'Longitude']
-              ].map(([key, label]) => <label key={key} className="text-[10px] text-slate-400 uppercase">{label}<input value={propertyForm[key] ?? ''} onChange={e => setPropertyForm({ ...propertyForm, [key]: e.target.value })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case" /></label>)}
+              ].map(([key, label]) => <label key={key} className="text-[10px] text-slate-400 uppercase">{label}<input value={propertyForm[key] ?? ''} onChange={e => setPropertyForm({ ...propertyForm, [key]: e.target.value, ...(key === 'completeAddress' ? { latitude: '', longitude: '' } : {}) })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case" /></label>)}
               <div className="md:col-span-2 text-[10px] text-slate-400 uppercase">
                 Listing Type
                 <div className="mt-1 flex gap-4 p-3 bg-slate-950 border border-slate-700 rounded-lg normal-case">

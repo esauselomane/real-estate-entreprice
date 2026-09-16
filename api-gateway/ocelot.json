@@ -10,7 +10,12 @@
         }
       ],
       "UpstreamPathTemplate": "/gateway/auth/{everything}",
-      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
     },
     {
       "DownstreamPathTemplate": "/api/properties/{everything}",
@@ -22,7 +27,12 @@
         }
       ],
       "UpstreamPathTemplate": "/gateway/properties/{everything}",
-      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
     },
     {
       "DownstreamPathTemplate": "/api/crm/{everything}",
@@ -34,7 +44,12 @@
         }
       ],
       "UpstreamPathTemplate": "/gateway/crm/{everything}",
-      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
     },
     {
       "DownstreamPathTemplate": "/api/system/{everything}",
@@ -46,7 +61,12 @@
         }
       ],
       "UpstreamPathTemplate": "/gateway/system/{everything}",
-      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
     },
     {
       "DownstreamPathTemplate": "/api/payments/{everything}",
@@ -58,7 +78,12 @@
         }
       ],
       "UpstreamPathTemplate": "/gateway/payments/{everything}",
-      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
     },
     {
       "DownstreamPathTemplate": "/api/developer/{everything}",
@@ -70,7 +95,42 @@
         }
       ],
       "UpstreamPathTemplate": "/gateway/developer/{everything}",
-      "UpstreamHttpMethod": [ "Get", "Post", "Put", "Delete" ]
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/user/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity",
+          "Port": 5001
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/user/{everything}",
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put"
+      ]
+    },
+    {
+      "DownstreamPathTemplate": "/profiles/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity",
+          "Port": 5001
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/profiles/{everything}",
+      "UpstreamHttpMethod": [
+        "Get"
+      ]
     }
   ],
   "GlobalConfiguration": {

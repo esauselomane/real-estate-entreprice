@@ -65,7 +65,9 @@ export const propertyService = {
     const subtreeList = resolvePropertyTenantIdList();
     if (subtreeList) return { tenantId: subtreeList };
     if (override) return { tenantId: override };
-    const fallback = resolveLoggedInTenantId();
+    const profile = JSON.parse(localStorage.getItem('user_profile_data') || 'null');
+      if (['PlatformAdmin', 'SuperAdmin'].includes(profile?.role)) return {};
+      const fallback = resolveLoggedInTenantId();
     return fallback ? { tenantId: fallback } : {};
   },
 

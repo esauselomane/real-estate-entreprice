@@ -1,3 +1,5 @@
+import NameAvatar from './NameAvatar.jsx';
+import { authService } from '../services/authService.js';
 import { useState, useRef, useEffect } from 'react';
 import { Home, Building, TrendingUp, User, PieChart, Key, ChevronDown, ChevronRight, LayoutDashboard, Activity, Search, Map, UserPlus, Briefcase, Users, UserCheck, BarChart3, Shield, Settings, Building2, ChevronLeft, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -18,11 +20,7 @@ export default function LeftSidebar() {
   const { hasPermission } = usePermission();
 
   const toggleCategory = (id) => {
-    setExpandedCategories(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    setExpandedCategories(previous => previous.has(id) ? new Set() : new Set([id]));
   };
 
   // Hierarchical navigation: 6 parent categories with expandable submenus
@@ -69,7 +67,7 @@ export default function LeftSidebar() {
       icon: PieChart,
       items: [
         { name: 'Performance Reports', view: 'reports', icon: BarChart3, permission: 'billing:view' },
-        { name: 'Agency at a Glance', view: 'agency-glance', icon: Building2, permission: 'billing:view' },
+        { name: 'Reports & Analytics', view: 'reports-analytics', roles: ['AgencyAdmin', 'PlatformAdmin'], icon: BarChart3, permission: 'billing:view' },
       ],
     },
     {
@@ -77,7 +75,8 @@ export default function LeftSidebar() {
       label: 'Administration',
       icon: Key,
       items: [
-        { name: 'System Admin', view: 'admin', icon: Shield, permission: 'agencies:view' },
+        { name: 'Agency Overview', view: 'agency-glance', roles: ['AgencyAdmin', 'PlatformAdmin'], icon: Building2 },
+        { name: 'System Admin', view: 'admin', roles: ['AgencyAdmin', 'PlatformAdmin'], icon: Shield, permission: 'agencies:view' },
         { name: 'Roles & Permissions', view: 'roles', icon: Settings, permission: 'system:roles:manage' },
       ],
     },
@@ -87,7 +86,7 @@ export default function LeftSidebar() {
   useEffect(() => {
     const cat = navCategories.find(c => c.items.some(item => item.view === currentView));
     if (cat && !expandedCategories.has(cat.id)) {
-      setExpandedCategories(prev => new Set([...prev, cat.id]));
+      setExpandedCategories(new Set([cat.id]));
     }
   }, [currentView]);
 
@@ -130,8 +129,9 @@ export default function LeftSidebar() {
             const CategoryIcon = category.icon;
             const isExpanded = expandedCategories.has(category.id);
             const isActive = isCategoryActive(category.id);
-            const categoryItems = category.items.filter(item => hasPermission(item.permission));
+            const categoryItems = category.items.filter(item => (!item.permission || hasPermission(item.permission)) && (!item.roles || item.roles.includes(userRole)));
 
+            if (categoryItems.length === 0) return null;
             return (
               <div key={category.id}>
                 <button
@@ -168,7 +168,7 @@ export default function LeftSidebar() {
                         <button
                           key={idx}
                           type="button"
-                          onClick={() => navigateTo(item.view)}
+                          onClick={() => { setExpandedCategories(new Set([category.id])); navigateTo(item.view); }}
                           aria-current={currentView === item.view ? 'page' : undefined}
                           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group cursor-pointer text-left ${currentView === item.view ? 'bg-blue-600/20 text-white border border-blue-900/70' : 'hover:bg-slate-800/60 hover:text-white border border-transparent'}`}
                         >
@@ -187,22 +187,22 @@ export default function LeftSidebar() {
 
           {/* 👤 Account Profile Session Footer Section */}
       <div className="p-3 border-t border-slate-800 bg-slate-950/40">
-        <div
+        <button
+          type="button"
+          aria-label="Open my profile"
           ref={profilePicRef}
           className="flex items-center gap-3 p-1 overflow-hidden cursor-pointer"
           onClick={() => setPopoutOpen(true)}
         >
           {/* Professional Round Profile Image Layout Container */}
-          <div className="w-10 h-10 rounded-full border-2 border-slate-700 bg-blue-600 flex items-center justify-center text-sm font-bold text-white min-w-10">
-            {(activeProfile?.name || 'U').split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()}
-          </div>
+          <NameAvatar name={activeProfile?.name} src={authService.profilePictureUrl(activeProfile?.avatarUrl || activeProfile?.avatar)} />
           {!isCollapsed && (
             <div className="flex flex-col min-w-0 flex-1">
               <span className="text-sm font-semibold text-white truncate">{activeProfile?.name || 'User session'}</span>
               <span className="text-xs text-slate-500 truncate">{userRole} Privilege</span>
             </div>
           )}
-        </div>
+        </button>
 
         {/* Minimal logout row button container */}
         <button onClick={logout} className="w-full mt-3 flex items-center gap-4 px-3 py-2 rounded-lg hover:bg-red-950/20 hover:text-red-400 text-slate-400 transition-colors cursor-pointer text-left text-xs font-medium">

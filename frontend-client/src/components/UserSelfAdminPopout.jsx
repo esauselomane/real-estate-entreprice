@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { User, LogOut, Key, Upload, Camera, CheckCircle, X, Shield, Zap } from 'lucide-react';
 import { authService } from '../services/authService.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -7,7 +8,7 @@ import { useEpilepsySafeMode } from './EpilepsySafeMode.jsx';
 const DEFAULT_AVATAR = 'https://api.dicebear.com/7.x/initials/svg?background=random';
 
 export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
-  const { activeProfile, logout } = useAuth();
+  const { activeProfile, logout, updateLocalProfile } = useAuth();
   const { epilepsySafeMode, toggleEpilepsySafeMode } = useEpilepsySafeMode();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -18,6 +19,25 @@ export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
   const [passwordSuccess, setPasswordSuccess] = useState('');
 
   const fileInputRef = useRef(null);
+  const dialogRef = useRef(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState('');
+  useEffect(() => {
+    if (isOpen && dialogRef.current && !dialogRef.current.open) dialogRef.current.showModal();
+  }, [isOpen]);
+  const saveDetails = async (event) => {
+    event.preventDefault();
+    setProfileSaving(true);
+    setProfileMessage('');
+    try {
+      await authService.updateProfile({ fullName: profile.fullName.trim(), licenseNumber: profile.licenseNumber || '' });
+      setProfileMessage('Your details have been saved.');
+      updateLocalProfile({ name: profile.fullName.trim() });
+      const saved = JSON.parse(localStorage.getItem('user_profile_data') || '{}');
+      localStorage.setItem('user_profile_data', JSON.stringify({ ...saved, name: profile.fullName.trim() }));
+    } catch (error) { setProfileMessage(error.message || 'Could not save your details.'); }
+    finally { setProfileSaving(false); }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -27,11 +47,12 @@ export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
 
   const loadProfile = async () => {
     setLoading(true);
+    setProfileMessage('');
     try {
       const data = await authService.getProfile();
       setProfile(data);
     } catch (err) {
-      console.warn('Failed to load profile for pop-out', err);
+      setProfileMessage(err.message || 'Could not load your profile. Please retry.');
     } finally {
       setLoading(false);
     }
@@ -39,7 +60,7 @@ export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
 
   const displayName = profile?.fullName || activeProfile?.name || 'User';
   const displayEmail = profile?.email || activeProfile?.email || '';
-  const avatarUrl = profile?.avatarUrl || activeProfile?.avatar || DEFAULT_AVATAR;
+  const avatarUrl = authService.profilePictureUrl(profile?.avatarUrl || activeProfile?.avatar) || DEFAULT_AVATAR;
 
   const handlePickFile = () => {
     if (fileInputRef.current) fileInputRef.current.click();
@@ -58,6 +79,7 @@ export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
     try {
       const result = await authService.uploadProfilePicture(file);
       setProfile((prev) => ({ ...prev, avatarUrl: result.avatarUrl }));
+      updateLocalProfile({ avatar: result.avatarUrl });
     } catch (err) {
       alert(err.message || 'Upload failed.');
     } finally {
@@ -107,37 +129,9 @@ export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
 
   if (!isOpen) return null;
 
-  const popoutWidth = 320;
-  const popoutMaxHeight = window.innerHeight - 80;
-
-  const position = anchorRect
-    ? {
-        position: 'fixed',
-        top: Math.min(anchorRect.bottom + 8, window.innerHeight - 200),
-        right: Math.max(8, window.innerWidth - anchorRect.right - popoutWidth),
-        maxHeight: popoutMaxHeight,
-        overflow: 'auto',
-      }
-    : {};
-
-  return (
-    <>
-      <div
-        className="fixed inset-0 z-40"
-        onClick={onClose}
-      />
-      <div
-        className="fixed z-50 bg-transparent"
-        style={{
-          top: anchorRect ? Math.min(anchorRect.bottom + 8, window.innerHeight - 200) : 8,
-          right: anchorRect ? Math.max(8, window.innerWidth - anchorRect.right - popoutWidth) : 8,
-        }}
-      >
-        <div
-          className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-80 max-w-sm"
-          onClick={(e) => e.stopPropagation()}
-          style={{ maxHeight: popoutMaxHeight, overflow: 'auto' }}
-        >
+  return createPortal(
+    <dialog ref={dialogRef} onCancel={onClose} aria-label="My profile" className="m-auto w-[calc(100%-2rem)] max-w-md max-h-[85dvh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-0 text-slate-100 shadow-2xl backdrop:bg-black/60">
+      <button type="button" onClick={onClose} aria-label="Close profile" className="absolute right-3 top-3 p-2 text-slate-300"><X size={18} /></button>
         <div className="p-4 border-b border-slate-800 flex items-center gap-3">
           <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-slate-700">
             <img
@@ -161,6 +155,14 @@ export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
         </div>
 
         <div className="p-2">
+          {!loading && !profile && profileMessage && <div role="alert" className="p-3 text-sm text-red-300">{profileMessage}<button type="button" onClick={loadProfile} className="ml-2 underline">Retry</button></div>}
+          {loading ? <p role="status" className="p-3 text-sm">Loading profile…</p> : profile && <form onSubmit={saveDetails} className="space-y-3 p-3">
+            <label className="block text-xs">Full name<input required maxLength={200} value={profile.fullName || ''} onChange={event => setProfile({ ...profile, fullName: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2" /></label>
+            <label className="block text-xs">License number<input maxLength={100} value={profile.licenseNumber || ''} onChange={event => setProfile({ ...profile, licenseNumber: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2" /></label>
+            <p className="text-xs text-slate-400">Role: {profile.systemRole}. Email and role are managed by your administrator.</p>
+            <button disabled={profileSaving} className="rounded-lg bg-blue-600 px-4 py-2 text-xs disabled:opacity-50">{profileSaving ? 'Saving…' : 'Save details'}</button>
+            {profileMessage && <p role="status" className="text-xs">{profileMessage}</p>}
+          </form>}
           <button
             type="button"
             onClick={handlePickFile}
@@ -261,8 +263,6 @@ export default function UserSelfAdminPopout({ isOpen, onClose, anchorRect }) {
             <span>Sign Out</span>
           </button>
         </div>
-      </div>
-    </div>
-    </>
+    </dialog>, document.body
   );
 }

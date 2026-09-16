@@ -58,7 +58,6 @@ public class LegalEntitiesController : CRMControllerBase
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<CRMLegalEntity> query = LegalEntityRepository.Query().AsNoTracking().Include(e => e.CompanyDetails);
-            if (visibleTenants.Count > 0)
                 query = query.Where(e => visibleTenants.Contains(e.TenantId));
             var ordered = query.OrderBy(e => e.RegisteredLegalName);
             var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
@@ -97,7 +96,8 @@ public class LegalEntitiesController : CRMControllerBase
                 return Forbid();
             }
 
-            var existing = await LegalEntityRepository.GetByIdAsync(updatedEntity.LegalEntityId);
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var existing = await LegalEntityRepository.Query().FirstOrDefaultAsync(entity => entity.LegalEntityId == updatedEntity.LegalEntityId && permittedTenantIds.Contains(entity.TenantId));
             if (existing == null) return NotFound(new { message = "Legal Entity record not found." });
 
             existing.RegisteredLegalName = updatedEntity.RegisteredLegalName;
@@ -121,7 +121,6 @@ public class LegalEntitiesController : CRMControllerBase
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<CRMLegalEntity> query = LegalEntityRepository.Query().AsNoTracking().Include(e => e.CompanyDetails);
-            if (visibleTenants.Count > 0)
                 query = query.Where(e => visibleTenants.Contains(e.TenantId));
 
             var term = (q ?? string.Empty).Trim().ToLower();
@@ -159,7 +158,7 @@ public class LegalEntitiesController : CRMControllerBase
                 .FirstOrDefaultAsync(e => e.LegalEntityId == legalEntityId);
             if (entity == null) return NotFound(new { message = "Legal entity record not found." });
 
-            if (visibleTenants.Count > 0 && !visibleTenants.Contains(entity.TenantId))
+            if (!visibleTenants.Contains(entity.TenantId))
                 return Forbid();
 
             return Ok(entity);

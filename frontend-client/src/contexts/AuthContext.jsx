@@ -23,6 +23,8 @@ const authReducer = (state, action) => {
         userRole: action.payload.role,
         isLoggedIn: true,
       };
+    case 'UPDATE_PROFILE':
+      return { ...state, activeProfile: { ...state.activeProfile, ...action.payload } };
     case 'LOGIN_START':
       return { ...state, isConnecting: true, errorMessage: '' };
     case 'LOGIN_SUCCESS':
@@ -135,6 +137,7 @@ export function AuthProvider({ children }) {
     login,
     register,
     logout,
+    updateLocalProfile: (profile) => dispatch({ type: 'UPDATE_PROFILE', payload: profile }),
     setRegistering: (value) => dispatch({ type: 'SET_REGISTERING', payload: value }),
     clearError: () => dispatch({ type: 'CLEAR_ERROR' }),
   };
