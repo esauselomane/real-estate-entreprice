@@ -776,10 +776,35 @@ namespace CRM.Microservice.Controllers
             HttpContext.Response.Headers["X-Deal-Count"] = dealTotal.ToString();
             HttpContext.Response.Headers["X-Aggregates"] = SerializeAggregates(aggregates);
 
+            var contactNameLookup = await BuildDealContactNameLookupAsync(activeDeals);
+
+            var dealsWithNames = activeDeals.Select(deal => new
+            {
+                dealId = deal.DealId,
+                tenantId = deal.TenantId,
+                allocatedBrokerIds = deal.AllocatedBrokerIds,
+                dealStage = deal.DealStage.ToString(),
+                linkedPropertyId = deal.LinkedPropertyId,
+                buyerClientId = deal.BuyerClientId,
+                buyerClientName = contactNameLookup.TryGetValue(deal.BuyerClientId, out var buyerName) ? buyerName : ResolveFallbackName(deal.BuyerClientId),
+                sellerClientId = deal.SellerClientId,
+                sellerClientName = contactNameLookup.TryGetValue(deal.SellerClientId, out var sellerName) ? sellerName : ResolveFallbackName(deal.SellerClientId),
+                transactionValue = deal.TransactionValue,
+                dealNotes = deal.DealNotes,
+                lastStageUpdatedAt = deal.LastStageUpdatedAt,
+                createdAt = deal.CreatedAt,
+                commissionType = deal.CommissionType,
+                commissionValue = deal.CommissionValue,
+                realisedCommission = deal.RealisedCommission,
+                realisedCommissionIsAuto = deal.RealisedCommissionIsAuto,
+                previousStage = deal.PreviousStage,
+                propertyAddress = deal.PropertyAddress
+            });
+
             return Ok(new
             {
                 unverifiedLeads = activeLeads,
-                verifiedDeals = activeDeals
+                verifiedDeals = dealsWithNames
             });
         }
         [HttpGet("report/summary")]
@@ -1311,6 +1336,9 @@ namespace CRM.Microservice.Controllers
                 .OrderBy(d => d.LastStageUpdatedAt)
                 .Take(20)
                 .ToListAsync();
+
+            var complianceContactLookup = await BuildDealContactNameLookupAsync(awaitingDeals);
+
             var awaiting = awaitingDeals
                 .Where(d => effectiveBrokerId == null || BrokerMatches(d.AllocatedBrokerIds, effectiveBrokerId))
                 .Select(d => new
@@ -1319,7 +1347,7 @@ namespace CRM.Microservice.Controllers
                     category = "compliance.awaiting_signature",
                     severity = "info",
                     title = $"Deal DL-{d.DealId} awaits broker signature",
-                    body = $"Buyer: {d.BuyerClientId} • Seller: {d.SellerClientId} • R {d.TransactionValue.ToString("N2")}",
+                    body = $"Buyer: {ResolveComplianceName(d.BuyerClientId, complianceContactLookup)} • Seller: {ResolveComplianceName(d.SellerClientId, complianceContactLookup)} • R {d.TransactionValue.ToString("N2")}",
                     linkType = "deal",
                     linkId = d.DealId.ToString(),
                     icon = "📝"
@@ -1618,5 +1646,54 @@ namespace CRM.Microservice.Controllers
             return Accepted(new { message = "Brochure generation request queued." });
         }
 
+        /// <summary>
+        /// Builds a lookup of ContactId → FullName for all buyer/seller
+        /// client IDs present on the current page of deal records.
+        /// </summary>
+        private async Task<Dictionary<string, string>> BuildDealContactNameLookupAsync(List<DealRecord> deals)
+        {
+            var participantIds = deals
+                .SelectMany(d => new[] { d.BuyerClientId, d.SellerClientId })
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (participantIds.Count == 0)
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            var contacts = await ContactRepository.Query()
+                .Where(c => participantIds.Contains(c.ContactId))
+                .ToDictionaryAsync(c => c.ContactId, c => c.FullName);
+
+            return contacts;
+        }
+
+        /// <summary>
+        /// Returns a human-readable fallback when a contact name cannot be resolved
+        /// (e.g. "Unknown Seller Pool" sentinel values inserted during lead promotion).
+        /// </summary>
+        private static string ResolveFallbackName(string clientId)
+        {
+            if (string.IsNullOrWhiteSpace(clientId))
+                return "Not assigned";
+            if (clientId == "Unknown Seller Pool")
+                return clientId;
+            return "Contact unavailable";
+        }
+
+        /// <summary>
+        /// Resolves a buyer/seller client ID to a display name using the provided
+        /// lookup dictionary. Used by the compliance inbox notification messages.
+        /// </summary>
+        private static string ResolveComplianceName(string clientId, Dictionary<string, string> lookup)
+        {
+            if (string.IsNullOrWhiteSpace(clientId))
+                return "Not assigned";
+            if (lookup.TryGetValue(clientId, out var name) && !string.IsNullOrEmpty(name))
+                return name;
+            if (clientId == "Unknown Seller Pool")
+                return clientId;
+            return "Contact unavailable";
+        }
     }
 }

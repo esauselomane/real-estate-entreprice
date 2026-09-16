@@ -222,7 +222,7 @@ export default function DealsPage() {
   const filteredDeals = deals.filter((d) => {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
-    return (d.buyerClientId || '').toLowerCase().includes(term) || (d.sellerClientId || '').toLowerCase().includes(term) || (d.dealStage || '').toLowerCase().includes(term);
+    return (d.buyerClientId || '').toLowerCase().includes(term) || (d.sellerClientId || '').toLowerCase().includes(term) || (d.buyerClientName || '').toLowerCase().includes(term) || (d.sellerClientName || '').toLowerCase().includes(term) || (d.dealStage || '').toLowerCase().includes(term);
   });
 
   const stageCounts = DEAL_STAGES.reduce((acc, stage) => { acc[stage] = Number(stageAggregates[stage] || 0); return acc; }, {});
@@ -368,7 +368,7 @@ export default function DealsPage() {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 font-medium">Buyer: <span className="text-blue-400 font-semibold">{contacts.find((c) => c.contactId === deal.buyerClientId)?.fullName || (deal.buyerClientId ? 'Contact unavailable' : 'Not assigned')}</span> • Seller: <span className="text-purple-400 font-semibold">{contacts.find((c) => c.contactId === deal.sellerClientId)?.fullName || (deal.sellerClientId ? 'Contact unavailable' : 'Not assigned')}</span></p>
+                  <p className="text-xs text-slate-400 font-medium">Buyer: <span className="text-blue-400 font-semibold">{deal.buyerClientName || (deal.buyerClientId ? 'Contact unavailable' : 'Not assigned')}</span> • Seller: <span className="text-purple-400 font-semibold">{deal.sellerClientName || (deal.sellerClientId ? 'Contact unavailable' : 'Not assigned')}</span></p>
                   {deal.commissionValue > 0 && (
                     <p className="text-[10px] text-slate-500 mt-1">
                       💰 Commission: {deal.commissionType === 'Percent' ? `${deal.commissionValue}%` : `R ${deal.commissionValue.toLocaleString()}`}
