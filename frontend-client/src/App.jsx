@@ -1,3 +1,4 @@
+import ReportsAnalytics from './components/ReportsAnalytics.jsx';
 import { useEffect, useState } from 'react';
 import LeftSidebar from './components/LeftSidebar.jsx';
 import PropertySearch from './components/PropertySearch.jsx';
@@ -244,9 +245,10 @@ export default function App() {
               {currentView === 'crm' && "Corporate CRM Pipeline"}
               {currentView === 'owners-tenants' && "Owner & Tenant Directory"}
               {currentView === 'reports' && "Performance Reports"}
+              {currentView === 'reports-analytics' && "Reports & Analytics"}
               {currentView === 'map' && "Property Map"}
               {currentView === 'admin' && "SuperAdmin Control Board"}
-              {currentView === 'agency-glance' && "Agency at a Glance"}
+              {currentView === 'agency-glance' && "Agency Overview"}
               {currentView === 'roles' && "Role & Permission Management"}
             </h2>
             <p className="text-slate-400 text-sm">
@@ -292,6 +294,7 @@ export default function App() {
           <OwnersTenantsWorkspace />
         )}
 
+        {currentView === 'reports-analytics' && ['AgencyAdmin', 'PlatformAdmin'].includes(userRole) && <ReportsAnalytics />}
         {currentView === 'reports' && (
           <ReportsWorkspace />
         )}
@@ -317,7 +320,7 @@ export default function App() {
           />
         )}
 
-        {currentView === 'agency-glance' && hasPermission('billing:view') && (
+        {currentView === 'agency-glance' && ['AgencyAdmin', 'PlatformAdmin'].includes(userRole) && (
           <AgencyGlance />
         )}
         {currentView === 'admin' && hasPermission('agencies:view') && (

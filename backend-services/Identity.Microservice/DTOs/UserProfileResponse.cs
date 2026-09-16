@@ -17,7 +17,10 @@ namespace Identity.Microservice.DTOs
 
     public record class UpdateProfileRequest
     {
+        [System.ComponentModel.DataAnnotations.StringLength(200, MinimumLength = 1)]
         public string? FullName { get; init; }
+        [System.ComponentModel.DataAnnotations.StringLength(100)]
+        public string? LicenseNumber { get; init; }
         public bool? OutOfOffice { get; init; }
         public bool? EpilepsySafeMode { get; init; }
     }

@@ -84,6 +84,8 @@ export const crmService = {
     _tenantQueryParams: () => {
       const override = resolveActiveTenantOverride();
       if (override) return { tenantId: override };
+      const profile = JSON.parse(localStorage.getItem('user_profile_data') || 'null');
+      if (['PlatformAdmin', 'SuperAdmin'].includes(profile?.role)) return {};
       const fallback = resolveLoggedInTenantId();
       return fallback ? { tenantId: fallback } : {};
     },
@@ -255,9 +257,9 @@ export const crmService = {
   // them. Honours the same `?tenantId=` override the rest of the
   // visibility helpers use, so the dropdown can also be filtered to a
   // specific subtree.
-  getAgenciesRoster: async (tenantIdOverride) => {
+  getAgenciesRoster: async (tenantIdOverride, ignoreActiveFilter = false) => {
     try {
-      const params = { ...crmService._tenantQueryParams() };
+      const params = ignoreActiveFilter ? {} : { ...crmService._tenantQueryParams() };
       if (tenantIdOverride) params.tenantId = tenantIdOverride;
       const response = await apiClient.get('/crm/agencies/roster', { params });
       return Array.isArray(response.data) ? response.data : [];
@@ -371,7 +373,7 @@ export const crmService = {
     try {
       const response = await apiClient.post('/crm/brokers', {
         ...payload,
-        tenantId: crmService._resolveWriteTenantId() || payload.tenantId || 'TEN-001'
+        tenantId: payload.tenantId || crmService._resolveWriteTenantId()
       });
       return response.data;
     } catch (error) {

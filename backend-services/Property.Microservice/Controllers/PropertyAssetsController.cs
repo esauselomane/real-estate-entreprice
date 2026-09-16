@@ -257,9 +257,7 @@ public class PropertyAssetsController : PropertyControllerBase
                 .Include(p => p.PropertyTypeDetails)
                 .Include(p => p.SubUnits);
 
-            propertyQuery = isPlatformAdmin
-                ? propertyQuery.Where(p => p.PropertyId == propertyId)
-                : propertyQuery.Where(p => p.PropertyId == propertyId && p.TenantId == userTenantId);
+            propertyQuery = ApplyPropertyVisibility(propertyQuery).Where(p => p.PropertyId == propertyId);
 
             var property = await propertyQuery.FirstOrDefaultAsync();
             if (property == null)
@@ -288,9 +286,7 @@ public class PropertyAssetsController : PropertyControllerBase
 
             // Re-assert the tenant scope on the entity so a malicious payload cannot
             // override or clear the TenantId isolation key during a cross-tenant attempt.
-            property.TenantId = isPlatformAdmin
-                ? property.TenantId
-                : userTenantId;
+            // Retain the tenant of the authorized record when an administrator edits a subagency property.
 
             await DbContext.SaveChangesAsync();
             return Ok(await PropertyRepository.Query()

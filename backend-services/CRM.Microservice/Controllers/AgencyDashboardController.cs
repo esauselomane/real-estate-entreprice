@@ -65,8 +65,7 @@ namespace CRM.Microservice.Controllers
         [HttpGet("glance/summary")]
         public async Task<IActionResult> GetAgencyGlanceSummary([FromQuery] string? tenantId)
         {
-            if (!await PermissionCheck.HasPermissionAsync("billing:view"))
-                return Forbid();
+            if (GetCurrentCanonicalRole() is not ("AgencyAdmin" or "PlatformAdmin")) return Forbid();
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             if (visibleTenants.Count == 0)
@@ -103,8 +102,7 @@ namespace CRM.Microservice.Controllers
         [HttpGet("glance/tabs")]
         public async Task<IActionResult> GetAgencyGlanceTabs([FromQuery] string? tenantId)
         {
-            if (!await PermissionCheck.HasPermissionAsync("billing:view"))
-                return Forbid();
+            if (GetCurrentCanonicalRole() is not ("AgencyAdmin" or "PlatformAdmin")) return Forbid();
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             if (visibleTenants.Count == 0)

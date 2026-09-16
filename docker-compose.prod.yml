@@ -209,55 +209,6 @@ services:
       - realestate-network
     restart: unless-stopped
 
-  # 📄 Brochure Generation Worker
-  brochure-worker:
-    build:
-      context: .
-      dockerfile: backend-services/BrochureGeneration.Worker/Dockerfile
-    container_name: realestate-brochure-worker
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - Gateway__BaseUrl=${GATEWAY_BASE_URL}
-      - Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}
-    depends_on:
-      kafka:
-        condition: service_healthy
-    networks:
-      - realestate-network
-    restart: unless-stopped
-
-  # 🖼️ Image Processor Worker
-  image-worker:
-    build:
-      context: .
-      dockerfile: backend-services/ImageProcessor.Worker/Dockerfile
-    container_name: realestate-image-worker
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}
-    depends_on:
-      kafka:
-        condition: service_healthy
-    networks:
-      - realestate-network
-    restart: unless-stopped
-
-  # 📢 Platform Syndication Worker
-  syndication-worker:
-    build:
-      context: .
-      dockerfile: backend-services/PlatformSyndication.Worker/Dockerfile
-    container_name: realestate-syndication-worker
-    environment:
-      - ASPNETCORE_ENVIRONMENT=Production
-      - Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}
-    depends_on:
-      kafka:
-        condition: service_healthy
-    networks:
-      - realestate-network
-    restart: unless-stopped
-
   # 🌍 Client-Facing App (Next.js Marketing Website)
   client-facing:
     build:

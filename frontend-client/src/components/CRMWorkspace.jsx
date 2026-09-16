@@ -1,3 +1,4 @@
+import { normalizeContactTypes } from './contacts/contactTypes.js';
 import { useState, useEffect, useRef } from 'react';
 import { Banknote, TrendingUp, UserPlus, User, Loader2, Building2, Edit2, Search } from 'lucide-react';
 import { crmService } from '../services/crmService.js';
@@ -7,12 +8,6 @@ import SearchableSelect from '../components/SearchableSelect.jsx';
 
 export default function CRMWorkspace() {
   const { hasPermission } = usePermission();
-
-  const normalizeContactTypes = (contactType) => {
-    if (!contactType) return [];
-    if (Array.isArray(contactType)) return contactType;
-    return contactType.split(',').map(t => t.trim()).filter(Boolean);
-  };
 
   const [activeTab, setActiveTab] = useState('contacts');
 
@@ -669,18 +664,14 @@ export default function CRMWorkspace() {
                   <div className="flex flex-wrap gap-2 mt-1">
                     {['Buyer','Seller','Broker','Owner','Tenant','Staff','Manager'].map((type) => {
                       const types = editingContact
-                        ? (Array.isArray(editingContact.contactType)
-                            ? editingContact.contactType
-                            : (editingContact.contactType || '').split(',').map(t => t.trim()).filter(Boolean))
+                        ? (normalizeContactTypes(editingContact.contactType))
                         : (contactForm.contactType || []);
                       const checked = types.includes(type);
                       return (
                         <label key={type} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
                           <input type="checkbox" checked={checked} onChange={(e) => {
                             if (editingContact) {
-                              const existing = Array.isArray(editingContact.contactType)
-                                ? editingContact.contactType
-                                : (editingContact.contactType || '').split(',').map(t => t.trim()).filter(Boolean);
+                              const existing = normalizeContactTypes(editingContact.contactType);
                               setEditingContact({ ...editingContact, contactType: e.target.checked ? [...existing, type] : existing.filter(t => t !== type) });
                             } else {
                               const existing = contactForm.contactType || [];

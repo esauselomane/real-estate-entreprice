@@ -58,7 +58,6 @@ public class CompaniesController : CRMControllerBase
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<CRMCompany> query = CompanyRepository.Query();
-            if (visibleTenants.Count > 0)
                 query = query.Where(c => visibleTenants.Contains(c.TenantId));
             var ordered = query.OrderBy(c => c.BusinessName);
             var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
@@ -92,7 +91,7 @@ public class CompaniesController : CRMControllerBase
                 var entity = await LegalEntityRepository.Query()
                     .FirstOrDefaultAsync(e => e.LegalEntityId == company.AssociatedLegalEntityId);
                 if (entity == null) return BadRequest(new { message = "Referenced legal entity not found." });
-                if (visibleTenants.Count > 0 && !visibleTenants.Contains(entity.TenantId)) return Forbid();
+                if (!visibleTenants.Contains(entity.TenantId)) return Forbid();
             }
 
             CompanyRepository.Add(company);
@@ -108,7 +107,8 @@ public class CompaniesController : CRMControllerBase
                 return Forbid();
             }
 
-            var existing = await CompanyRepository.GetByIdAsync(updatedCompany.CompanyId);
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var existing = await CompanyRepository.Query().FirstOrDefaultAsync(company => company.CompanyId == updatedCompany.CompanyId && permittedTenantIds.Contains(company.TenantId));
             if (existing == null) return NotFound(new { message = "Company record not found." });
 
             existing.BusinessName = updatedCompany.BusinessName;
@@ -129,7 +129,7 @@ public class CompaniesController : CRMControllerBase
                 var entity = await LegalEntityRepository.Query()
                     .FirstOrDefaultAsync(e => e.LegalEntityId == existing.AssociatedLegalEntityId);
                 if (entity == null) return BadRequest(new { message = "Referenced legal entity not found." });
-                if (visibleTenants.Count > 0 && !visibleTenants.Contains(entity.TenantId))
+                if (!visibleTenants.Contains(entity.TenantId))
                     return Forbid();
             }
 
@@ -148,7 +148,6 @@ public class CompaniesController : CRMControllerBase
 
             var visibleTenants = await GetVisibleTenantIdsAsync(tenantId);
             IQueryable<CRMCompany> query = CompanyRepository.Query();
-            if (visibleTenants.Count > 0)
                 query = query.Where(c => visibleTenants.Contains(c.TenantId));
 
             var term = (q ?? string.Empty).Trim().ToLower();
@@ -186,7 +185,7 @@ public class CompaniesController : CRMControllerBase
                 .FirstOrDefaultAsync(c => c.CompanyId == companyId);
             if (company == null) return NotFound(new { message = "Company record not found." });
 
-            if (visibleTenants.Count > 0 && !visibleTenants.Contains(company.TenantId))
+            if (!visibleTenants.Contains(company.TenantId))
                 return Forbid();
 
             return Ok(company);

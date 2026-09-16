@@ -1,3 +1,4 @@
+import { LEAD_STAGES, leadStageName, leadStageChartData } from '../constants/leadWorkflowStages.js';
 import BrokerSuggestions from './leads/BrokerSuggestions.jsx';
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -10,22 +11,9 @@ import ContactPicker from '../components/ContactPicker.jsx';
 import BrokerPicker from '../components/BrokerPicker.jsx';
 import Pagination from '../components/Pagination.jsx';
 
-const LEAD_STAGES = ['Contacted', 'Qualified', 'Negotiation', 'ProposalSent', 'ClosedWon', 'ClosedLost'];
 const LEAD_PAGE_SIZE = 20;
-const LEAD_STAGE_COLORS = { Contacted: '#3b82f6', Qualified: '#14b8a6', Negotiation: '#f59e0b', ProposalSent: '#a78bfa', ClosedWon: '#22c55e', ClosedLost: '#ef4444' };
-
-const formatLeadStage = (value) => {
-  if (typeof value === 'string') return value.replace(/([A-Z])/g, ' $1').trim();
-  if (typeof value === 'number') return LEAD_STAGES[value]?.replace(/([A-Z])/g, ' $1').trim() || String(value);
-  return String(value || '');
-};
-
-const getLeadStageValue = (lead) => {
-  const stage = lead?.leadStage;
-  if (typeof stage === 'string') return stage;
-  if (typeof stage === 'number') return LEAD_STAGES[stage] || String(stage);
-  return String(stage || '');
-};
+const formatLeadStage = value => leadStageName(value).replace(/([A-Z])/g, ' $1').trim() || 'Unknown stage';
+const getLeadStageValue = lead => leadStageName(lead?.leadStage);
 
 export default function LeadsPage() {
   const { hasPermission } = usePermission();
@@ -258,15 +246,11 @@ export default function LeadsPage() {
   const filteredLeads = leads.filter((l) => {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
-    return (l.clientName || '').toLowerCase().includes(term) || (l.contactEmail || '').toLowerCase().includes(term) || (l.leadStage || '').toLowerCase().includes(term);
+    return (l.clientName || '').toLowerCase().includes(term) || (l.contactEmail || '').toLowerCase().includes(term) || formatLeadStage(l.leadStage).toLowerCase().includes(term);
   });
 
   const stageCounts = LEAD_STAGES.reduce((acc, stage) => { acc[stage] = Number(stageAggregates[stage] || 0); return acc; }, {});
-  // 📊 Render EVERY active lead stage on the chart — including stages with a
-  // zero count — so the pipeline always shows the full funnel. Filtering out
-  // zero-value stages made the chart "missing" stages and hid the fact that
-  // the pipeline has gaps (e.g. no leads in Negotiation yet).
-  const chartData = [...new Set([...LEAD_STAGES, ...Object.keys(stageAggregates)])].map((stage) => ({ name: stage.replace(/([A-Z])/g, ' $1').trim(), value: Number(stageAggregates[stage] || 0), color: LEAD_STAGE_COLORS[stage] || '#64748b' }));
+  const chartData = leadStageChartData(stageAggregates);
 
   return (
     <div className="space-y-6 animate-fade-in">

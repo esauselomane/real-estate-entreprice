@@ -141,7 +141,8 @@ public class LeadsController : CRMControllerBase
             }
 
             var tenantId = GetCurrentTenant();
-            var lead = await LeadRepository.Query().FirstOrDefaultAsync(l => l.LeadId == leadId && l.TenantId == tenantId);
+            var visibleTenants = await GetVisibleTenantIdsAsync(null);
+            var lead = await LeadRepository.Query().FirstOrDefaultAsync(l => l.LeadId == leadId && visibleTenants.Contains(l.TenantId));
             if (lead == null) return NotFound(new { message = "Lead record not found." });
 
             if (GetCurrentCanonicalRole() == "Broker")
@@ -157,7 +158,7 @@ public class LeadsController : CRMControllerBase
                     {
                         return Forbid();
                     }
-                    updatedLead.AllocatedBrokerIds = brokerId;
+                    updatedLead.AllocatedBrokerIds = lead.AllocatedBrokerIds;
                 }
             }
 
@@ -188,8 +189,10 @@ public class LeadsController : CRMControllerBase
                 return Forbid();
             }
 
+            var visibleTenants = await GetVisibleTenantIdsAsync(null);
             var lead = await LeadRepository.Query()
-                .FirstOrDefaultAsync(l => l.LeadId == leadId && l.TenantId == GetCurrentTenant());
+                .FirstOrDefaultAsync(l => l.LeadId == leadId && visibleTenants.Contains(l.TenantId));
+            if (lead != null && GetCurrentCanonicalRole() == "Broker" && !CallerIsAssignedTo(lead.AllocatedBrokerIds, GetCurrentUserId())) return Forbid();
             if (lead == null) return NotFound(new { message = "Target lead record not found." });
             if (lead.IsConvertedToDeal) return Conflict(new { message = "Lead already promoted to a deal." });
 
@@ -323,14 +326,15 @@ public class LeadsController : CRMControllerBase
             }
 
             var tenantId = GetCurrentTenant();
-            var lead = await LeadRepository.Query().FirstOrDefaultAsync(l => l.LeadId == payload.LeadId && l.TenantId == tenantId);
+            var visibleTenants = await GetVisibleTenantIdsAsync(null);
+            var lead = await LeadRepository.Query().FirstOrDefaultAsync(l => l.LeadId == payload.LeadId && visibleTenants.Contains(l.TenantId));
             if (lead == null) return NotFound(new { message = "Target lead tracking record not found." });
 
             // 🔐 A Broker may only advance leads allocated to themselves.
             if (GetCurrentCanonicalRole() == "Broker" && !CallerIsAssignedTo(lead.AllocatedBrokerIds, GetCurrentUserId()))
                 return Forbid();
 
-            if (!Enum.TryParse<LeadWorkflowStage>(payload.NextStage, true, out var nextStageEnum))
+            if (!Enum.TryParse<LeadWorkflowStage>(payload.NextStage, true, out var nextStageEnum) || !Enum.IsDefined(nextStageEnum))
             {
                 return BadRequest(new { message = "Invalid lead workflow stage parameter provided." });
             }

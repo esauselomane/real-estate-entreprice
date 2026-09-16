@@ -85,7 +85,11 @@ namespace Identity.Microservice.Controllers
                 return NotFound(new { message = "User account not found." });
 
             if (request.FullName != null)
-                user.FullName = request.FullName;
+            {
+                if (string.IsNullOrWhiteSpace(request.FullName)) return BadRequest(new { message = "Full name is required." });
+                user.FullName = request.FullName.Trim();
+            }
+            if (request.LicenseNumber != null) user.LicenseNumber = request.LicenseNumber.Trim();
 
              if (request.OutOfOffice.HasValue)
                  user.OutOfOffice = request.OutOfOffice.Value;
@@ -125,11 +129,15 @@ namespace Identity.Microservice.Controllers
             if (!allowedTypes.Contains(file.ContentType, StringComparer.OrdinalIgnoreCase))
                 return BadRequest(new { message = "Only image files (jpeg, png, webp, gif) are allowed." });
 
-            var uploadDir = Path.Combine(_environment.ContentRootPath, "..", "..", "..", "..", "Identity.Microservice", "wwwroot", "profiles");
+            if (file.Length > 5 * 1024 * 1024) return BadRequest(new { message = "Profile pictures must be no larger than 5 MB." });
+            var uploadDir = Path.Combine(_environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot"), "profiles");
             Directory.CreateDirectory(uploadDir);
 
-            var fileExtension = Path.GetExtension(file.FileName) ?? ".jpg";
-            var fileName = $"{userId}{fileExtension}";
+            var fileExtension = file.ContentType.ToLowerInvariant() switch
+            {
+                "image/png" => ".png", "image/webp" => ".webp", "image/gif" => ".gif", _ => ".jpg"
+            };
+            var fileName = $"{Guid.NewGuid():N}{fileExtension}";
             var filePath = Path.Combine(uploadDir, fileName);
 
             using (var stream = new FileStream(filePath, FileMode.Create))

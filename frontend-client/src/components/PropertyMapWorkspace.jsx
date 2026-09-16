@@ -1,3 +1,4 @@
+import GoogleAddressPicker from './maps/GoogleAddressPicker.jsx';
 import { useState, useEffect, useMemo } from 'react';
 import { MapPin, Building2, SlidersHorizontal, Loader2, Layers, ListCollapse, Search, Plus, X, Save } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
@@ -83,8 +84,8 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
     valuationPrice: '',
     salePrice: '',
     tenantInstallationAllowance: 0,
-    latitude: -33.9249,
-    longitude: 18.4241,
+    latitude: '',
+    longitude: '',
     linkedOwnerId: 'OT-0001',
     subUnits: []
   });
@@ -184,7 +185,7 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
       completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold',
       portfolioZoning: 'Commercial Zone', marketClass: 'Sale', propertyTypeId: 1,
       valuationPrice: '', salePrice: '', tenantInstallationAllowance: 0,
-      latitude: -33.9249, longitude: 18.4241, linkedOwnerId: 'OT-0001',
+      latitude: '', longitude: '', linkedOwnerId: 'OT-0001',
       isForSale: true, isForRent: false, subUnits: []
     });
     setSaveError('');
@@ -226,8 +227,8 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
         valuationPrice: Number(propertyForm.valuationPrice) || 0,
         salePrice: propertyForm.salePrice ? Number(propertyForm.salePrice) : null,
         tenantInstallationAllowance: Number(propertyForm.tenantInstallationAllowance) || 0,
-        latitude: Number(propertyForm.latitude) || -33.9249,
-        longitude: Number(propertyForm.longitude) || 18.4241,
+        latitude: Number(propertyForm.latitude) || 0,
+        longitude: Number(propertyForm.longitude) || 0,
         propertyTypeId: Number(propertyForm.propertyTypeId) || 1,
         isForSale: !!propertyForm.isForSale,
         isForRent: !!propertyForm.isForRent
@@ -490,12 +491,13 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
             {saveSuccess && <div className="mb-3 p-2 bg-emerald-950/30 border border-emerald-900 rounded-lg text-emerald-300 text-xs">Property created successfully!</div>}
 
             <form onSubmit={handleSaveProperty} className="grid grid-cols-2 gap-3">
+<GoogleAddressPicker onSelect={address => setPropertyForm(previous => ({ ...previous, ...address }))} />
               <div className="col-span-2">
                 <label className="block text-[10px] text-slate-400 uppercase mb-1">Complete Address *</label>
                 <input
                   type="text" required
                   value={propertyForm.completeAddress}
-                  onChange={(e) => handleFormChange('completeAddress', e.target.value)}
+                  onChange={(e) => setPropertyForm(previous => ({ ...previous, completeAddress: e.target.value, latitude: '', longitude: '' }))}
                   placeholder="123 Main Street, City, Country"
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
                 />

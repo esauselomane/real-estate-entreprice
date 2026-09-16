@@ -362,7 +362,7 @@ namespace Identity.Microservice.Data
             {
                 new { Email = platformAdminEmail, UserId = "USR-ADMIN-PLAT", FullName = "Platform Administrator", SystemRole = "PlatformAdmin", TenantId = "TEN-001" },
                 new { Email = agencyAdminEmail,   UserId = "USR-ADMIN-AGY",  FullName = "Agency Administrator",     SystemRole = "AgencyAdmin",   TenantId = "TEN-0001" },
-                new { Email = "broker@agency.local",          UserId = "USR-BROKER-01",  FullName = "Sales Broker",             SystemRole = "Broker",         TenantId = "TEN-001" },
+                new { Email = "broker@agency.local",          UserId = "USR-BROKER-01",  FullName = "Sales Broker",             SystemRole = "Broker",         TenantId = "TEN-0001" },
                 new { Email = "owner@agency.local",           UserId = "USR-OWNER-01",   FullName = "Property Owner",          SystemRole = "Owner",          TenantId = "TEN-001" },
                 new { Email = "tenant@agency.local",          UserId = "USR-TENANT-01",  FullName = "Rental Tenant",           SystemRole = "Tenant",         TenantId = "TEN-001" }
             };
@@ -601,13 +601,13 @@ namespace Identity.Microservice.Data
             }
 
             // AgencyAdmin gets agency, user, billing, and valuation permissions
-            foreach (var key in new[] { "agencies:create", "agencies:view", "agencies:edit", "agencies:delete", "users:create", "users:view", "users:edit", "users:delete", "properties:view", "units:view", "billing:view", "billing:export", "valuations:bypass", "leads:view", "leads:create", "leads:edit", "leads:delete", "deals:view", "deals:create", "deals:edit", "deals:delete", "billing:edit", "properties:create", "properties:edit", "units:create", "units:edit" })
+            foreach (var key in new[] { "agencies:create", "agencies:view", "agencies:edit", "agencies:delete", "users:create", "users:view", "users:edit", "users:delete", "properties:view", "units:view", "billing:view", "billing:export", "valuations:bypass", "leads:view", "leads:create", "leads:edit", "leads:delete", "deals:view", "deals:create", "deals:edit", "deals:delete", "billing:edit", "properties:create", "properties:edit", "units:create", "units:edit", "units:delete", "properties:delete", "amenities:view" })
             {
                 AssignIfExists(agencyAdminRole.RoleDefId, key);
             }
 
             // Broker gets view permissions plus property/unit create/edit
-            foreach (var key in new[] { "properties:view", "properties:create", "properties:edit", "units:view", "units:create", "units:edit", "agencies:view", "users:view", "billing:view" })
+            foreach (var key in new[] { "properties:view", "properties:create", "properties:edit", "units:view", "units:create", "units:edit", "users:view", "billing:view", "billing:edit", "leads:view", "leads:create", "leads:edit", "deals:view", "deals:edit" })
             {
                 AssignIfExists(brokerRole.RoleDefId, key);
             }

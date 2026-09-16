@@ -72,8 +72,9 @@ public class DealsController : CRMControllerBase
             if (callerRole != "AgencyAdmin" && callerRole != "PlatformAdmin")
                 return Forbid();
 
+            var visibleTenants = await GetVisibleTenantIdsAsync(null);
             var deal = await DealRepository.Query()
-                .FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == GetCurrentTenant());
+                .FirstOrDefaultAsync(d => d.DealId == dealId && visibleTenants.Contains(d.TenantId));
             if (deal == null) return NotFound(new { message = "Target deal record not found." });
 
             DealRepository.Remove(deal);
@@ -94,9 +95,8 @@ public class DealsController : CRMControllerBase
             var callerRole = GetCurrentCanonicalRole();
             var isPlatformAdmin = callerRole == "PlatformAdmin";
             var tenantId = GetCurrentTenant();
-            var deal = isPlatformAdmin
-                ? await DealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId)
-                : await DealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            var visibleTenants = await GetVisibleTenantIdsAsync(null);
+            var deal = await DealRepository.Query().FirstOrDefaultAsync(record => record.DealId == dealId && visibleTenants.Contains(record.TenantId));
             if (deal == null) return NotFound(new { message = "Deal record not found." });
 
             // 🔒 Closed deals (ClosedWon / ClosedLost) are read-only. The
@@ -112,8 +112,7 @@ public class DealsController : CRMControllerBase
             var isBroker = callerRole == "Broker";
             if (isBroker)
             {
-                var callerId = GetCurrentUserId();
-                if (!string.IsNullOrEmpty(callerId)) deal.AllocatedBrokerIds = callerId;
+                if (!CallerIsAssignedTo(deal.AllocatedBrokerIds, GetCurrentUserId())) return Forbid();
             }
             else if (!string.IsNullOrEmpty(updatedDeal.AllocatedBrokerIds))
             {
@@ -178,9 +177,9 @@ public class DealsController : CRMControllerBase
             var callerId = GetCurrentUserId();
             var isPlatformAdmin = callerRole == "PlatformAdmin";
             var tenantId = GetCurrentTenant();
-            var deal = isPlatformAdmin
-                ? await DealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId)
-                : await DealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId && d.TenantId == tenantId);
+            var visibleTenants = await GetVisibleTenantIdsAsync(null);
+            var deal = await DealRepository.Query().FirstOrDefaultAsync(d => d.DealId == dealId && visibleTenants.Contains(d.TenantId));
+            if (deal != null && callerRole == "Broker" && !CallerIsAssignedTo(deal.AllocatedBrokerIds, callerId)) return Forbid();
             if (deal == null) return NotFound(new { message = "Deal record not found." });
 
             if (deal.DealStage == DealWorkflowStage.ClosedWon || deal.DealStage == DealWorkflowStage.ClosedLost)
@@ -202,9 +201,11 @@ public class DealsController : CRMControllerBase
                 return Forbid();
             }
 
+            if (GetCurrentCanonicalRole() is not ("AgencyAdmin" or "PlatformAdmin")) return Forbid();
+            var visibleTenants = await GetVisibleTenantIdsAsync(null);
             if (payload.IsDeal)
             {
-                var deal = await DealRepository.GetByIdAsync(payload.TargetId);
+                var deal = await DealRepository.Query().FirstOrDefaultAsync(record => record.DealId == payload.TargetId && visibleTenants.Contains(record.TenantId));
                 if (deal == null) return NotFound(new { message = "Target deal record not found." });
                 // payload.TargetAgentName is actually a broker id now (legacy field name kept
                 // for frontend compat — same payload shape, just an id instead of a display name).
@@ -212,7 +213,7 @@ public class DealsController : CRMControllerBase
             }
             else
             {
-                var lead = await LeadRepository.GetByIdAsync(payload.TargetId);
+                var lead = await LeadRepository.Query().FirstOrDefaultAsync(record => record.LeadId == payload.TargetId && visibleTenants.Contains(record.TenantId));
                 if (lead == null) return NotFound(new { message = "Target lead record not found." });
                 lead.AllocatedBrokerIds = payload.TargetAgentName;
             }
@@ -230,7 +231,8 @@ public class DealsController : CRMControllerBase
             }
 
             var tenantId = GetCurrentTenant();
-            var deal = await DealRepository.Query().FirstOrDefaultAsync(d => d.DealId == payload.DealId && d.TenantId == tenantId);
+            var visibleTenants = await GetVisibleTenantIdsAsync(null);
+            var deal = await DealRepository.Query().FirstOrDefaultAsync(d => d.DealId == payload.DealId && visibleTenants.Contains(d.TenantId));
             if (deal == null) return NotFound(new { message = "Target deal record not found." });
 
             // 🔒 Closed deals (ClosedWon / ClosedLost) are read-only — the
@@ -414,7 +416,6 @@ public class DealsController : CRMControllerBase
             IQueryable<BrochureCard> cardQuery = BrochureCardRepository.Query()
                 .Include(c => c.Lines)
                 .Where(c => c.DealId == dealId && !c.IsDeleted);
-            if (visibleTenants.Count > 0)
                 cardQuery = cardQuery.Where(c => visibleTenants.Contains(c.TenantId));
 
             var card = await cardQuery.FirstOrDefaultAsync();

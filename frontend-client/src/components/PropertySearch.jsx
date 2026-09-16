@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import GoogleAddressPicker from './maps/GoogleAddressPicker.jsx';
+import { useState, useEffect, useCallback } from 'react';
 import { MapPin, X, SlidersHorizontal, Building2, Loader2, Pencil } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import { usePermission } from '../contexts/PermissionContext.jsx';
@@ -26,11 +27,6 @@ export default function PropertySearch({ onSelectProperty }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [editingProperty, setEditingProperty] = useState(null);
   const [propertyForm, setPropertyForm] = useState({ completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold', portfolioZoning: '', marketClass: 'Sale', propertyTypeId: '', valuationPrice: '', salePrice: '', latitude: '', longitude: '', linkedOwnerId: '', soleMandate: false, soleMandateStart: '', soleMandateEnd: '' });
-  const [addressQuery, setAddressQuery] = useState('');
-  const [addressResults, setAddressResults] = useState([]);
-  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
-  const [showAddressDropdown, setShowAddressDropdown] = useState(false);
-  const addressDebounceRef = useRef(null);
   const criteriaKey = `${selectedLocations.join('|')}::${propertyType}::${minSize}::${maxSize}::${listingType}`;
 
   // 📜 Single-shot fetch — every filter change requests page 1 with a
@@ -69,7 +65,6 @@ export default function PropertySearch({ onSelectProperty }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLocations, propertyType, minSize, maxSize, listingType]);
 
-  useEffect(() => () => { if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current); }, []);
 
 
   const handleAddLocation = (e) => {
@@ -82,33 +77,6 @@ export default function PropertySearch({ onSelectProperty }) {
 
   const handleRemoveLocation = (locToRemove) => {
     setSelectedLocations(selectedLocations.filter(loc => loc !== locToRemove));
-  };
-
-  const searchAddress = async (query) => {
-    setAddressQuery(query);
-    if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
-    if (query.trim().length < 3) { setAddressResults([]); setShowAddressDropdown(false); return; }
-    addressDebounceRef.current = setTimeout(async () => {
-      setIsSearchingAddress(true);
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`);
-        if (!res.ok) throw new Error(`Geocoding failed: ${res.status}`);
-        const data = await res.json();
-        setAddressResults(data || []);
-        setShowAddressDropdown(true);
-      } catch {
-        setAddressResults([]);
-      } finally {
-        setIsSearchingAddress(false);
-      }
-    }, 350);
-  };
-
-  const selectAddress = (result) => {
-    setPropertyForm((prev) => ({ ...prev, completeAddress: result.display_name, latitude: result.lat, longitude: result.lon }));
-    setAddressQuery(result.display_name);
-    setShowAddressDropdown(false);
-    setAddressResults([]);
   };
 
   const openEditProperty = async (propertyId) => {
@@ -132,7 +100,7 @@ export default function PropertySearch({ onSelectProperty }) {
         soleMandateStart: mandate ? mandate.startDate?.slice(0, 10) : '',
         soleMandateEnd: mandate ? mandate.endDate?.slice(0, 10) : ''
       });
-      setAddressQuery(prop.completeAddress || '');
+
     } catch (err) { alert(err || 'Failed to load property.'); }
   };
 
@@ -172,15 +140,15 @@ export default function PropertySearch({ onSelectProperty }) {
         }
       }
       setEditingProperty(null);
-      setAddressQuery('');
-      setAddressResults([]);
-      setShowAddressDropdown(false);
+
+
+
     } catch (err) { alert(err || 'Failed to update property.'); }
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
-      
+
       {/* 🔍 Interactive Search Control Panel */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
@@ -189,14 +157,14 @@ export default function PropertySearch({ onSelectProperty }) {
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          
+
           {/* 📍 Multi-Location Dynamic Chip Array Entry */}
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Target Locations</label>
             <form onSubmit={handleAddLocation} className="flex gap-2">
               <div className="relative flex-1">
                 <MapPin size={16} className="absolute left-3 top-3.5 text-slate-500" />
-                <input 
+                <input
                   type="text"
                   value={locationInput}
                   onChange={(e) => setLocationInput(e.target.value)}
@@ -205,7 +173,7 @@ export default function PropertySearch({ onSelectProperty }) {
                 />
               </div>
             </form>
-            
+
             {/* Location Chips Display Canvas */}
             <div className="flex flex-wrap gap-1.5 pt-1">
               {selectedLocations.map((loc, idx) => (
@@ -225,7 +193,7 @@ export default function PropertySearch({ onSelectProperty }) {
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Property Type Sector</label>
             <div className="relative">
               <Building2 size={16} className="absolute left-3 top-3.5 text-slate-500" />
-              <select 
+              <select
                 value={propertyType}
                 onChange={(e) => setPropertyType(e.target.value)}
                 className="w-full pl-9 pr-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 appearance-none cursor-pointer"
@@ -260,15 +228,15 @@ export default function PropertySearch({ onSelectProperty }) {
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Size Boundary Extent (m²)</label>
             <div className="flex gap-2">
-              <input 
-                type="number" 
+              <input
+                type="number"
                 placeholder="Min m²"
                 value={minSize}
                 onChange={(e) => setMinSize(e.target.value)}
                 className="w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
               />
-              <input 
-                type="number" 
+              <input
+                type="number"
                 placeholder="Max m²"
                 value={maxSize}
                 onChange={(e) => setMaxSize(e.target.value)}
@@ -304,8 +272,8 @@ export default function PropertySearch({ onSelectProperty }) {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {properties.map((prop) => (
-              <div 
-                key={prop.propertyId} 
+              <div
+                key={prop.propertyId}
                 onClick={() => onSelectProperty(prop.propertyId)}
                 className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 transition-all flex flex-col justify-between group cursor-pointer"
               >
@@ -322,7 +290,7 @@ export default function PropertySearch({ onSelectProperty }) {
                       </div>
                    </div>
 
-                  
+
                    <h4 className="text-white font-bold text-base mb-1 tracking-tight group-hover:text-blue-400 transition-colors">
                      {prop.completeAddress}
                    </h4>
@@ -389,25 +357,12 @@ export default function PropertySearch({ onSelectProperty }) {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-white uppercase tracking-wider">Edit Property</h3>
-              <button type="button" onClick={() => { setEditingProperty(null); setAddressQuery(''); setAddressResults([]); }} className="text-slate-400 hover:text-white"><X size={14} /></button>
+              <button type="button" onClick={() => { setEditingProperty(null);   }} className="text-slate-400 hover:text-white"><X size={14} /></button>
             </div>
             <form onSubmit={handleUpdateProperty} className="space-y-3">
-              <div className="space-y-1 relative">
-                <label className="text-[10px] text-slate-400 uppercase">Address Search</label>
-                <input type="text" value={addressQuery} onChange={(e) => searchAddress(e.target.value)} onFocus={() => addressResults.length > 0 && setShowAddressDropdown(true)} placeholder="Search address..." className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" />
-                {isSearchingAddress && <Loader2 className="absolute right-3 top-7 text-blue-500 animate-spin" size={14} />}
-                {showAddressDropdown && addressResults.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl shadow-xl max-h-48 overflow-y-auto">
-                    {addressResults.map((r) => (
-                      <button key={r.place_id} type="button" onClick={() => selectAddress(r)} className="w-full text-left px-3 py-2 hover:bg-slate-800 text-xs text-white">
-                        {r.display_name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+<GoogleAddressPicker onSelect={address => setPropertyForm(previous => ({ ...previous, ...address }))} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1 md:col-span-2"><label className="text-[10px] text-slate-400 uppercase">Complete Address</label><input required type="text" value={propertyForm.completeAddress} onChange={(e) => setPropertyForm({ ...propertyForm, completeAddress: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1 md:col-span-2"><label className="text-[10px] text-slate-400 uppercase">Complete Address</label><input required type="text" value={propertyForm.completeAddress} onChange={(e) => setPropertyForm({ ...propertyForm, completeAddress: e.target.value, latitude: '', longitude: '' })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">ERF Size</label><input type="text" value={propertyForm.erfSpatialSize} onChange={(e) => setPropertyForm({ ...propertyForm, erfSpatialSize: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Title Deed Type</label><select value={propertyForm.titleDeedType} onChange={(e) => setPropertyForm({ ...propertyForm, titleDeedType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"><option>Freehold</option><option>Sectional Title</option><option>Leasehold</option></select></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Zoning</label><input type="text" value={propertyForm.portfolioZoning} onChange={(e) => setPropertyForm({ ...propertyForm, portfolioZoning: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
@@ -459,7 +414,7 @@ export default function PropertySearch({ onSelectProperty }) {
               </div>
               <div className="flex gap-2">
                 <button type="submit" className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold">Save Changes</button>
-                <button type="button" onClick={() => { setEditingProperty(null); setAddressQuery(''); setAddressResults([]); }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300">Cancel</button>
+                <button type="button" onClick={() => { setEditingProperty(null);   }} className="py-2.5 px-4 rounded-xl text-xs font-bold bg-slate-800 text-slate-300">Cancel</button>
               </div>
             </form>
           </div>

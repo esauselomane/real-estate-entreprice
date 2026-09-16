@@ -9,6 +9,7 @@ namespace CRM.Microservice.DTOs
     {
         public string? BuyerClientId { get; set; }
         public string? SellerClientId { get; set; }
+        [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
         public DealWorkflowStage? DealStage { get; set; }
         public decimal? TransactionValue { get; set; }
         public string? DealNotes { get; set; }
