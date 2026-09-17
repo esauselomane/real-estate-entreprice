@@ -21,8 +21,6 @@ VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY:-}"
 IDENTITY_CONN_SECRET="identity-service-db-conn-${REGION}"
 PROPERTY_CONN_SECRET="property-service-db-conn-${REGION}"
 CRM_CONN_SECRET="crm-service-db-conn-${REGION}"
-DEVELOPER_CONN_SECRET="developer-api-db-conn-${REGION}"
-PROPERTY_PROPERTY_CONN_SECRET="developer-api-property-db-conn-${REGION}"
 
 require_command gcloud
 require_command docker
@@ -32,7 +30,7 @@ if [ -z "${PROJECT_ID}" ]; then
 fi
 
 if [ "$#" -ne 1 ]; then
-  error "Usage: $0 <identity-service|property-service|crm-service|developer-api|gateway|frontend-client|client-facing>"
+  error "Usage: $0 <identity-service|property-service|crm-service|gateway|frontend-client|client-facing>"
 fi
 
 SERVICE_NAME=$1
@@ -43,7 +41,6 @@ dockerfile_for() {
     identity-service) echo "backend-services/Identity.Microservice/Dockerfile" ;;
     property-service) echo "backend-services/Property.Microservice/Dockerfile" ;;
     crm-service) echo "backend-services/CRM.Microservice/Dockerfile" ;;
-    developer-api) echo "Developer.API/Dockerfile" ;;
     gateway) echo "api-gateway/Dockerfile" ;;
     frontend-client) echo "frontend-client/Dockerfile" ;;
     client-facing) echo "client-facing-app/Dockerfile" ;;
@@ -54,18 +51,28 @@ dockerfile_for() {
 deploy_backend() {
   local name=$1
   local container_port=$2
-  local cpu=$3
-  local memory=$4
-  local min_instances=$5
-  local cpu_throttling_flag=$6
-  shift 6
+  local service_account=$3
+  local cpu=$4
+  local memory=$5
+  local min_instances=$6
+  local cpu_throttling_flag=$7
+  shift 7
 
+  # FIX: Pre-clear the legacy VPC connector first to prevent API validation conflicts
+  log "Ensuring legacy VPC connector is cleared for ${name}..."
+  gcloud run services update "${name}" \
+    --clear-vpc-connector \
+    --region="${REGION}" \
+    --project="${PROJECT_ID}" \
+    --quiet 2>/dev/null || true
+
+  log "Deploying ${name}..."
   gcloud run deploy "${name}" \
     --image="$(artifact_image "${name}")" \
     --region="${REGION}" \
     --project="${PROJECT_ID}" \
     --platform=managed \
-    --service-account="${name}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --service-account="${service_account}@${PROJECT_ID}.iam.gserviceaccount.com" \
     --port="${container_port}" \
     --network="${NETWORK}" \
     --subnet="${SUBNET}" \
@@ -75,6 +82,8 @@ deploy_backend() {
     --memory="${memory}" \
     --min-instances="${min_instances}" \
     --max-instances=10 \
+    --concurrency=80 \
+    --timeout=300 \
     "${cpu_throttling_flag}" \
     --allow-unauthenticated \
     --ingress=all \
@@ -82,10 +91,10 @@ deploy_backend() {
     --quiet
 }
 
+
 IDENTITY_URL="$(run_url identity-service)"
 PROPERTY_URL="$(run_url property-service)"
 CRM_URL="$(run_url crm-service)"
-DEVELOPER_URL="$(run_url developer-api)"
 GATEWAY_URL="$(run_url gateway)"
 FRONTEND_URL="$(run_url frontend-client)"
 MARKETING_URL="$(run_url client-facing)"
@@ -145,14 +154,6 @@ case "${SERVICE_NAME}" in
       --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${CRM_CONN_SECRET}:latest"
     rm -f "${ENV_FILE}"
     ;;
-  developer-api)
-    ENV_FILE="$(mktemp)"
-    append_env_var "${ENV_FILE}" ASPNETCORE_ENVIRONMENT Production
-    deploy_backend developer-api 5006 1 512Mi 0 --cpu-throttling \
-      --env-vars-file="${ENV_FILE}" \
-      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DeveloperConnection=${DEVELOPER_CONN_SECRET}:latest,ConnectionStrings__PropertyConnection=${PROPERTY_PROPERTY_CONN_SECRET}:latest"
-    rm -f "${ENV_FILE}"
-    ;;
   gateway)
     ENV_FILE="$(mktemp)"
     append_env_var "${ENV_FILE}" ASPNETCORE_ENVIRONMENT Production
@@ -163,8 +164,6 @@ case "${SERVICE_NAME}" in
     append_env_var "${ENV_FILE}" PROPERTY_PORT 443
     append_env_var "${ENV_FILE}" CRM_HOST "$(host_from_url "${CRM_URL}")"
     append_env_var "${ENV_FILE}" CRM_PORT 443
-    append_env_var "${ENV_FILE}" DEVELOPER_HOST "$(host_from_url "${DEVELOPER_URL}")"
-    append_env_var "${ENV_FILE}" DEVELOPER_PORT 443
     append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
     CORS_ORIGINS="${FRONTEND_URL},${MARKETING_URL},${GATEWAY_URL}"
     if [ -n "${DOMAIN}" ]; then

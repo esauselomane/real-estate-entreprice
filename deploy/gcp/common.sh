@@ -99,18 +99,34 @@ build_and_push_image() {
     return 0
   fi
 
-  log "Building ${service_name}..."
-  docker build \
-    --build-arg BUILD_CONFIGURATION=Release \
-    --build-arg BUILDCONFIGURATION=Release \
-    "$@" \
-    -t "$(artifact_image "${service_name}")" \
-    -t "${ARTIFACT_REG}/${service_name}:latest" \
-    -f "${dockerfile}" \
-    . || error "Build failed for ${service_name}"
+  log "Building ${service_name} via Google Cloud Build..."
+  # Cloud Build handles authentication internally and is more reliable than local Docker.
+  local build_args_json=""
+  if [ $# -gt 0 ]; then
+    # Prepare build-args for the Cloud Build config
+    build_args_json=$(printf "'%s', " "$@")
+  fi
 
-  docker push "$(artifact_image "${service_name}")" || error "Push failed for ${service_name}:${SHORT_SHA}"
-  docker push "${ARTIFACT_REG}/${service_name}:latest" || error "Push failed for ${service_name}:latest"
+  gcloud builds submit . \
+    --project="${PROJECT_ID}" \
+    --config <(cat <<EOF
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', 
+         '--build-arg', 'BUILD_CONFIGURATION=Release',
+         '--build-arg', 'BUILDCONFIGURATION=Release',
+         ${build_args_json}
+         '-t', '$(artifact_image "${service_name}")',
+         '-f', '${dockerfile}', 
+         '.']
+images:
+- '$(artifact_image "${service_name}")'
+EOF
+) --quiet || error "Cloud Build failed for ${service_name}"
+
+  # Add the 'latest' tag to the image in Artifact Registry
+  gcloud artifacts docker tags add "$(artifact_image "${service_name}")" \
+    "${ARTIFACT_REG}/${service_name}:latest" --project="${PROJECT_ID}" --quiet
 }
 
 run_url() {

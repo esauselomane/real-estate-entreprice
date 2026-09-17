@@ -4,11 +4,9 @@ COPY ["backend-services/Shared.Access/", "backend-services/Shared.Access/"]
 
 COPY ["backend-services/Property.Microservice/Property.Microservice.csproj", "backend-services/Property.Microservice/"]
 COPY ["backend-services/Property.Microservice/appsettings.json", "backend-services/Property.Microservice/"]
-COPY ["backend-services/Shared.Kafka/Shared.Kafka.csproj", "backend-services/Shared.Kafka/"]
 COPY ["backend-services/Property.Microservice/", "backend-services/Property.Microservice/"]
 
 RUN dotnet restore "backend-services/Property.Microservice/Property.Microservice.csproj"
-COPY ["backend-services/Shared.Kafka/", "backend-services/Shared.Kafka/"]
 RUN dotnet build "backend-services/Property.Microservice/Property.Microservice.csproj" -c Release -o /app/build
 
 FROM build AS publish
