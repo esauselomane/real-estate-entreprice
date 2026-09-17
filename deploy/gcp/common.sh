@@ -167,7 +167,59 @@ append_env_var() {
 }
 
 sql_private_ip() {
-  gcloud sql instances describe "${SQL_INSTANCE}" \
+  gcloud sql instances list \
     --project="${PROJECT_ID}" \
-    --format='value(ipAddresses.filter(type=PRIVATE).ipAddress)'
+    --filter="name=${SQL_INSTANCE}" \
+    --format='value(PRIVATE_ADDRESS)'
+}
+
+deploy_gateway() {
+  local cors_origins=$1
+  local gateway_base=$2
+  local identity_host=$3
+  local property_host=$4
+  local crm_host=$5
+  local project_id=$6
+  local region=$7
+  local network=$8
+  local subnet=$9
+  local artifact_image_name=${10}
+
+  local gateway_env
+  gateway_env="$(mktemp)"
+  append_env_var "${gateway_env}" ASPNETCORE_ENVIRONMENT Production
+  append_env_var "${gateway_env}" DOWNSTREAM_SCHEME https
+  append_env_var "${gateway_env}" IDENTITY_HOST "${identity_host}"
+  append_env_var "${gateway_env}" IDENTITY_PORT 443
+  append_env_var "${gateway_env}" PROPERTY_HOST "${property_host}"
+  append_env_var "${gateway_env}" PROPERTY_PORT 443
+  append_env_var "${gateway_env}" CRM_HOST "${crm_host}"
+  append_env_var "${gateway_env}" CRM_PORT 443
+  append_env_var "${gateway_env}" Gateway__BaseUrl "${gateway_base}"
+  append_env_var "${gateway_env}" CORS_ORIGINS "${cors_origins}"
+  append_env_var "${gateway_env}" Cors__AllowedOrigins "${cors_origins}"
+  append_env_var "${gateway_env}" AllowedOrigins "${cors_origins}"
+  append_env_var "${gateway_env}" ASPNETCORE_URLS "http://*:5000"
+
+  log "Deploying gateway..."
+  gcloud run services update gateway --clear-vpc-connector --region="${region}" --project="${project_id}" --quiet 2>/dev/null || true
+  gcloud run deploy gateway \
+    --image="${artifact_image_name}" \
+    --region="${region}" \
+    --project="${project_id}" \
+    --platform=managed \
+    --service-account="gateway-sa@${project_id}.iam.gserviceaccount.com" \
+    --port=5000 \
+    --execution-environment=gen2 \
+    --cpu=1 \
+    --memory=512Mi \
+    --min-instances=1 \
+    --max-instances=20 \
+    --concurrency=200 \
+    --timeout=60 \
+    --allow-unauthenticated \
+    --ingress=all \
+    --env-vars-file="${gateway_env}" \
+    --quiet
+  rm -f "${gateway_env}"
 }

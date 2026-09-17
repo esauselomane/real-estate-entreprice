@@ -57,6 +57,21 @@ else
   log "Public hosts: app.${DOMAIN}, api.${DOMAIN}, www.${DOMAIN}"
 fi
 
+# Compute specific origins for production to allow credentials (cookies/auth headers)
+# This must be defined BEFORE the services are deployed.
+if [ -n "${DOMAIN}" ]; then
+  INITIAL_CORS="https://app.${DOMAIN},https://www.${DOMAIN},https://${DOMAIN},https://api.${DOMAIN}"
+  GATEWAY_PUBLIC_URL="https://api.${DOMAIN}"
+else
+  INITIAL_CORS="*"
+  GATEWAY_PUBLIC_URL="" # Will be resolved via run_url
+fi
+
+if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
+  APP_PUBLIC_URL="" # Will be resolved via run_url
+  SITE_PUBLIC_URL="" # Will be resolved via run_url
+fi
+
 gcloud config set project "${PROJECT_ID}" --quiet
 log "Targeting project ${PROJECT_ID} in ${REGION} (tag ${SHORT_SHA})"
 log "Force rebuild is set to: ${FORCE_REBUILD}"
@@ -283,6 +298,8 @@ log "Deploying identity-service..."
 IDENTITY_ENV="$(mktemp)"
 append_env_var "${IDENTITY_ENV}" ASPNETCORE_ENVIRONMENT Production
 append_env_var "${IDENTITY_ENV}" CORS_ORIGINS "${INITIAL_CORS}"
+append_env_var "${IDENTITY_ENV}" Cors__AllowedOrigins "${INITIAL_CORS}"
+append_env_var "${IDENTITY_ENV}" AllowedOrigins "${INITIAL_CORS}"
 append_env_var "${IDENTITY_ENV}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
 deploy_backend identity-service 5001 identity-service-sa 1 1Gi 1 --no-cpu-throttling \
   --env-vars-file="${IDENTITY_ENV}" \
@@ -295,6 +312,8 @@ log "Deploying property-service..."
 PROPERTY_ENV="$(mktemp)"
 append_env_var "${PROPERTY_ENV}" ASPNETCORE_ENVIRONMENT Production
 append_env_var "${PROPERTY_ENV}" Identity__BaseUrl "${IDENTITY_URL}"
+append_env_var "${PROPERTY_ENV}" CORS_ORIGINS "${INITIAL_CORS}"
+append_env_var "${PROPERTY_ENV}" Cors__AllowedOrigins "${INITIAL_CORS}"
 deploy_backend property-service 5002 property-service-sa 1 1.5Gi 1 --no-cpu-throttling \
   --env-vars-file="${PROPERTY_ENV}" \
   --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${PROPERTY_CONN_SECRET}:latest"
@@ -306,17 +325,14 @@ log "Deploying crm-service..."
 CRM_ENV="$(mktemp)"
 append_env_var "${CRM_ENV}" ASPNETCORE_ENVIRONMENT Production
 append_env_var "${CRM_ENV}" Identity__BaseUrl "${IDENTITY_URL}"
+append_env_var "${CRM_ENV}" CORS_ORIGINS "${INITIAL_CORS}"
+append_env_var "${CRM_ENV}" Cors__AllowedOrigins "${INITIAL_CORS}"
 deploy_backend crm-service 5003 crm-service-sa 1 1.5Gi 1 --no-cpu-throttling \
   --env-vars-file="${CRM_ENV}" \
   --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${CRM_CONN_SECRET}:latest"
 rm -f "${CRM_ENV}"
 CRM_URL="$(run_url crm-service)"
 CRM_HOST="$(host_from_url "${CRM_URL}")"
-
-GATEWAY_PUBLIC_URL="https://api.${DOMAIN}"
-if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
-  GATEWAY_PUBLIC_URL=""
-fi
 
 deploy_gateway() {
   local cors_origins=$1
@@ -333,6 +349,8 @@ deploy_gateway() {
   append_env_var "${gateway_env}" CRM_PORT 443
   append_env_var "${gateway_env}" Gateway__BaseUrl "${gateway_base}"
   append_env_var "${gateway_env}" CORS_ORIGINS "${cors_origins}"
+  append_env_var "${gateway_env}" Cors__AllowedOrigins "${cors_origins}"
+  append_env_var "${gateway_env}" AllowedOrigins "${cors_origins}"
   append_env_var "${gateway_env}" ASPNETCORE_URLS "http://*:5000"
 
   log "Deploying gateway..."
@@ -359,10 +377,6 @@ deploy_gateway() {
     --quiet
   rm -f "${gateway_env}"
 }
-
-# Allow all origins for testing purposes
-INITIAL_CORS="*"
-
 deploy_gateway "${INITIAL_CORS}" "${GATEWAY_PUBLIC_URL:-https://placeholder.invalid}"
 GATEWAY_URL="$(run_url gateway)"
 [ -n "${GATEWAY_URL}" ] || error "gateway did not return a URL"
@@ -429,11 +443,6 @@ gcloud run deploy client-facing \
 
 FRONTEND_URL="$(run_url frontend-client)"
 MARKETING_URL="$(run_url client-facing)"
-
-# Allow all origins for testing purposes
-FINAL_CORS="*"
-deploy_gateway "${FINAL_CORS}" "${GATEWAY_PUBLIC_URL}"
-
 gcloud run services update crm-service \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
