@@ -440,12 +440,14 @@ export const propertyService = {
       return response.data;
     },
 
-    uploadPropertyDocument: async (propertyId, file, { name, description } = {}) => {
+    uploadPropertyDocument: async (propertyId, file, { name, description, isPasswordProtected = false, documentPassword = '' } = {}) => {
       try {
         const formData = new FormData();
         formData.append('File', file);
         if (name) formData.append('Name', name);
         if (description) formData.append('Description', description);
+        formData.append('IsPasswordProtected', String(Boolean(isPasswordProtected)));
+        formData.append('DocumentPassword', documentPassword || '');
         const response = await apiClient.post(`/properties/${propertyId}/documents`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });

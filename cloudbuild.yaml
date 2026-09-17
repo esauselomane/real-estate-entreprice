@@ -1,5 +1,5 @@
 substitutions:
-  _REGION: us-central1
+  _REGION: africa-south1
   _REPO: realestate-images
   _SQL_INSTANCE: realestate-sql
   _VPC_CONNECTOR: realestate-connector
@@ -61,36 +61,6 @@ steps:
       - -f=api-gateway/Dockerfile
       - .
 
-  - id: build-brochure-worker
-    name: gcr.io/cloud-builders/docker
-    args:
-      - build
-      - --build-arg=BUILD_CONFIGURATION=Release
-      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/brochure-worker:${_SHORT_SHA}
-      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/brochure-worker:latest
-      - -f=backend-services/BrochureGeneration.Worker/Dockerfile
-      - .
-
-  - id: build-image-worker
-    name: gcr.io/cloud-builders/docker
-    args:
-      - build
-      - --build-arg=BUILD_CONFIGURATION=Release
-      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/image-worker:${_SHORT_SHA}
-      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/image-worker:latest
-      - -f=backend-services/ImageProcessor.Worker/Dockerfile
-      - .
-
-  - id: build-syndication-worker
-    name: gcr.io/cloud-builders/docker
-    args:
-      - build
-      - --build-arg=BUILD_CONFIGURATION=Release
-      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/syndication-worker:${_SHORT_SHA}
-      - -t=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/syndication-worker:latest
-      - -f=backend-services/PlatformSyndication.Worker/Dockerfile
-      - .
-
   - id: build-frontend
     name: gcr.io/cloud-builders/docker
     args:
@@ -118,7 +88,7 @@ steps:
       - -c
       - |
         set -e
-        for svc in identity-service property-service crm-service developer-api gateway brochure-worker image-worker syndication-worker frontend-client client-facing; do
+        for svc in identity-service property-service crm-service developer-api gateway frontend-client client-facing; do
           docker push ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/$$svc:${_SHORT_SHA}
           docker push ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/$$svc:latest
         done
@@ -139,9 +109,6 @@ images:
   - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/crm-service:${_SHORT_SHA}
   - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/developer-api:${_SHORT_SHA}
   - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/gateway:${_SHORT_SHA}
-  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/brochure-worker:${_SHORT_SHA}
-  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/image-worker:${_SHORT_SHA}
-  - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/syndication-worker:${_SHORT_SHA}
   - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/frontend-client:${_SHORT_SHA}
   - ${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/client-facing:${_SHORT_SHA}
 

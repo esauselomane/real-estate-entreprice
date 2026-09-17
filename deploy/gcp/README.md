@@ -1,140 +1,84 @@
 # Google Cloud Deployment Guide
 
-This directory contains everything needed to deploy the Real Estate Enterprise platform to Google Cloud.
+Johannesburg (`africa-south1`) is the default region. The existing `realestate-sql` instance in `us-central1` cannot be moved; this script creates a **new** regional SQL Server instance and empty databases. Local databases are not touched.
 
 ## Quick Start
 
 ```bash
-# 1. Authenticate
 gcloud auth login
-gcloud config set project YOUR_PROJECT_ID
+gcloud auth application-default login
 
-# 2. One-shot deploy (provisions all infrastructure)
-export PROJECT_ID="my-realestate-prod"
-export REGION="us-central1"
-export DOMAIN="yourdomain.com"
+export PROJECT_ID="project-ff46407b-1a09-4376-95a"
+export REGION="africa-south1"
 ./deploy/gcp/deploy.sh
 ```
 
-The script will:
-- Enable required APIs
-- Create Artifact Registry repository
-- Store secrets in Secret Manager
-- Provision Cloud SQL for SQL Server
-- Create VPC + Serverless VPC connector
-- Create service accounts + IAM bindings
-- Build 10 container images
-- Deploy 10 Cloud Run services
-- Map custom domains
-- Print service URLs
+Default public hosts (`DOMAIN=biscovetech.com`):
 
-## Estimated Cost (us-central1, low traffic)
+- `https://app.biscovetech.com` — admin UI (`frontend-client`)
+- `https://api.biscovetech.com` — API gateway
+- `https://www.biscovetech.com` — marketing site (`client-facing`)
 
-| Resource | Config | Monthly |
-|----------|--------|---------|
-| Cloud SQL SQL Server Standard | db-custom-2-7680 (HA) | ~$280 |
-| Identity Cloud Run | 1 vCPU, 1Gi, min=1, max=10 | ~$30 |
-| Property Cloud Run | 1 vCPU, 1.5Gi, min=1, max=15 | ~$50 |
-| CRM Cloud Run | 1 vCPU, 1.5Gi, min=1, max=15 | ~$50 |
-| Gateway Cloud Run | 1 vCPU, 512Mi, min=1, max=20 | ~$25 |
-| Frontend Cloud Run | 1 vCPU, 512Mi, min=1, max=10 | ~$25 |
-| Client-Facing Cloud Run | 1 vCPU, 512Mi, min=1, max=10 | ~$25 |
-| Workers (3) | 1 vCPU, 1Gi, min=0-1 | ~$20 |
-| VPC Connector | 2-10 instances | ~$15 |
-| **Total** | | **~$520/mo** |
+Set `SKIP_DOMAIN_MAPPING=1` to skip Cloud Run domain mappings and bake `*.run.app` URLs instead.
 
-Plus Cloud Storage for brochures, Memorystore Redis if you add caching, and Confluent Cloud for Kafka.
+The script:
 
-## Architecture
+- Enables required APIs
+- Creates Artifact Registry in `africa-south1` (the US registry is not reused)
+- Reuses `jwt-secret` and `mssql-password` when they already exist (does not rotate them)
+- Creates `realestate-sql-africa-south1` with private IP and empty Identity/Property/CRM/Developer databases
+- Stores regional connection-string secrets (`*-db-conn-africa-south1`)
+- Builds and deploys Identity, Property, CRM, Developer API, Gateway, frontend-client, and client-facing
+- Wires the gateway with `DOWNSTREAM_SCHEME=https` and Cloud Run hostnames
+- Rebuilds the frontends **after** the gateway URL is known (Vite/Next public URLs are bake-time)
 
-```
-   ┌──────────────┐
-   │ Cloud CDN    │ ← static assets
-   └──────┬───────┘
-          │
-   ┌──────▼───────┐    ┌──────────────┐
-   │ Frontend     │    │ Client-Facing│
-   │ (admin UI)   │    │ (marketing)  │
-   └──────┬───────┘    └──────┬───────┘
-          │                   │
-          └────────┬──────────┘
-                   │
-            ┌──────▼──────┐
-            │  Gateway    │  (Ocelot, public)
-            └──────┬──────┘
-                   │
-   ┌───────┬───────┼───────┬────────┐
-   │       │       │       │        │
-┌──▼──┐ ┌──▼──┐ ┌──▼──┐ ┌──▼──┐ ┌──▼──┐
-│ID  │ │PROP │ │ CRM │ │DEV  │ │WORK │  (private)
-└──┬──┘ └──┬──┘ └──┬──┘ └──┬──┘ └──┬──┘
-   └──────┴───────┴──────┴──────┘
-                  │
-          ┌───────▼──────┐
-          │  Cloud SQL   │ (private IP)
-          └──────────────┘
-```
+Kafka worker containers are **not** deployed. Image processing, syndication, brochure generation, and imports run as hosted services inside Property and CRM (`min-instances=1`, CPU always allocated).
 
-## Required Environment Variables
+## Required environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PROJECT_ID` | — | GCP project ID (required) |
-| `REGION` | us-central1 | GCP region |
-| `ZONE` | us-central1-a | GCP zone (for SQL HA pairing) |
-| `DOMAIN` | yourdomain.com | Base domain for cloud run domain mappings |
-| `SQL_PASSWORD` | auto-generated | SA password for Cloud SQL |
-| `JWT_SECRET` | auto-generated | Symmetric JWT signing key |
+| `PROJECT_ID` | — | Required GCP project |
+| `REGION` | `africa-south1` | Cloud Run, Artifact Registry, and Cloud SQL region |
+| `ZONE` | `africa-south1-a` | Cloud SQL zone |
+| `SQL_INSTANCE` | `realestate-sql-${REGION}` | Must be a **new** name; `realestate-sql` already exists in us-central1 |
+| `DOMAIN` | `biscovetech.com` | Base domain for `app.` / `www.` / `api.` mappings |
+| `NETWORK` / `SUBNET` | `default` | VPC used for Direct VPC egress to Cloud SQL |
+| `VITE_GOOGLE_MAPS_API_KEY` | unset | Optional frontend build arg |
+| `SKIP_DOMAIN_MAPPING` | `0` | Set to `1` to skip Cloud Run domain mappings |
 
-## Manual Follow-ups After Deploy
+## What changed vs the old script
 
-1. **DNS** — Add A or CNAME records at your registrar:
-   - `app.yourdomain.com` → frontend-client service
-   - `www.yourdomain.com` → client-facing service
-   - `api.yourdomain.com` → gateway service
+- Default region is Johannesburg, not `us-central1`
+- SQL connection strings use the instance **private IP** (SQL Server cannot use the Cloud SQL Unix socket)
+- Broken `Server=localhost,1433` values are gone; passwords are not printed
+- Service accounts match Cloud Run names (`identity-service-sa`, not `identity-sa`)
+- Gateway routing uses Cloud Run HTTPS hosts/ports instead of Docker Compose hostnames
+- Frontend images are built with `VITE_API_BASE_URL` / `NEXT_PUBLIC_*` build args
+- Backends stay reachable so Ocelot can proxy (app-level JWT still applies)
 
-2. **SSL certificates** — Wait for managed certs to provision (~15 min after DNS propagates).
+## After Johannesburg is healthy
 
-3. **Kafka** — Cloud Run can't run a Kafka broker. Use Confluent Cloud, or run a dedicated VM/MIG with Kafka. Update worker env vars.
+1. Point DNS at the Cloud Run domain-mapping records:
+   - `app.biscovetech.com` → frontend-client
+   - `api.biscovetech.com` → gateway
+   - `www.biscovetech.com` → client-facing
+   Wait for managed certificates (~15 minutes after DNS propagates).
+2. Confirm `/health` on gateway, identity, and property.
+3. Only then delete the **us-central1** Cloud Run services and `realestate-sql`. Do not run `destroy.sh` against us-central1 with the new defaults; set `REGION=us-central1` and `SQL_INSTANCE=realestate-sql` explicitly if you intend to tear that stack down.
+4. Property documents currently write to container disk. Plan Cloud Storage before relying on the vault in production.
 
-4. **Cloud SQL authorized networks** — Cloud Run uses the VPC connector, so no authorized network changes needed.
-
-5. **Cloud CDN** — Enable on frontend-client for static asset caching:
-   ```bash
-   gcloud compute backend-services update ... --enable-cdn
-   ```
-
-6. **Cloud Monitoring alerts** — Set up uptime checks on `/health` endpoints.
-
-## CI/CD
-
-Connect Cloud Build to your GitHub repo:
+## Redeploy one service
 
 ```bash
-gcloud builds triggers create github \
-  --repo-name=real-estate-entreprice \
-  --repo-owner=YOUR_GITHUB_USER \
-  --branch-pattern="^main$" \
-  --build-config=cloudbuild.yaml
+export PROJECT_ID="project-ff46407b-1a09-4376-95a"
+./deploy/gcp/deploy-service.sh property-service
 ```
 
-After the first deploy, you can also run `cloudbuild.yaml` directly:
-```bash
-gcloud builds submit --config=cloudbuild.yaml
-```
+## Files
 
-## Files in This Directory
-
-- `deploy.sh` — One-shot provision + deploy (production)
-- `destroy.sh` — Tear down all resources
-- `cloud-run-manifest.yaml` — Service definitions (alternative to CLI)
-- `ocelot.production.json` — Gateway routing for Cloud Run
-- `../../cloudbuild.yaml` — Cloud Build pipeline
-
-## Troubleshooting
-
-**401 on gateway** — Verify JWT secret is the same in Identity, Property, CRM, Developer-API services (it is, all read from `jwt-secret:latest`).
-
-**Cloud Run times out connecting to Cloud SQL** — Check VPC connector and ensure `Identity__BaseUrl` / `Gateway__BaseUrl` use the public Cloud Run URLs.
-
-**Identity service can't be reached by Permission check** — Update the `Identity__BaseUrl` env var on Property and CRM services to point to the actual `identity-service-xxx.a.run.app` URL after first deploy.
+- `deploy.sh` — provision + deploy
+- `deploy-service.sh` — rebuild and replace one service
+- `common.sh` — shared helpers
+- `destroy.sh` — regional teardown (does not delete shared `jwt-secret` / `mssql-password`)
+- `../../cloudbuild.yaml` — image builds for africa-south1; use `deploy.sh` for a full release (the Knative replace manifest still has placeholders)

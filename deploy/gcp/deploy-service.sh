@@ -1,190 +1,223 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================
-#  Real Estate Enterprise — Individual Service Deployer
-# ============================================================
-#  Usage:
-#    ./deploy/gcp/deploy-service.sh <service-name>
-#
-#  Available Services:
-#    identity-service, property-service, crm-service, 
-#    developer-api, gateway, brochure-worker, image-worker, 
-#    syndication-worker, frontend-client, client-facing
-# ============================================================
+# Redeploy a single Cloud Run service after the first africa-south1 deploy.
+# Usage: ./deploy/gcp/deploy-service.sh <service-name>
 
-# --- Configuration ---
-PROJECT_ID="${PROJECT_ID:-your-gcp-project-id}"
-REGION="${REGION:-us-central1}"
-DOMAIN="${DOMAIN:-your-production-domain.com}"
-KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-your-kafka-broker:9092}"
-REPO_NAME="realestate-images"
-SQL_INSTANCE="realestate-sql"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+PROJECT_ID="${PROJECT_ID:-}"
+REGION="${REGION:-africa-south1}"
+DOMAIN="${DOMAIN:-biscovetech.com}"
+REPO_NAME="${REPO_NAME:-realestate-images}"
 SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo manual)"
 ARTIFACT_REG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}"
+NETWORK="${NETWORK:-default}"
+SUBNET="${SUBNET:-default}"
+VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY:-}"
 
-# --- Color output ---
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-log()   { echo -e "${GREEN}[+]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
-error() { echo -e "${RED}[-]${NC} $*" >&2; exit 1; }
+IDENTITY_CONN_SECRET="identity-service-db-conn-${REGION}"
+PROPERTY_CONN_SECRET="property-service-db-conn-${REGION}"
+CRM_CONN_SECRET="crm-service-db-conn-${REGION}"
+DEVELOPER_CONN_SECRET="developer-api-db-conn-${REGION}"
+PROPERTY_PROPERTY_CONN_SECRET="developer-api-property-db-conn-${REGION}"
 
-# --- Pre-flight ---
+require_command gcloud
+require_command docker
+
+if [ -z "${PROJECT_ID}" ]; then
+  error "Set PROJECT_ID before running deploy-service.sh"
+fi
+
 if [ "$#" -ne 1 ]; then
-    error "Usage: $0 <service-name>\nExample: $0 syndication-worker"
+  error "Usage: $0 <identity-service|property-service|crm-service|developer-api|gateway|frontend-client|client-facing>"
 fi
 
 SERVICE_NAME=$1
-
-declare -A SERVICES=(
-  ["identity-service"]="backend-services/Identity.Microservice/Dockerfile"
-  ["property-service"]="backend-services/Property.Microservice/Dockerfile"
-  ["crm-service"]="backend-services/CRM.Microservice/Dockerfile"
-  ["developer-api"]="Developer.API/Dockerfile"
-  ["gateway"]="api-gateway/Dockerfile"
-  ["brochure-worker"]="backend-services/BrochureGeneration.Worker/Dockerfile"
-  ["image-worker"]="backend-services/ImageProcessor.Worker/Dockerfile"
-  ["syndication-worker"]="backend-services/PlatformSyndication.Worker/Dockerfile"
-  ["frontend-client"]="frontend-client/Dockerfile"
-  ["client-facing"]="client-facing-app/Dockerfile"
-)
-
-if [[ -z "${SERVICES[$SERVICE_NAME]:-}" ]]; then
-    error "Unknown service: ${SERVICE_NAME}. Available: ${!SERVICES[@]}"
-fi
-
-command -v gcloud >/dev/null || error "gcloud CLI is required"
-command -v docker  >/dev/null || error "docker is required"
 gcloud config set project "${PROJECT_ID}" --quiet
 
-# Fetch SQL Password from Secret Manager
-log "Fetching deployment credentials..."
-SQL_PASSWORD=$(gcloud secrets versions access latest --secret=mssql-password 2>/dev/null || error "Could not find mssql-password secret. Run full deploy.sh first.")
+dockerfile_for() {
+  case "$1" in
+    identity-service) echo "backend-services/Identity.Microservice/Dockerfile" ;;
+    property-service) echo "backend-services/Property.Microservice/Dockerfile" ;;
+    crm-service) echo "backend-services/CRM.Microservice/Dockerfile" ;;
+    developer-api) echo "Developer.API/Dockerfile" ;;
+    gateway) echo "api-gateway/Dockerfile" ;;
+    frontend-client) echo "frontend-client/Dockerfile" ;;
+    client-facing) echo "client-facing-app/Dockerfile" ;;
+    *) error "Unknown service: $1" ;;
+  esac
+}
 
-# Verify Service Account exists before building/pushing
-SA_EMAIL="${SERVICE_NAME}-sa@${PROJECT_ID}.iam.gserviceaccount.com"
-log "Verifying service account: ${SA_EMAIL}"
-gcloud iam service-accounts describe "${SA_EMAIL}" --quiet >/dev/null 2>&1 || error "Service account ${SA_EMAIL} not found. Run full deploy.sh first."
-
-deploy_service() {
+deploy_backend() {
   local name=$1
-  local db_name=$2
-  shift 2
-  log "Deploying ${name} to Cloud Run..."
+  local container_port=$2
+  local cpu=$3
+  local memory=$4
+  local min_instances=$5
+  local cpu_throttling_flag=$6
+  shift 6
+
   gcloud run deploy "${name}" \
-    --image="${ARTIFACT_REG}/${name}:${SHORT_SHA}" \
+    --image="$(artifact_image "${name}")" \
     --region="${REGION}" \
+    --project="${PROJECT_ID}" \
     --platform=managed \
     --service-account="${name}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --vpc-connector=realestate-connector \
-    --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" \
+    --port="${container_port}" \
+    --network="${NETWORK}" \
+    --subnet="${SUBNET}" \
+    --vpc-egress=private-ranges-only \
     --execution-environment=gen2 \
-    --cpu=2 \
-    --memory=2Gi \
-    --min-instances=0 \
+    --cpu="${cpu}" \
+    --memory="${memory}" \
+    --min-instances="${min_instances}" \
     --max-instances=10 \
-    --concurrency=80 \
-    --timeout=300 \
-    --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,ASPNETCORE_URLS=http://*:8080" \
-    --set-env-vars="ConnectionStrings__DefaultConnection=Server=localhost,1433,1433;Database=${db_name};User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;,Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
-    --set-secrets="Jwt__Secret=jwt-secret:latest" \
+    "${cpu_throttling_flag}" \
+    --allow-unauthenticated \
+    --ingress=all \
     "$@" \
     --quiet
 }
 
-deploy_worker() {
-  local name=$1
-  shift
-  log "Deploying worker ${name} to Cloud Run..."
-  gcloud run deploy "${name}" \
-    --image="${ARTIFACT_REG}/${name}:${SHORT_SHA}" \
-    --region="${REGION}" \
-    --platform=managed \
-    --service-account="${name}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --no-allow-unauthenticated \
-    --vpc-connector=realestate-connector \
-    --min-instances=0 \
-    --max-instances=5 \
-    --cpu=2 \
-    --memory=2Gi \
-    --timeout=3600 \
-    "$@" \
-    --quiet
-}
+IDENTITY_URL="$(run_url identity-service)"
+PROPERTY_URL="$(run_url property-service)"
+CRM_URL="$(run_url crm-service)"
+DEVELOPER_URL="$(run_url developer-api)"
+GATEWAY_URL="$(run_url gateway)"
+FRONTEND_URL="$(run_url frontend-client)"
+MARKETING_URL="$(run_url client-facing)"
 
-get_url() {
-    gcloud run services describe "$1" --region="${REGION}" --format='value(status.url)' 2>/dev/null || echo "pending"
-}
-
-# --- Build & Push ---
-log "Checking if image version ${SHORT_SHA} exists in registry..."
-if gcloud artifacts docker images list "${ARTIFACT_REG}/${SERVICE_NAME}" --filter="TAGS:${SHORT_SHA}" --format="get(package)" 2>/dev/null | grep -q "${SERVICE_NAME}"; then
-    log "Image ${SERVICE_NAME}:${SHORT_SHA} already exists. Skipping build and push."
+if [ -n "${DOMAIN}" ]; then
+  GATEWAY_PUBLIC_URL="https://api.${DOMAIN}"
+  APP_PUBLIC_URL="https://app.${DOMAIN}"
+  SITE_PUBLIC_URL="https://www.${DOMAIN}"
 else
-    dockerfile="${SERVICES[$SERVICE_NAME]}"
-    log "Building ${SERVICE_NAME}..."
-    docker build \
-      --build-arg BUILDCONFIGURATION=Release \
-      -t "${ARTIFACT_REG}/${SERVICE_NAME}:${SHORT_SHA}" \
-      -t "${ARTIFACT_REG}/${SERVICE_NAME}:latest" \
-      -f "${dockerfile}" \
-      .
-
-    log "Pushing image..."
-    docker push "${ARTIFACT_REG}/${SERVICE_NAME}:${SHORT_SHA}" || error "Docker push failed for tag ${SHORT_SHA}"
-    docker push "${ARTIFACT_REG}/${SERVICE_NAME}:latest" || error "Docker push failed for tag latest"
+  GATEWAY_PUBLIC_URL="${GATEWAY_URL}"
+  APP_PUBLIC_URL="${FRONTEND_URL}"
+  SITE_PUBLIC_URL="${MARKETING_URL}"
 fi
 
-# --- Service-Specific Deployment ---
-log "Starting Cloud Run deployment for ${SERVICE_NAME}..."
-case $SERVICE_NAME in
-    "identity-service")
-        deploy_service identity-service IdentityDB --no-allow-unauthenticated
-        ;;
-    "property-service")
-        IDENTITY_URL=$(get_url identity-service)
-        deploy_service property-service PropertyDB --no-allow-unauthenticated --set-env-vars="Identity__BaseUrl=${IDENTITY_URL}"
-        ;;
-    "crm-service")
-        IDENTITY_URL=$(get_url identity-service)
-        deploy_service crm-service CRMDB --no-allow-unauthenticated --set-env-vars="Identity__BaseUrl=${IDENTITY_URL}"
-        ;;
-    "developer-api")
-        deploy_service developer-api DeveloperDB --no-allow-unauthenticated \
-          --set-env-vars="ConnectionStrings__PropertyConnection=Server=localhost,1433,1433;Database=PropertyDB;User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;"
-        ;;
-    "gateway")
-        gcloud run deploy gateway --image="${ARTIFACT_REG}/gateway:${SHORT_SHA}" \
-          --region="${REGION}" --service-account="gateway-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-          --allow-unauthenticated --min-instances=0 --max-instances=20 --cpu=2 --memory=2Gi \
-          --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,Cors__AllowedOrigins__0=https://app.${DOMAIN},Cors__AllowedOrigins__1=https://www.${DOMAIN}" --quiet
-        ;;
-    "frontend-client")
-        GATEWAY_URL=$(get_url gateway)
-        gcloud run deploy frontend-client --image="${ARTIFACT_REG}/frontend-client:${SHORT_SHA}" \
-          --region="${REGION}" --service-account="frontend-client-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-          --allow-unauthenticated --set-env-vars="VITE_API_BASE_URL=${GATEWAY_URL},NODE_ENV=production" --quiet
-        ;;
-    "client-facing")
-        GATEWAY_URL=$(get_url gateway)
-        IDENTITY_URL=$(get_url identity-service)
-        gcloud run deploy client-facing --image="${ARTIFACT_REG}/client-facing:${SHORT_SHA}" \
-          --region="${REGION}" --service-account="client-facing-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-          --allow-unauthenticated --set-env-vars="NODE_ENV=production,NEXT_PUBLIC_GATEWAY_URL=${GATEWAY_URL},NEXT_PUBLIC_APP_URL=https://app.${DOMAIN},NEXT_PUBLIC_SITE_URL=https://www.${DOMAIN},LEAD_API_URL=${IDENTITY_URL}" --quiet
-        ;;
-    "brochure-worker")
-        GATEWAY_URL=$(get_url gateway)
-        deploy_worker brochure-worker --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,Gateway__BaseUrl=${GATEWAY_URL},Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}"
-        ;;
-    "image-worker")
-        deploy_worker image-worker --set-env-vars="Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}"
-        ;;
-    "syndication-worker")
-        deploy_worker syndication-worker --set-env-vars="Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}"
-        ;;
-    *)
-        deploy_service "${SERVICE_NAME}" "None" --no-allow-unauthenticated
-        ;;
+case "${SERVICE_NAME}" in
+  frontend-client)
+    build_and_push_image frontend-client "$(dockerfile_for frontend-client)" \
+      --build-arg "VITE_API_BASE_URL=${GATEWAY_PUBLIC_URL}" \
+      --build-arg "VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY}"
+    ;;
+  client-facing)
+    build_and_push_image client-facing "$(dockerfile_for client-facing)" \
+      --build-arg "NEXT_PUBLIC_GATEWAY_URL=${GATEWAY_PUBLIC_URL}" \
+      --build-arg "NEXT_PUBLIC_APP_URL=${APP_PUBLIC_URL}" \
+      --build-arg "NEXT_PUBLIC_SITE_URL=${SITE_PUBLIC_URL}"
+    ;;
+  *)
+    build_and_push_image "${SERVICE_NAME}" "$(dockerfile_for "${SERVICE_NAME}")"
+    ;;
 esac
 
-log "Successfully deployed ${SERVICE_NAME}!"
+case "${SERVICE_NAME}" in
+  identity-service)
+    ENV_FILE="$(mktemp)"
+    append_env_var "${ENV_FILE}" ASPNETCORE_ENVIRONMENT Production
+    deploy_backend identity-service 5001 1 1Gi 1 --no-cpu-throttling \
+      --env-vars-file="${ENV_FILE}" \
+      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest"
+    rm -f "${ENV_FILE}"
+    ;;
+  property-service)
+    ENV_FILE="$(mktemp)"
+    append_env_var "${ENV_FILE}" ASPNETCORE_ENVIRONMENT Production
+    append_env_var "${ENV_FILE}" Identity__BaseUrl "${IDENTITY_URL}"
+    deploy_backend property-service 5002 1 1.5Gi 1 --no-cpu-throttling \
+      --env-vars-file="${ENV_FILE}" \
+      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${PROPERTY_CONN_SECRET}:latest"
+    rm -f "${ENV_FILE}"
+    ;;
+  crm-service)
+    ENV_FILE="$(mktemp)"
+    append_env_var "${ENV_FILE}" ASPNETCORE_ENVIRONMENT Production
+    append_env_var "${ENV_FILE}" Identity__BaseUrl "${IDENTITY_URL}"
+    append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
+    deploy_backend crm-service 5003 1 1.5Gi 1 --no-cpu-throttling \
+      --env-vars-file="${ENV_FILE}" \
+      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${CRM_CONN_SECRET}:latest"
+    rm -f "${ENV_FILE}"
+    ;;
+  developer-api)
+    ENV_FILE="$(mktemp)"
+    append_env_var "${ENV_FILE}" ASPNETCORE_ENVIRONMENT Production
+    deploy_backend developer-api 5006 1 512Mi 0 --cpu-throttling \
+      --env-vars-file="${ENV_FILE}" \
+      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DeveloperConnection=${DEVELOPER_CONN_SECRET}:latest,ConnectionStrings__PropertyConnection=${PROPERTY_PROPERTY_CONN_SECRET}:latest"
+    rm -f "${ENV_FILE}"
+    ;;
+  gateway)
+    ENV_FILE="$(mktemp)"
+    append_env_var "${ENV_FILE}" ASPNETCORE_ENVIRONMENT Production
+    append_env_var "${ENV_FILE}" DOWNSTREAM_SCHEME https
+    append_env_var "${ENV_FILE}" IDENTITY_HOST "$(host_from_url "${IDENTITY_URL}")"
+    append_env_var "${ENV_FILE}" IDENTITY_PORT 443
+    append_env_var "${ENV_FILE}" PROPERTY_HOST "$(host_from_url "${PROPERTY_URL}")"
+    append_env_var "${ENV_FILE}" PROPERTY_PORT 443
+    append_env_var "${ENV_FILE}" CRM_HOST "$(host_from_url "${CRM_URL}")"
+    append_env_var "${ENV_FILE}" CRM_PORT 443
+    append_env_var "${ENV_FILE}" DEVELOPER_HOST "$(host_from_url "${DEVELOPER_URL}")"
+    append_env_var "${ENV_FILE}" DEVELOPER_PORT 443
+    append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
+    CORS_ORIGINS="${FRONTEND_URL},${MARKETING_URL},${GATEWAY_URL}"
+    if [ -n "${DOMAIN}" ]; then
+      CORS_ORIGINS="https://app.${DOMAIN},https://www.${DOMAIN},${CORS_ORIGINS}"
+    fi
+    append_env_var "${ENV_FILE}" CORS_ORIGINS "${CORS_ORIGINS}"
+    gcloud run deploy gateway \
+      --image="$(artifact_image gateway)" \
+      --region="${REGION}" \
+      --project="${PROJECT_ID}" \
+      --service-account="gateway-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+      --port=5000 \
+      --cpu=1 \
+      --memory=512Mi \
+      --min-instances=1 \
+      --max-instances=20 \
+      --allow-unauthenticated \
+      --env-vars-file="${ENV_FILE}" \
+      --quiet
+    rm -f "${ENV_FILE}"
+    ;;
+  frontend-client)
+    gcloud run deploy frontend-client \
+      --image="$(artifact_image frontend-client)" \
+      --region="${REGION}" \
+      --project="${PROJECT_ID}" \
+      --service-account="frontend-client-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+      --port=80 \
+      --cpu=1 \
+      --memory=512Mi \
+      --allow-unauthenticated \
+      --quiet
+    ;;
+  client-facing)
+    ENV_FILE="$(mktemp)"
+    append_env_var "${ENV_FILE}" NODE_ENV production
+    append_env_var "${ENV_FILE}" LEAD_API_URL "${IDENTITY_URL}"
+    append_env_var "${ENV_FILE}" NEXT_PUBLIC_GATEWAY_URL "${GATEWAY_PUBLIC_URL}"
+    append_env_var "${ENV_FILE}" NEXT_PUBLIC_APP_URL "${APP_PUBLIC_URL}"
+    append_env_var "${ENV_FILE}" NEXT_PUBLIC_SITE_URL "${SITE_PUBLIC_URL}"
+    gcloud run deploy client-facing \
+      --image="$(artifact_image client-facing)" \
+      --region="${REGION}" \
+      --project="${PROJECT_ID}" \
+      --service-account="client-facing-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+      --port=80 \
+      --cpu=1 \
+      --memory=512Mi \
+      --allow-unauthenticated \
+      --env-vars-file="${ENV_FILE}" \
+      --quiet
+    rm -f "${ENV_FILE}"
+    ;;
+esac
+
+log "Deployed ${SERVICE_NAME} to ${REGION}"

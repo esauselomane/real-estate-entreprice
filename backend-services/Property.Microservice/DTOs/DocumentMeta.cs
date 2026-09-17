@@ -11,5 +11,6 @@ namespace Property.Microservice.DTOs
             public string ContentType { get; set; } = string.Empty;
             public long SizeBytes { get; set; }
             public DateTime UploadedAt { get; set; }
+            public bool IsPasswordProtected { get; set; }
         }
 }

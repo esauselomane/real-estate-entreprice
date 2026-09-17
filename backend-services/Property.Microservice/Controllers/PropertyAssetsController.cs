@@ -28,6 +28,7 @@ public class PropertyAssetsController : PropertyControllerBase
     private readonly IRepository<PropertyPlatformSyndication> _propertyPlatformSyndicationRepository;
     private readonly IRepository<AmenityType> _amenityTypeRepository;
     private readonly IRepository<PropertyUnitAmenity> _propertyUnitAmenityRepository;
+    private readonly IDocumentEncryptionService _documentEncryptionService;
     private readonly IConfiguration _configuration;
 
     public PropertyAssetsController(
@@ -43,6 +44,7 @@ public class PropertyAssetsController : PropertyControllerBase
         IRepository<PropertyUnitAmenity> propertyUnitAmenityRepository,
         IJobQueue<ImageProcessingJob> imageProcessingQueue,
         IJobQueue<SyndicationJob> syndicationQueue,
+        IDocumentEncryptionService documentEncryptionService,
         IConfiguration configuration)
         : base(dbContext, permissionCheck, propertyRepository, propertyUnitRepository, logger, imageProcessingQueue, syndicationQueue)
     {
@@ -51,6 +53,7 @@ public class PropertyAssetsController : PropertyControllerBase
         _propertyPlatformSyndicationRepository = propertyPlatformSyndicationRepository;
         _amenityTypeRepository = amenityTypeRepository;
         _propertyUnitAmenityRepository = propertyUnitAmenityRepository;
+        _documentEncryptionService = documentEncryptionService;
         _configuration = configuration;
     }
 
@@ -900,47 +903,84 @@ public class PropertyAssetsController : PropertyControllerBase
             .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
         if (property == null) return NotFound(new { message = "Property not found." });
 
-        var docs = string.IsNullOrWhiteSpace(property.VerificationDocumentsJson)
-            ? new List<string>()
-            : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.VerificationDocumentsJson) ?? new List<string>());
+        var documents = DeserializeVerificationDocuments(property.VerificationDocumentsJson);
 
-        if (index < 0 || index >= docs.Count) return NotFound(new { message = "Document not found." });
+        if (index < 0 || index >= documents.Count) return NotFound(new { message = "Document not found." });
 
-        var doc = docs[index];
+        var documentReference = documents[index];
+        var metadata = ParseVerificationDocumentMetadata(property.VerificationDocumentMetadataJson);
+        var documentMetadata = index < metadata.Count ? metadata[index] : null;
 
-        // Data URL — return inline
-        if (doc.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        if (documentReference.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
         {
-            var parts = doc.Split(',', 2);
+            var parts = documentReference.Split(',', 2);
             if (parts.Length != 2) return BadRequest(new { message = "Invalid data URL." });
 
-            var meta = parts[0].Split(';');
-            var mime = meta[0].Replace("data:", "", StringComparison.OrdinalIgnoreCase);
-            var base64 = parts[1];
-
-            var dataBytes = Convert.FromBase64String(base64);
-            return File(dataBytes, mime);
+            var header = parts[0].Split(';');
+            var mime = header[0].Replace("data:", "", StringComparison.OrdinalIgnoreCase);
+            var dataBytes = Convert.FromBase64String(parts[1]);
+            var contentType = documentMetadata?.ContentType ?? mime;
+            var fileName = string.IsNullOrWhiteSpace(documentMetadata?.FileName) ? null : documentMetadata.FileName;
+            return File(dataBytes, contentType, fileName);
         }
 
-        // File path — resolve from worker storage root
-        var fileName = Path.GetFileName(doc);
-        var workerRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "PropertyMediaVault"));
-        var filePath = Path.GetFullPath(Path.Combine(workerRoot, doc.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar)));
-
-        if (!filePath.StartsWith(workerRoot, StringComparison.OrdinalIgnoreCase))
-            return BadRequest(new { message = "Invalid document path." });
-
-        if (!System.IO.File.Exists(filePath))
-            return NotFound(new { message = "Document file not found on disk." });
+        var filePath = ResolveStoredDocumentPath(documentMetadata?.StoredName ?? documentReference);
+        if (filePath == null) return BadRequest(new { message = "Invalid document path." });
+        if (!System.IO.File.Exists(filePath)) return NotFound(new { message = "Document file not found on disk." });
 
         var bytes = await System.IO.File.ReadAllBytesAsync(filePath);
-        var contentType = fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ? "application/pdf"
-            : fileName.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "image/png"
-            : fileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ? "image/jpeg"
-            : "application/octet-stream";
-
-        return File(bytes, contentType, fileName);
+        var storedFileName = Path.GetFileName(filePath);
+        var storedContentType = documentMetadata?.ContentType ?? GetStoredDocumentContentType(storedFileName);
+        var downloadFileName = string.IsNullOrWhiteSpace(documentMetadata?.FileName) ? storedFileName : documentMetadata.FileName;
+        return File(bytes, storedContentType, downloadFileName);
     }
+
+    private string? ResolveStoredDocumentPath(string storedPath)
+    {
+        if (string.IsNullOrWhiteSpace(storedPath)) return null;
+
+        var normalizedPath = storedPath.Replace('\\', Path.DirectorySeparatorChar)
+            .Replace('/', Path.DirectorySeparatorChar);
+        var storageRoot = Path.GetFullPath(StorageRootPath);
+        var candidatePaths = Path.IsPathRooted(normalizedPath)
+            ? new[] { Path.GetFullPath(normalizedPath) }
+            : new[]
+            {
+                Path.GetFullPath(Path.Combine(storageRoot, normalizedPath)),
+                Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "PropertyMediaVault", normalizedPath))
+            };
+
+        foreach (var candidatePath in candidatePaths)
+        {
+            if (!IsPathWithinStorageRoot(candidatePath, storageRoot)) continue;
+            if (System.IO.File.Exists(candidatePath)) return candidatePath;
+        }
+
+        return candidatePaths.FirstOrDefault(candidatePath => IsPathWithinStorageRoot(candidatePath, storageRoot));
+    }
+
+    private static bool IsPathWithinStorageRoot(string candidatePath, string storageRoot)
+    {
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(storageRoot);
+        return candidatePath.Equals(normalizedRoot, StringComparison.OrdinalIgnoreCase)
+            || candidatePath.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetStoredDocumentContentType(string fileName)
+    {
+        return Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".pdf" => "application/pdf",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".tif" or ".tiff" => "image/tiff",
+            ".gif" => "image/gif",
+            ".txt" => "text/plain",
+            ".zip" => "application/zip",
+            _ => "application/octet-stream"
+        };
+    }
+
 
     // ➕ Upload a new verification document into the property's deeds vault.
     // The document is stored as a base64 data URL inside VerificationDocumentsJson
@@ -956,8 +996,10 @@ public class PropertyAssetsController : PropertyControllerBase
         if (dto.File == null || dto.File.Length == 0)
             return BadRequest(new { message = "A file is required." });
 
-        // 🛡️ Enforce file validation — size and format limits.
-        const long maxBytes = 10 * 1024 * 1024; // 10 MB
+        if (dto.IsPasswordProtected && string.IsNullOrWhiteSpace(dto.DocumentPassword))
+            return BadRequest(new { message = "A document password is required when password protection is enabled." });
+
+        const long maxBytes = 10 * 1024 * 1024;
         if (dto.File.Length > maxBytes)
             return BadRequest(new { message = $"File exceeds the 10 MB size limit. Selected file is {dto.File.Length / (1024.0 * 1024.0):0.0} MB." });
 
@@ -965,39 +1007,103 @@ public class PropertyAssetsController : PropertyControllerBase
         {
             ".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".gif", ".doc", ".docx", ".txt"
         };
-        var ext = Path.GetExtension(dto.File.FileName);
-        if (string.IsNullOrEmpty(ext) || !allowedExtensions.Contains(ext))
-            return BadRequest(new { message = $"File type '{ext}' is not supported. Allowed: {string.Join(", ", allowedExtensions)}." });
+        var extension = Path.GetExtension(dto.File.FileName);
+        if (string.IsNullOrEmpty(extension) || !allowedExtensions.Contains(extension))
+            return BadRequest(new { message = $"File type '{extension}' is not supported. Allowed: {string.Join(", ", allowedExtensions)}." });
 
-        // Convert the file to a base64 data URL so the document is embedded
-        // directly in the property row (no separate file-table plumbing).
-        string dataUrl;
-        await using (var stream = new MemoryStream())
+        EncryptedDocumentResult documentResult;
+        try
         {
-            await dto.File.CopyToAsync(stream);
-            var base64 = Convert.ToBase64String(stream.ToArray());
-            var contentType = ext.ToLowerInvariant() switch
-            {
-                ".pdf" => "application/pdf", ".png" => "image/png",
-                ".jpg" or ".jpeg" => "image/jpeg", ".tif" or ".tiff" => "image/tiff",
-                ".gif" => "image/gif", ".txt" => "text/plain",
-                ".doc" => "application/msword",
-                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                _ => "application/octet-stream"
-            };
-            dataUrl = $"data:{contentType};base64,{base64}";
+            await using var sourceStream = dto.File.OpenReadStream();
+            documentResult = await _documentEncryptionService.EncryptAsync(
+                sourceStream,
+                dto.File.FileName,
+                dto.DocumentPassword,
+                dto.IsPasswordProtected);
+        }
+        catch (Exception exception)
+        {
+            Logger.LogWarning(exception, "Verification document encryption failed for PropertyId={PropertyId}", propertyId);
+            return BadRequest(new { message = "The document could not be prepared for upload. Please check the file and password, then try again." });
         }
 
-        var docs = string.IsNullOrWhiteSpace(property.VerificationDocumentsJson)
-            ? new List<string>()
-            : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.VerificationDocumentsJson) ?? new List<string>());
+        var documentPath = string.Empty;
+        if (documentResult.IsPasswordProtected)
+        {
+            try
+            {
+                documentPath = await SaveEncryptedDocumentAsync(propertyId, documentResult);
+            }
+            catch (Exception exception)
+            {
+                Logger.LogWarning(exception, "Password-protected verification document storage failed for PropertyId={PropertyId}", propertyId);
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "The document was encrypted but could not be saved. Please try again."
+                });
+            }
+        }
 
-        docs.Add(dataUrl);
-        property.VerificationDocumentsJson = System.Text.Json.JsonSerializer.Serialize(docs);
+        var documents = DeserializeVerificationDocuments(property.VerificationDocumentsJson);
+        var metadata = ParseVerificationDocumentMetadata(property.VerificationDocumentMetadataJson);
+        var documentName = string.IsNullOrWhiteSpace(dto.Name) ? Path.GetFileNameWithoutExtension(dto.File.FileName) : dto.Name.Trim();
+        var documentMetadata = new DocumentMeta
+        {
+            Name = documentName,
+            Description = dto.Description?.Trim() ?? string.Empty,
+            FileName = documentResult.FileName,
+            StoredName = documentPath,
+            ContentType = documentResult.ContentType,
+            SizeBytes = documentResult.Content.Length,
+            UploadedAt = DateTime.UtcNow,
+            IsPasswordProtected = documentResult.IsPasswordProtected
+        };
+
+        if (documentResult.IsPasswordProtected)
+        {
+            documents.Add(documentPath);
+        }
+        else
+        {
+            var base64 = Convert.ToBase64String(documentResult.Content);
+            documents.Add($"data:{documentResult.ContentType};base64,{base64}");
+        }
+
+        metadata.Add(documentMetadata);
+        property.VerificationDocumentsJson = JsonSerializer.Serialize(documents);
+        property.VerificationDocumentMetadataJson = JsonSerializer.Serialize(metadata, JsonOptions);
         await DbContext.SaveChangesAsync();
 
-        return Ok(new { message = "Verification document uploaded.", index = docs.Count - 1 });
+        return Ok(new
+        {
+            message = documentResult.IsPasswordProtected
+                ? "Password-protected verification document uploaded."
+                : "Verification document uploaded.",
+            index = documents.Count - 1,
+            isPasswordProtected = documentResult.IsPasswordProtected
+        });
     }
+
+    private async Task<string> SaveEncryptedDocumentAsync(int propertyId, EncryptedDocumentResult documentResult)
+    {
+        var documentFolder = Path.Combine(StorageRootPath, $"Property_{propertyId}", "Documents");
+        Directory.CreateDirectory(documentFolder);
+
+        var storedFileName = $"{Guid.NewGuid():N}{documentResult.FileExtension}";
+        var storedFilePath = Path.Combine(documentFolder, storedFileName);
+        await System.IO.File.WriteAllBytesAsync(storedFilePath, documentResult.Content);
+
+        return Path.Combine($"Property_{propertyId}", "Documents", storedFileName)
+            .Replace('\\', '/');
+    }
+
+    private static List<string> DeserializeVerificationDocuments(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new List<string>();
+        try { return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>(); }
+        catch { return new List<string>(); }
+    }
+
 
     // ❌ Delete a verification document from the property's deeds vault.
     [HttpDelete("{propertyId:int}/documents/{index:int}")]
@@ -1008,14 +1114,27 @@ public class PropertyAssetsController : PropertyControllerBase
             .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
         if (property == null) return NotFound(new { message = "Property not found." });
 
-        var docs = string.IsNullOrWhiteSpace(property.VerificationDocumentsJson)
-            ? new List<string>()
-            : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.VerificationDocumentsJson) ?? new List<string>());
+        var documents = DeserializeVerificationDocuments(property.VerificationDocumentsJson);
 
-        if (index < 0 || index >= docs.Count) return NotFound(new { message = "Document not found." });
+        if (index < 0 || index >= documents.Count) return NotFound(new { message = "Document not found." });
 
-        docs.RemoveAt(index);
-        property.VerificationDocumentsJson = System.Text.Json.JsonSerializer.Serialize(docs);
+        var metadata = ParseVerificationDocumentMetadata(property.VerificationDocumentMetadataJson);
+        var documentMetadata = index < metadata.Count ? metadata[index] : null;
+        var documentReference = documents[index];
+        var storedFilePath = documentMetadata == null || !documentMetadata.IsPasswordProtected
+            ? null
+            : ResolveStoredDocumentPath(documentMetadata.StoredName ?? documentReference);
+
+        if (storedFilePath != null && System.IO.File.Exists(storedFilePath))
+        {
+            System.IO.File.Delete(storedFilePath);
+        }
+
+        documents.RemoveAt(index);
+        if (index < metadata.Count) metadata.RemoveAt(index);
+
+        property.VerificationDocumentsJson = JsonSerializer.Serialize(documents);
+        property.VerificationDocumentMetadataJson = JsonSerializer.Serialize(metadata, JsonOptions);
         await DbContext.SaveChangesAsync();
 
         return Ok(new { message = "Verification document removed." });

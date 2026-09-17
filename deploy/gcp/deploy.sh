@@ -2,51 +2,66 @@
 set -euo pipefail
 
 # ============================================================
-#  Real Estate Enterprise — Google Cloud one-shot deployer
-# ============================================================
+#  Real Estate Enterprise — Google Cloud deployer
+#  Default region: africa-south1 (Johannesburg)
+#
 #  Provisions:
 #   - Artifact Registry
-#   - Cloud SQL for SQL Server
-#   - VPC + Serverless VPC connector
-#   - Secret Manager secrets
-#   - Service accounts + IAM roles
-#   - Builds & pushes 10 container images
-#   - Deploys 10 Cloud Run services
+#   - Cloud SQL for SQL Server (private IP, new regional instance)
+#   - Secret Manager secrets (reuses jwt-secret / mssql-password)
+#   - Service accounts + IAM
+#   - Cloud Run services (in-process workers live inside Property/CRM)
 #
 #  Usage:
-#    export PROJECT_ID="my-realestate-prod"
-#    export REGION="us-central1"
-#    export DOMAIN="yourdomain.com"
+#    export PROJECT_ID="project-ff46407b-1a09-4376-95a"
+#    export DOMAIN="biscovetech.com"
 #    ./deploy/gcp/deploy.sh
 # ============================================================
 
-# --- Configuration ---
-PROJECT_ID="${PROJECT_ID:-your-gcp-project-id}"
-REGION="${REGION:-us-central1}"
-ZONE="${ZONE:-us-central1-a}"
-DOMAIN="${DOMAIN:-your-production-domain.com}"
-KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-your-kafka-broker:9092}"
-REPO_NAME="realestate-images"
-SQL_INSTANCE="realestate-sql"
-SQL_TIER="db-custom-1-3840"
-SQL_PASSWORD="${SQL_PASSWORD:-$(openssl rand -base64 24 | tr -d /=+ | cut -c1-24)}"
-JWT_SECRET="${JWT_SECRET:-$(openssl rand -base64 48 | tr -d /=+)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+PROJECT_ID="${PROJECT_ID:-}"
+REGION="${REGION:-africa-south1}"
+ZONE="${ZONE:-africa-south1-a}"
+DOMAIN="${DOMAIN:-biscovetech.com}"
+REPO_NAME="${REPO_NAME:-realestate-images}"
+SQL_INSTANCE="${SQL_INSTANCE:-realestate-sql-${REGION}}"
+SQL_TIER="${SQL_TIER:-db-custom-1-3840}"
+SQL_VERSION="${SQL_VERSION:-SQLSERVER_2022_EXPRESS}"
+NETWORK="${NETWORK:-default}"
+SUBNET="${SUBNET:-default}"
 SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo manual)"
 ARTIFACT_REG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}"
+SKIP_DOMAIN_MAPPING="${SKIP_DOMAIN_MAPPING:-0}"
+VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY:-}"
 
-# --- Color output ---
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-log()   { echo -e "${GREEN}[+]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
-error() { echo -e "${RED}[-]${NC} $*" >&2; exit 1; }
+IDENTITY_CONN_SECRET="identity-service-db-conn-${REGION}"
+PROPERTY_CONN_SECRET="property-service-db-conn-${REGION}"
+CRM_CONN_SECRET="crm-service-db-conn-${REGION}"
+DEVELOPER_CONN_SECRET="developer-api-db-conn-${REGION}"
+PROPERTY_PROPERTY_CONN_SECRET="developer-api-property-db-conn-${REGION}"
 
-# --- Pre-flight ---
-command -v gcloud >/dev/null || error "gcloud CLI is required"
-command -v docker  >/dev/null || error "docker is required"
+require_command gcloud
+require_command docker
+require_command openssl
+
+if [ -z "${PROJECT_ID}" ] || [ "${PROJECT_ID}" = "your-gcp-project-id" ]; then
+  error "Set PROJECT_ID to your GCP project (for example project-ff46407b-1a09-4376-95a)"
+fi
+
+if [ -z "${DOMAIN}" ] || [ "${DOMAIN}" = "your-production-domain.com" ]; then
+  warn "DOMAIN is not set. Frontends will be built against the Cloud Run gateway URL and custom domain mapping will be skipped."
+  SKIP_DOMAIN_MAPPING=1
+  DOMAIN=""
+else
+  log "Public hosts: app.${DOMAIN}, api.${DOMAIN}, www.${DOMAIN}"
+fi
+
 gcloud config set project "${PROJECT_ID}" --quiet
-log "Targeting project: ${PROJECT_ID} (region ${REGION})"
+log "Targeting project ${PROJECT_ID} in ${REGION} (tag ${SHORT_SHA})"
 
-# --- Enable APIs ---
 log "Enabling required Google Cloud APIs..."
 gcloud services enable \
   run.googleapis.com \
@@ -54,280 +69,416 @@ gcloud services enable \
   secretmanager.googleapis.com \
   artifactregistry.googleapis.com \
   cloudbuild.googleapis.com \
-  vpcaccess.googleapis.com \
   compute.googleapis.com \
   certificatemanager.googleapis.com \
   servicenetworking.googleapis.com \
   dns.googleapis.com \
+  --project="${PROJECT_ID}" \
   --quiet
 
-# --- Artifact Registry ---
-log "Creating Artifact Registry repository: ${REPO_NAME}"
-gcloud artifacts repositories create "${REPO_NAME}" \
-  --repository-format=docker \
+log "Ensuring Artifact Registry repository ${REPO_NAME}..."
+gcloud artifacts repositories describe "${REPO_NAME}" \
   --location="${REGION}" \
-  --description="Real Estate Enterprise container images" \
-  --quiet 2>/dev/null || warn "Repository already exists"
+  --project="${PROJECT_ID}" >/dev/null 2>&1 || \
+  gcloud artifacts repositories create "${REPO_NAME}" \
+    --repository-format=docker \
+    --location="${REGION}" \
+    --description="Real Estate Enterprise container images (${REGION})" \
+    --project="${PROJECT_ID}" \
+    --quiet
 gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-# --- Secrets ---
-log "Storing secrets in Secret Manager..."
-echo -n "${JWT_SECRET}" | gcloud secrets create jwt-secret --data-file=- --replication-policy=automatic --quiet 2>/dev/null || \
-  echo -n "${JWT_SECRET}" | gcloud secrets versions add jwt-secret --data-file=- --quiet
-echo -n "${SQL_PASSWORD}" | gcloud secrets create mssql-password --data-file=- --replication-policy=automatic --quiet 2>/dev/null || \
-  echo -n "${SQL_PASSWORD}" | gcloud secrets versions add mssql-password --data-file=- --quiet
-echo -n "support@${DOMAIN}" | gcloud secrets create support-email --data-file=- --replication-policy=automatic --quiet 2>/dev/null || true
+log "Resolving JWT and SQL credentials from Secret Manager..."
+if secret_exists jwt-secret; then
+  JWT_SECRET="$(read_secret jwt-secret)"
+else
+  JWT_SECRET="${JWT_SECRET:-$(openssl rand -base64 48 | tr -d '/+=' )}"
+  ensure_secret_if_missing jwt-secret "${JWT_SECRET}"
+fi
 
-# --- Cloud SQL ---
+if secret_exists mssql-password; then
+  SQL_PASSWORD="$(read_secret mssql-password)"
+else
+  SQL_PASSWORD="${SQL_PASSWORD:-$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)}"
+  ensure_secret_if_missing mssql-password "${SQL_PASSWORD}"
+fi
+
+if [ -n "${DOMAIN}" ]; then
+  ensure_secret_if_missing support-email "support@${DOMAIN}"
+fi
+
 log "Configuring Private Services Access for Cloud SQL..."
-gcloud compute addresses create google-managed-services-default \
+gcloud compute addresses describe google-managed-services-default \
   --global \
-  --purpose=VPC_PEERING \
-  --prefix-length=16 \
-  --description="PEERING_ADDRESS_RANGE" \
-  --network=default \
-  --quiet 2>/dev/null || true
+  --project="${PROJECT_ID}" >/dev/null 2>&1 || \
+  gcloud compute addresses create google-managed-services-default \
+    --global \
+    --purpose=VPC_PEERING \
+    --prefix-length=16 \
+    --description="Private services range for Cloud SQL" \
+    --network="${NETWORK}" \
+    --project="${PROJECT_ID}" \
+    --quiet
 
 gcloud services vpc-peerings connect \
   --service=servicenetworking.googleapis.com \
   --ranges=google-managed-services-default \
-  --network=default \
+  --network="${NETWORK}" \
+  --project="${PROJECT_ID}" \
   --quiet 2>/dev/null || true
 
-log "Creating Cloud SQL for SQL Server (this takes ~5 minutes)..."
-gcloud sql instances describe "${SQL_INSTANCE}" >/dev/null 2>&1 || \
+create_sql_instance_if_needed() {
+  if gcloud sql instances describe "${SQL_INSTANCE}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    local existing_region
+    existing_region="$(gcloud sql instances describe "${SQL_INSTANCE}" --project="${PROJECT_ID}" --format='value(region)')"
+    if [ "${existing_region}" != "${REGION}" ]; then
+      error "Cloud SQL instance ${SQL_INSTANCE} already exists in ${existing_region}. Set SQL_INSTANCE to a new name for ${REGION}."
+    fi
+    log "Using existing Cloud SQL instance ${SQL_INSTANCE}"
+    return 0
+  fi
+
+  log "Creating Cloud SQL SQL Server instance ${SQL_INSTANCE} in ${REGION} (several minutes)..."
   gcloud sql instances create "${SQL_INSTANCE}" \
-    --database-version=SQLSERVER_2022_EXPRESS \
+    --database-version="${SQL_VERSION}" \
     --tier="${SQL_TIER}" \
     --region="${REGION}" \
+    --zone="${ZONE}" \
     --root-password="${SQL_PASSWORD}" \
     --availability-type=ZONAL \
-    --network=projects/${PROJECT_ID}/global/networks/default \
+    --network="projects/${PROJECT_ID}/global/networks/${NETWORK}" \
     --no-assign-ip \
+    --project="${PROJECT_ID}" \
     --quiet
+}
 
-log "Creating databases..."
-for db in IdentityDB PropertyDB CRMDB DeveloperDB; do
-  gcloud sql databases create "${db}" --instance="${SQL_INSTANCE}" --quiet 2>/dev/null || warn "${db} exists"
-done
+create_sql_instance_if_needed
 
-# --- VPC Connector ---
-log "Creating Serverless VPC connector..."
-gcloud compute networks vpc-access connectors describe realestate-connector --region="${REGION}" >/dev/null 2>&1 || \
-  gcloud compute networks vpc-access connectors create realestate-connector \
-    --region="${REGION}" \
-    --network=default \
-    --range=10.8.0.0/28 \
-    --min-instances=2 \
-    --max-instances=10 \
-    --quiet
-
-# --- Service Accounts ---
-log "Creating service accounts..."
-for svc in identity property crm gateway frontend-client client-facing brochure-worker image-worker syndication-worker; do
-  gcloud iam service-accounts describe "${svc}-sa@${PROJECT_ID}.iam.gserviceaccount.com" >/dev/null 2>&1 || \
-    gcloud iam service-accounts create "${svc}-sa" \
-      --display-name="Real Estate ${svc} service account" --quiet
-done
-
-# --- IAM ---
-log "Binding IAM roles..."
-for sa in identity property crm; do
-  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${sa}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --role="roles/cloudsql.client" --condition=None --quiet >/dev/null
-  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${sa}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --role="roles/secretmanager.secretAccessor" --condition=None --quiet >/dev/null
-done
-
-# Allow frontend service accounts to invoke other Cloud Run services
-for sa in gateway frontend-client client-facing; do
-  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${sa}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --role="roles/run.invoker" --condition=None --quiet >/dev/null
-done
-
-# --- Container builds ---
-log "Building 10 container images in parallel..."
-declare -A SERVICES=(
-  ["identity-service"]="backend-services/Identity.Microservice/Dockerfile"
-  ["property-service"]="backend-services/Property.Microservice/Dockerfile"
-  ["crm-service"]="backend-services/CRM.Microservice/Dockerfile"
-  ["gateway"]="api-gateway/Dockerfile"
-  ["brochure-worker"]="backend-services/BrochureGeneration.Worker/Dockerfile"
-  ["image-worker"]="backend-services/ImageProcessor.Worker/Dockerfile"
-  ["syndication-worker"]="backend-services/PlatformSyndication.Worker/Dockerfile"
-  ["frontend-client"]="frontend-client/Dockerfile"
-  ["client-facing"]="client-facing-app/Dockerfile"
-)
-
-for svc in "${!SERVICES[@]}"; do
-  dockerfile="${SERVICES[$svc]}"
-
-  # Check if the specific tag already exists in registry to skip redundant build/push
-  if gcloud artifacts docker images list "${ARTIFACT_REG}/${svc}" --filter="TAGS:${SHORT_SHA}" --format="get(package)" 2>/dev/null | grep -q "${svc}"; then
-    log "Image ${svc}:${SHORT_SHA} already exists. Skipping build."
-  else
-    log "Building ${svc}..."
-    docker build \
-      --build-arg BUILDCONFIGURATION=Release \
-      -t "${ARTIFACT_REG}/${svc}:${SHORT_SHA}" \
-      -t "${ARTIFACT_REG}/${svc}:latest" \
-      -f "${dockerfile}" \
-      . >/tmp/build-${svc}.log 2>&1 || error "Build failed for ${svc} (see /tmp/build-${svc}.log)"
-
-    docker push "${ARTIFACT_REG}/${svc}:${SHORT_SHA}" &
-    docker push "${ARTIFACT_REG}/${svc}:latest" &
+log "Waiting for Cloud SQL instance to become RUNNABLE..."
+SQL_STATE=""
+while [ "${SQL_STATE}" != "RUNNABLE" ]; do
+  SQL_STATE="$(gcloud sql instances describe "${SQL_INSTANCE}" --project="${PROJECT_ID}" --format='value(state)')"
+  if [ "${SQL_STATE}" != "RUNNABLE" ]; then
+    sleep 15
   fi
 done
-wait
 
-# --- Cloud Run deployments ---
-log "Deploying Cloud Run services..."
+SQL_PRIVATE_IP="$(sql_private_ip)"
+if [ -z "${SQL_PRIVATE_IP}" ]; then
+  error "Cloud SQL instance ${SQL_INSTANCE} has no private IP. Check VPC peering and recreate with --no-assign-ip."
+fi
+log "Cloud SQL private IP is available"
 
-deploy_service() {
+for db in IdentityDB PropertyDB CRMDB DeveloperDB; do
+  gcloud sql databases create "${db}" \
+    --instance="${SQL_INSTANCE}" \
+    --project="${PROJECT_ID}" \
+    --quiet 2>/dev/null || warn "${db} already exists"
+done
+
+write_secret "${IDENTITY_CONN_SECRET}" "$(sql_connection_string IdentityDB)"
+write_secret "${PROPERTY_CONN_SECRET}" "$(sql_connection_string PropertyDB)"
+write_secret "${CRM_CONN_SECRET}" "$(sql_connection_string CRMDB)"
+write_secret "${DEVELOPER_CONN_SECRET}" "$(sql_connection_string DeveloperDB)"
+write_secret "${PROPERTY_PROPERTY_CONN_SECRET}" "$(sql_connection_string PropertyDB)"
+
+log "Creating service accounts..."
+ensure_service_account identity-service-sa "Identity Cloud Run"
+ensure_service_account property-service-sa "Property Cloud Run"
+ensure_service_account crm-service-sa "CRM Cloud Run"
+ensure_service_account developer-api-sa "Developer API Cloud Run"
+ensure_service_account gateway-sa "Gateway Cloud Run"
+ensure_service_account frontend-client-sa "Frontend Cloud Run"
+ensure_service_account client-facing-sa "Marketing Cloud Run"
+
+log "Binding Cloud SQL and secret access..."
+for account_id in identity-service-sa property-service-sa crm-service-sa developer-api-sa; do
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${account_id}@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --role="roles/cloudsql.client" \
+    --condition=None \
+    --quiet >/dev/null
+  grant_secret_accessor "${account_id}@${PROJECT_ID}.iam.gserviceaccount.com" jwt-secret
+done
+
+grant_secret_accessor "identity-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${IDENTITY_CONN_SECRET}"
+grant_secret_accessor "property-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${PROPERTY_CONN_SECRET}"
+grant_secret_accessor "crm-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${CRM_CONN_SECRET}"
+grant_secret_accessor "developer-api-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${DEVELOPER_CONN_SECRET}"
+grant_secret_accessor "developer-api-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${PROPERTY_PROPERTY_CONN_SECRET}"
+
+deploy_backend() {
   local name=$1
-  local db_name=$2
-  shift 2
-  log "  → ${name}"
+  local container_port=$2
+  local service_account=$3
+  local cpu=$4
+  local memory=$5
+  local min_instances=$6
+  local cpu_throttling_flag=$7
+  shift 7
+
+  log "Deploying ${name}..."
   gcloud run deploy "${name}" \
-    --image="${ARTIFACT_REG}/${name}:${SHORT_SHA}" \
+    --image="$(artifact_image "${name}")" \
     --region="${REGION}" \
+    --project="${PROJECT_ID}" \
     --platform=managed \
-    --service-account="${name}-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-    --vpc-connector=realestate-connector \
-    --add-cloudsql-instances="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}" \
+    --service-account="${service_account}@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --port="${container_port}" \
+    --network="${NETWORK}" \
+    --subnet="${SUBNET}" \
+    --vpc-egress=private-ranges-only \
     --execution-environment=gen2 \
-    --cpu=2 \
-    --memory=2Gi \
-    --min-instances=0 \
+    --cpu="${cpu}" \
+    --memory="${memory}" \
+    --min-instances="${min_instances}" \
     --max-instances=10 \
     --concurrency=80 \
     --timeout=300 \
-    --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,ASPNETCORE_URLS=http://*:8080" \
-    --set-env-vars="ConnectionStrings__DefaultConnection=Server=Server=localhost,1433,1433;Database=${db_name};User Id=sqlserver;Password=${SQL_PASSWORD};TrustServerCertificate=True;Encrypt=False;,Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
-    --set-secrets="Jwt__Secret=jwt-secret:latest" \
+    "${cpu_throttling_flag}" \
+    --allow-unauthenticated \
+    --ingress=all \
     "$@" \
     --quiet
 }
 
-# Identity
-deploy_service identity-service IdentityDB --no-allow-unauthenticated
-IDENTITY_URL=$(gcloud run services describe identity-service --region="${REGION}" --format='value(status.url)')
+log "Building backend images..."
+build_and_push_image identity-service backend-services/Identity.Microservice/Dockerfile
+build_and_push_image property-service backend-services/Property.Microservice/Dockerfile
+build_and_push_image crm-service backend-services/CRM.Microservice/Dockerfile
+build_and_push_image developer-api Developer.API/Dockerfile
+build_and_push_image gateway api-gateway/Dockerfile
 
-# Property
-deploy_service property-service PropertyDB --no-allow-unauthenticated --set-env-vars="Identity__BaseUrl=${IDENTITY_URL}"
+IDENTITY_ENV="$(mktemp)"
+append_env_var "${IDENTITY_ENV}" ASPNETCORE_ENVIRONMENT Production
+append_env_var "${IDENTITY_ENV}" Jwt__Issuer Identity.Microservice
+append_env_var "${IDENTITY_ENV}" Jwt__Audience RealEstateApp.Client
+if [ -n "${DOMAIN}" ]; then
+  append_env_var "${IDENTITY_ENV}" Cors__AllowedOrigins__0 "https://app.${DOMAIN}"
+  append_env_var "${IDENTITY_ENV}" Cors__AllowedOrigins__1 "https://www.${DOMAIN}"
+fi
 
-# CRM
-deploy_service crm-service CRMDB --no-allow-unauthenticated --set-env-vars="Identity__BaseUrl=${IDENTITY_URL}"
+deploy_backend identity-service 5001 identity-service-sa 1 1Gi 1 --no-cpu-throttling \
+  --env-vars-file="${IDENTITY_ENV}" \
+  --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest"
 
-# Gateway (public)
-log "  → gateway"
-gcloud run deploy gateway --image="${ARTIFACT_REG}/gateway:${SHORT_SHA}" \
-  --region="${REGION}" --service-account="gateway-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --no-allow-unauthenticated --min-instances=0 --max-instances=20 --cpu=2 --memory=2Gi \
-  --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,Cors__AllowedOrigins__0=https://app.${DOMAIN},Cors__AllowedOrigins__1=https://www.${DOMAIN}" --quiet
+IDENTITY_URL="$(run_url identity-service)"
+IDENTITY_HOST="$(host_from_url "${IDENTITY_URL}")"
+[ -n "${IDENTITY_URL}" ] || error "identity-service did not return a URL"
 
-GATEWAY_URL=$(gcloud run services describe gateway --region="${REGION}" --format='value(status.url)')
+PROPERTY_ENV="$(mktemp)"
+append_env_var "${PROPERTY_ENV}" ASPNETCORE_ENVIRONMENT Production
+append_env_var "${PROPERTY_ENV}" Identity__BaseUrl "${IDENTITY_URL}"
 
-# Frontend client (public)
-gcloud run deploy frontend-client \
-  --image="${ARTIFACT_REG}/frontend-client:${SHORT_SHA}" \
-  --region="${REGION}" \
-  --service-account="frontend-client-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --no-allow-unauthenticated \
-  --set-env-vars="VITE_API_BASE_URL=${GATEWAY_URL},NODE_ENV=production" \
-  --min-instances=0 --max-instances=10 --cpu=2 --memory=2Gi --quiet
+deploy_backend property-service 5002 property-service-sa 1 1.5Gi 1 --no-cpu-throttling \
+  --env-vars-file="${PROPERTY_ENV}" \
+  --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${PROPERTY_CONN_SECRET}:latest"
 
-# Client-facing marketing (public)
-gcloud run deploy client-facing \
-  --image="${ARTIFACT_REG}/client-facing:${SHORT_SHA}" \
-  --region="${REGION}" \
-  --service-account="client-facing-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --no-allow-unauthenticated \
-  --set-env-vars="NODE_ENV=production,NEXT_PUBLIC_GATEWAY_URL=${GATEWAY_URL},NEXT_PUBLIC_APP_URL=https://app.${DOMAIN},NEXT_PUBLIC_SITE_URL=https://www.${DOMAIN},LEAD_API_URL=${IDENTITY_URL}" \
-  --min-instances=0 --max-instances=10 --cpu=2 --memory=2Gi --quiet
+CRM_ENV="$(mktemp)"
+append_env_var "${CRM_ENV}" ASPNETCORE_ENVIRONMENT Production
+append_env_var "${CRM_ENV}" Identity__BaseUrl "${IDENTITY_URL}"
 
-# Workers (private)
-gcloud run deploy brochure-worker \
-  --image="${ARTIFACT_REG}/brochure-worker:${SHORT_SHA}" \
-  --region="${REGION}" \
-  --service-account="brochure-worker-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --no-allow-unauthenticated \
-  --vpc-connector=realestate-connector \
-  --set-env-vars="ASPNETCORE_ENVIRONMENT=Production,Gateway__BaseUrl=${GATEWAY_URL},Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
-  --min-instances=0 --max-instances=5 \
-  --cpu=2 --memory=2Gi --timeout=3600 --quiet
+deploy_backend crm-service 5003 crm-service-sa 1 1.5Gi 1 --no-cpu-throttling \
+  --env-vars-file="${CRM_ENV}" \
+  --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${CRM_CONN_SECRET}:latest"
 
-gcloud run deploy image-worker \
-  --image="${ARTIFACT_REG}/image-worker:${SHORT_SHA}" \
-  --region="${REGION}" \
-  --service-account="image-worker-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --no-allow-unauthenticated \
-  --vpc-connector=realestate-connector \
-  --set-env-vars="Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
-  --min-instances=0 --max-instances=5 \
-  --cpu=2 --memory=2Gi --timeout=3600 --quiet
+DEVELOPER_ENV="$(mktemp)"
+append_env_var "${DEVELOPER_ENV}" ASPNETCORE_ENVIRONMENT Production
 
-gcloud run deploy syndication-worker \
-  --image="${ARTIFACT_REG}/syndication-worker:${SHORT_SHA}" \
-  --region="${REGION}" \
-  --service-account="syndication-worker-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-  --no-allow-unauthenticated \
-  --vpc-connector=realestate-connector \
-  --set-env-vars="Kafka__BootstrapServers=${KAFKA_BOOTSTRAP_SERVERS}" \
-  --min-instances=0 --max-instances=5 \
-  --cpu=2 --memory=2Gi --timeout=3600 --quiet
+deploy_backend developer-api 5006 developer-api-sa 1 512Mi 0 --cpu-throttling \
+  --env-vars-file="${DEVELOPER_ENV}" \
+  --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DeveloperConnection=${DEVELOPER_CONN_SECRET}:latest,ConnectionStrings__PropertyConnection=${PROPERTY_PROPERTY_CONN_SECRET}:latest"
 
-# --- Custom domains ---
-log "Mapping custom domains..."
-gcloud run domain-mappings create --service=frontend-client --domain="app.${DOMAIN}" --region="${REGION}" --quiet 2>/dev/null || warn "frontend-client domain mapping exists"
-gcloud run domain-mappings create --service=client-facing --domain="www.${DOMAIN}" --region="${REGION}" --quiet 2>/dev/null || warn "client-facing domain mapping exists"
-gcloud run domain-mappings create --service=gateway --domain="api.${DOMAIN}" --region="${REGION}" --quiet 2>/dev/null || warn "gateway domain mapping exists"
+PROPERTY_URL="$(run_url property-service)"
+CRM_URL="$(run_url crm-service)"
+DEVELOPER_URL="$(run_url developer-api)"
+PROPERTY_HOST="$(host_from_url "${PROPERTY_URL}")"
+CRM_HOST="$(host_from_url "${CRM_URL}")"
+DEVELOPER_HOST="$(host_from_url "${DEVELOPER_URL}")"
 
-# --- IAM for unauthenticated access on gateway & frontends ---
-for svc in gateway frontend-client client-facing; do
-  gcloud run services add-iam-policy-binding "${svc}" \
+GATEWAY_PUBLIC_URL="https://api.${DOMAIN}"
+if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
+  GATEWAY_PUBLIC_URL=""
+fi
+
+deploy_gateway() {
+  local cors_origins=$1
+  local gateway_base=$2
+  local gateway_env
+  gateway_env="$(mktemp)"
+  append_env_var "${gateway_env}" ASPNETCORE_ENVIRONMENT Production
+  append_env_var "${gateway_env}" DOWNSTREAM_SCHEME https
+  append_env_var "${gateway_env}" IDENTITY_HOST "${IDENTITY_HOST}"
+  append_env_var "${gateway_env}" IDENTITY_PORT 443
+  append_env_var "${gateway_env}" PROPERTY_HOST "${PROPERTY_HOST}"
+  append_env_var "${gateway_env}" PROPERTY_PORT 443
+  append_env_var "${gateway_env}" CRM_HOST "${CRM_HOST}"
+  append_env_var "${gateway_env}" CRM_PORT 443
+  append_env_var "${gateway_env}" DEVELOPER_HOST "${DEVELOPER_HOST}"
+  append_env_var "${gateway_env}" DEVELOPER_PORT 443
+  append_env_var "${gateway_env}" Gateway__BaseUrl "${gateway_base}"
+  append_env_var "${gateway_env}" CORS_ORIGINS "${cors_origins}"
+
+  log "Deploying gateway..."
+  gcloud run deploy gateway \
+    --image="$(artifact_image gateway)" \
     --region="${REGION}" \
-    --member="allUsers" \
-    --role="roles/run.invoker" \
-    --condition=None \
-    --quiet 2>/dev/null || true
-done
+    --project="${PROJECT_ID}" \
+    --platform=managed \
+    --service-account="gateway-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --port=5000 \
+    --execution-environment=gen2 \
+    --cpu=1 \
+    --memory=512Mi \
+    --min-instances=1 \
+    --max-instances=20 \
+    --concurrency=200 \
+    --timeout=60 \
+    --allow-unauthenticated \
+    --ingress=all \
+    --env-vars-file="${gateway_env}" \
+    --quiet
+  rm -f "${gateway_env}"
+}
 
-# --- Summary ---
+INITIAL_CORS="http://localhost:5173,http://localhost:3000"
+if [ -n "${DOMAIN}" ]; then
+  INITIAL_CORS="https://app.${DOMAIN},https://www.${DOMAIN},${INITIAL_CORS}"
+fi
+
+deploy_gateway "${INITIAL_CORS}" "${GATEWAY_PUBLIC_URL:-https://placeholder.invalid}"
+GATEWAY_URL="$(run_url gateway)"
+[ -n "${GATEWAY_URL}" ] || error "gateway did not return a URL"
+if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
+  GATEWAY_PUBLIC_URL="${GATEWAY_URL}"
+fi
+
+FRONTEND_API_URL="${GATEWAY_PUBLIC_URL}"
+APP_PUBLIC_URL="https://app.${DOMAIN}"
+SITE_PUBLIC_URL="https://www.${DOMAIN}"
+if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
+  APP_PUBLIC_URL="${GATEWAY_URL}"
+  SITE_PUBLIC_URL="${GATEWAY_URL}"
+fi
+
+log "Building frontend images with public API URL ${FRONTEND_API_URL}..."
+FORCE_REBUILD=1
+FRONTEND_BUILD_ARGS=(--build-arg "VITE_API_BASE_URL=${FRONTEND_API_URL}")
+if [ -n "${VITE_GOOGLE_MAPS_API_KEY}" ]; then
+  FRONTEND_BUILD_ARGS+=(--build-arg "VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY}")
+fi
+build_and_push_image frontend-client frontend-client/Dockerfile "${FRONTEND_BUILD_ARGS[@]}"
+build_and_push_image client-facing client-facing-app/Dockerfile \
+  --build-arg "NEXT_PUBLIC_GATEWAY_URL=${FRONTEND_API_URL}" \
+  --build-arg "NEXT_PUBLIC_APP_URL=${APP_PUBLIC_URL}" \
+  --build-arg "NEXT_PUBLIC_SITE_URL=${SITE_PUBLIC_URL}"
+
+log "Deploying frontend-client..."
+gcloud run deploy frontend-client \
+  --image="$(artifact_image frontend-client)" \
+  --region="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --service-account="frontend-client-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --port=80 \
+  --cpu=1 \
+  --memory=512Mi \
+  --min-instances=0 \
+  --max-instances=10 \
+  --allow-unauthenticated \
+  --ingress=all \
+  --quiet
+
+log "Deploying client-facing..."
+CLIENT_ENV="$(mktemp)"
+append_env_var "${CLIENT_ENV}" NODE_ENV production
+append_env_var "${CLIENT_ENV}" LEAD_API_URL "${IDENTITY_URL}"
+append_env_var "${CLIENT_ENV}" NEXT_PUBLIC_GATEWAY_URL "${FRONTEND_API_URL}"
+append_env_var "${CLIENT_ENV}" NEXT_PUBLIC_APP_URL "${APP_PUBLIC_URL}"
+append_env_var "${CLIENT_ENV}" NEXT_PUBLIC_SITE_URL "${SITE_PUBLIC_URL}"
+gcloud run deploy client-facing \
+  --image="$(artifact_image client-facing)" \
+  --region="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --service-account="client-facing-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --port=80 \
+  --cpu=1 \
+  --memory=512Mi \
+  --min-instances=0 \
+  --max-instances=10 \
+  --allow-unauthenticated \
+  --ingress=all \
+  --env-vars-file="${CLIENT_ENV}" \
+  --quiet
+
+FRONTEND_URL="$(run_url frontend-client)"
+MARKETING_URL="$(run_url client-facing)"
+
+FINAL_CORS="${FRONTEND_URL},${MARKETING_URL},${GATEWAY_URL}"
+if [ -n "${DOMAIN}" ]; then
+  FINAL_CORS="https://app.${DOMAIN},https://www.${DOMAIN},${FINAL_CORS}"
+fi
+deploy_gateway "${FINAL_CORS}" "${GATEWAY_PUBLIC_URL}"
+
+gcloud run services update crm-service \
+  --region="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --update-env-vars="Gateway__BaseUrl=${GATEWAY_PUBLIC_URL}" \
+  --quiet
+
+if [ "${SKIP_DOMAIN_MAPPING}" != "1" ]; then
+  log "Mapping custom domains..."
+  gcloud beta run domain-mappings create --service=frontend-client --domain="app.${DOMAIN}" --region="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null \
+    || warn "frontend-client domain mapping already exists or is unavailable in ${REGION}"
+  gcloud beta run domain-mappings create --service=client-facing --domain="www.${DOMAIN}" --region="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null \
+    || warn "client-facing domain mapping already exists or is unavailable in ${REGION}"
+  gcloud beta run domain-mappings create --service=gateway --domain="api.${DOMAIN}" --region="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null \
+    || warn "gateway domain mapping already exists or is unavailable in ${REGION}"
+fi
+
+rm -f "${IDENTITY_ENV}" "${PROPERTY_ENV}" "${CRM_ENV}" "${DEVELOPER_ENV}" "${CLIENT_ENV}"
+
 cat <<EOF
 
 ${GREEN}========================================${NC}
 ${GREEN}  DEPLOYMENT COMPLETE${NC}
 ${GREEN}========================================${NC}
 
-Project:        ${PROJECT_ID}
-Region:         ${REGION}
-SQL Password:   ${SQL_PASSWORD}  (saved in Secret Manager)
-JWT Secret:     ${JWT_SECRET:0:8}... (saved in Secret Manager)
-Image Tag:      ${SHORT_SHA}
+Project:     ${PROJECT_ID}
+Region:      ${REGION}
+SQL instance: ${SQL_INSTANCE}
+Image tag:   ${SHORT_SHA}
 
 Service URLs:
-  Identity:     ${IDENTITY_URL}
-  Gateway:      ${GATEWAY_URL}
-  Frontend:     $(gcloud run services describe frontend-client --region=${REGION} --format='value(status.url)' 2>/dev/null || echo pending)
-  Marketing:    $(gcloud run services describe client-facing --region=${REGION} --format='value(status.url)' 2>/dev/null || echo pending)
+  Identity:   ${IDENTITY_URL}
+  Property:   ${PROPERTY_URL}
+  CRM:        ${CRM_URL}
+  Developer:  ${DEVELOPER_URL}
+  Gateway:    ${GATEWAY_URL}
+  Frontend:   ${FRONTEND_URL}
+  Marketing:  ${MARKETING_URL}
 
-Custom domains (configure DNS at your registrar):
-  A  app.${DOMAIN}   → frontend-client
-  A  www.${DOMAIN}   → client-facing
-  A  api.${DOMAIN}   → gateway
+EOF
 
-${YELLOW}Manual follow-ups:${NC}
-  1. Update DNS records (A or CNAME) for app/www/api.${DOMAIN}
-  2. Wait for managed SSL certificates to provision (~15 min)
-  3. Provision a Kafka cluster (Confluent Cloud or self-hosted) and update worker env vars
-  4. Set up Cloud CDN for frontend-client service
-  5. Configure Cloud Monitoring alerts (Uptime checks on /health)
+if [ "${SKIP_DOMAIN_MAPPING}" != "1" ]; then
+  cat <<EOF
+Custom domains (add DNS records at your registrar after mapping output):
+  app.${DOMAIN}  → frontend-client
+  www.${DOMAIN}  → client-facing
+  api.${DOMAIN}  → gateway
+
+EOF
+fi
+
+cat <<EOF
+${YELLOW}Notes:${NC}
+  - Background jobs run inside Property and CRM (min instances = 1). Separate Kafka workers are not deployed.
+  - SQL Server uses private IP over Direct VPC egress, not the Cloud SQL Unix socket.
+  - Connection strings are stored in regional Secret Manager secrets; jwt-secret was reused if it already existed.
+  - Uploaded property files live on the Cloud Run container disk and are not durable across revisions. Move the vault to Cloud Storage before production document use.
+  - Leave the us-central1 SQL instance in place until these Johannesburg health checks succeed, then delete it separately.
 
 ${GREEN}Verify with:${NC}
   curl -i ${GATEWAY_URL}/health
   curl -i ${IDENTITY_URL}/health
+  curl -i ${PROPERTY_URL}/health
 EOF

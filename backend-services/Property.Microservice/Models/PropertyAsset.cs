@@ -56,6 +56,9 @@ namespace Property.Microservice.Models
         public string VerificationDocumentsJson { get; set; } = "[]";
 
         [Required]
+        public string VerificationDocumentMetadataJson { get; set; } = "[]";
+
+        [Required]
         public string GalleryImageJson { get; set; } = "[]";
 
         [Required]

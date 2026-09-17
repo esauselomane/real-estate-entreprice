@@ -85,6 +85,7 @@ builder.Services.AddAuthorization(options =>
 });
 
 builder.Services.AddScoped<PermissionCheckService>();
+builder.Services.AddScoped<IDocumentEncryptionService, DocumentEncryptionService>();
 
 // Register background job queues
 builder.Services.AddSingleton<IJobQueue<ImageProcessingJob>, JobQueue<ImageProcessingJob>>();
@@ -309,6 +310,14 @@ using (var serviceScope = app.Services.CreateScope())
         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'[PropertyAssets]') AND name = N'GalleryImageJson')
         BEGIN
             ALTER TABLE [PropertyAssets] ADD [GalleryImageJson] nvarchar(MAX) NOT NULL CONSTRAINT DF_PropertyAssets_GalleryImageJson DEFAULT N'[]';
+        END
+    ");
+
+    databaseContext.Database.ExecuteSqlRaw(@"
+        IF COL_LENGTH(N'[PropertyAssets]', 'VerificationDocumentMetadataJson') IS NULL
+        BEGIN
+            ALTER TABLE [PropertyAssets] ADD [VerificationDocumentMetadataJson] nvarchar(MAX) NOT NULL
+                CONSTRAINT [DF_PropertyAssets_VerificationDocumentMetadataJson] DEFAULT N'[]';
         END
     ");
 

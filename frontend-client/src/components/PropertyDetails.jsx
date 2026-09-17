@@ -6,7 +6,7 @@ import {
    ExternalLink, Image, Plus, Trash2, Layers,
     Building, Check, Loader2, AlertCircle, FileSignature, Wrench, FolderLock, Pencil,
     X, Save, Upload, Download, History, ChevronDown, ChevronUp, Calendar,
-    ParkingMeter, Ship, Wind, Heart, Wifi, Zap, Shield, FileUp
+    ParkingMeter, Ship, Wind, Heart, Wifi, Zap, Shield, FileUp, Eye, EyeOff
   } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import { crmService } from '../services/crmService.js';
@@ -212,7 +212,14 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   // 📄 PROPERTY-LEVEL DEEDS & VERIFICATION VAULT — upload / delete verification
   // documents directly on the property page (Task 1). Mirrors the unit document
   // vault pattern so the UI is consistent.
-  const [verificationDocForm, setVerificationDocForm] = useState({ name: '', description: '', file: null });
+  const [verificationDocForm, setVerificationDocForm] = useState({
+    name: '',
+    description: '',
+    file: null,
+    isPasswordProtected: false,
+    documentPassword: ''
+  });
+  const [showVerificationPassword, setShowVerificationPassword] = useState(false);
   const [verificationDocUploading, setVerificationDocUploading] = useState(false);
   const [verificationDocDeleting, setVerificationDocDeleting] = useState(null);
   const [verificationDocError, setVerificationDocError] = useState('');
@@ -225,7 +232,46 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     catch { return []; }
   };
 
-  const resetVerificationDocForm = () => setVerificationDocForm({ name: '', description: '', file: null });
+  const parseVerificationDocumentMetadata = () => {
+    if (!property || !property.verificationDocumentMetadataJson) return [];
+    try {
+      const metadata = JSON.parse(property.verificationDocumentMetadataJson);
+      return Array.isArray(metadata) ? metadata : [];
+    }
+    catch { return []; }
+  };
+
+  const resetVerificationDocForm = () => {
+    setVerificationDocForm({
+      name: '',
+      description: '',
+      file: null,
+      isPasswordProtected: false,
+      documentPassword: ''
+    });
+    setShowVerificationPassword(false);
+  };
+
+  const handleVerificationPasswordToggle = (event) => {
+    const isPasswordProtected = event.target.checked;
+    setVerificationDocForm((currentForm) => ({
+      ...currentForm,
+      isPasswordProtected,
+      documentPassword: isPasswordProtected ? currentForm.documentPassword : ''
+    }));
+    setShowVerificationPassword(false);
+  };
+
+  const handleVerificationFileChange = (event) => {
+    setVerificationDocForm((currentForm) => ({
+      ...currentForm,
+      file: event.target.files?.[0] || null
+    }));
+  };
+
+  const handleVerificationPasswordVisibilityToggle = () => {
+    setShowVerificationPassword((isVisible) => !isVisible);
+  };
 
   const uploadVerificationDocument = async (event) => {
     event.preventDefault();
@@ -237,13 +283,19 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       setVerificationDocError('Choose a supported document no larger than 10 MB.');
       return;
     }
+    if (verificationDocForm.isPasswordProtected && !verificationDocForm.documentPassword.trim()) {
+      setVerificationDocError('Enter a password to protect this document.');
+      return;
+    }
     setVerificationDocUploading(true);
     setVerificationDocError('');
     setVerificationDocSuccess('');
     try {
       await propertyService.uploadPropertyDocument(property.propertyId, verificationDocForm.file, {
         name: verificationDocForm.name.trim(),
-        description: verificationDocForm.description.trim()
+        description: verificationDocForm.description.trim(),
+        isPasswordProtected: verificationDocForm.isPasswordProtected,
+        documentPassword: verificationDocForm.documentPassword
       });
       // Refresh the property row so the new document appears in the vault.
       const updated = await propertyService.getPropertyById(propertyId);
@@ -1985,13 +2037,50 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                     required
                     type="file"
                     accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.gif,.doc,.docx,.txt"
-                    onChange={e => setVerificationDocForm({ ...verificationDocForm, file: e.target.files?.[0] || null })}
+                    onChange={handleVerificationFileChange}
                     className="mt-1 w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
                   />
                   <span className="text-[10px] text-slate-500 block mt-1">
                     {verificationDocForm.file?.name || 'No file chosen'} · Max 10 MB · PDF / image / doc
                   </span>
                 </label>
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2.5">
+                  <label htmlFor="verification-password-protection" className="text-xs font-semibold text-slate-300 cursor-pointer">
+                    Password Protect Document?
+                  </label>
+                  <input
+                    id="verification-password-protection"
+                    type="checkbox"
+                    checked={verificationDocForm.isPasswordProtected}
+                    onChange={handleVerificationPasswordToggle}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500"
+                  />
+                </div>
+                {verificationDocForm.isPasswordProtected && (
+                  <div className="relative">
+                    <label htmlFor="verification-document-password" className="block text-[10px] uppercase text-slate-500 font-bold mb-1">
+                      Document password
+                    </label>
+                    <input
+                      id="verification-document-password"
+                      required={verificationDocForm.isPasswordProtected}
+                      type={showVerificationPassword ? 'text' : 'password'}
+                      value={verificationDocForm.documentPassword}
+                      onChange={e => setVerificationDocForm({ ...verificationDocForm, documentPassword: e.target.value })}
+                      autoComplete="new-password"
+                      placeholder="Enter a password to lock this file"
+                      className="w-full px-3 py-2 pr-10 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleVerificationPasswordVisibilityToggle}
+                      aria-label={showVerificationPassword ? 'Hide document password' : 'Show document password'}
+                      className="absolute right-2 top-[26px] text-slate-500 hover:text-slate-300"
+                    >
+                      {showVerificationPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                )}
                 <div className="flex justify-end">
                   <button
                     type="submit"
@@ -2010,19 +2099,24 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                 <p className="text-xs text-slate-500">No verification documents are stored for this property.</p>
               ) : (
                 parseVerificationDocs().map((doc, idx) => {
+                  const documentMetadata = parseVerificationDocumentMetadata()[idx] || {};
+                  const isPasswordProtected = documentMetadata.isPasswordProtected === true;
                   const isDataUrl = typeof doc === 'string' && doc.startsWith('data:');
-                  let displayName = typeof doc === "string" ? doc : `Verification document ${idx + 1}`;
-                  if (isDataUrl) {
+                  let displayName = documentMetadata.fileName || (typeof doc === "string" ? doc : `Verification document ${idx + 1}`);
+                  if (isDataUrl && !documentMetadata.fileName) {
                     const mimeMatch = doc.match(/data:([^;]+);/);
                     const ext = mimeMatch ? mimeMatch[1].split('/').pop()?.toUpperCase() : 'FILE';
                     displayName = `Verification document ${idx + 1}.${ext}`;
-                  } else if (typeof doc === 'string') {
+                  } else if (typeof doc === 'string' && !documentMetadata.fileName) {
                     displayName = doc.split('/').pop()?.split('\\').pop() || doc;
                   }
                   return (
                     <div key={idx} className="flex items-center gap-3 p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 group hover:border-slate-700 transition-colors">
-                      <FileText size={14} className="text-slate-500 group-hover:text-blue-400" />
-                      <button type="button" onClick={() => downloadVerificationDocument(idx, displayName)} className="truncate text-left flex-1 font-medium text-blue-400 hover:text-blue-300 underline decoration-dotted underline-offset-2">{displayName}</button>
+                      <FileText size={14} className="text-slate-500 group-hover:text-blue-400 transition-colors" />
+                      <button type="button" onClick={() => downloadVerificationDocument(idx, displayName)} className="truncate text-left flex-1 font-medium text-blue-400 hover:text-blue-300 underline decoration-dotted underline-offset-2">
+                        {displayName}
+                      </button>
+                      {isPasswordProtected && <FolderLock size={13} className="text-amber-400 shrink-0" title="Password protected" />}
                       <Can permission="properties:edit">
                         <button
                           type="button"
