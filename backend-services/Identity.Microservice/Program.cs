@@ -62,6 +62,7 @@ builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<Identity.Microservice.Services.Accounts.PasswordRecoveryService>();
 
+//Made a small change to force rebuild
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Permission", policy =>
