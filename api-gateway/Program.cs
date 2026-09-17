@@ -173,7 +173,12 @@ builder.Services.AddOcelot(builder.Configuration);
 
 var app = builder.Build();
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "gateway" }));
+app.Map("/health", healthApp => {
+    healthApp.Run(async context => {
+        context.Response.StatusCode = 200;
+        await context.Response.WriteAsJsonAsync(new { status = "healthy", service = "gateway" });
+    });
+});
 
 app.Use(async (context, next) =>
 {
