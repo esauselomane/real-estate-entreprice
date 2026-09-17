@@ -11,7 +11,7 @@ export default function LoginRedirect() {
   }, []);
 
   return (
-    <section className="flex min-h-[60vh] items-center justify-center py-20">
+    <section className="flex min-h-[40vh] items-center justify-center py-12">
       <div className="container text-center">
         <h1 className="text-2xl font-display font-extrabold text-white">
           Redirecting to the broker portal…

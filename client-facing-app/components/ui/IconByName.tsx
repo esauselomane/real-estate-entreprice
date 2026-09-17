@@ -16,6 +16,11 @@ const iconMap: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   Mail: Lucide.Mail,
   Phone: Lucide.Phone,
   MapPin: Lucide.MapPin,
+  Users: Lucide.Users,
+  BarChart3: Lucide.BarChart3,
+  LayoutDashboard: Lucide.LayoutDashboard,
+  Map: Lucide.Map,
+  Search: Lucide.Search,
 };
 
 export default function IconByName({

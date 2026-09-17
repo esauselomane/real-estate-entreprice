@@ -24,10 +24,10 @@ export type TeamMember = {
 
 export const site = {
   name: process.env.NEXT_PUBLIC_SITE_NAME || "Biscove Real Estate Tech",
-  tagline: "One platform for full-lifecycle real-estate deals.",
+  tagline: "The operating workspace for South African brokerages.",
   description:
-    "CRM, property listings, automated brochure generation and market syndication - unified for brokers, agencies and enterprise teams. We align the code, you sell the abode.",
-  url: process.env.NEXT_PUBLIC_SITE_URL || "https://realestate.example",
+    "A hosted platform for property inventory, lead and deal management, client records, branded presentations, listing distribution, and agency administration.",
+  url: process.env.NEXT_PUBLIC_SITE_URL || "https://www.biscovetech.com",
 } as const;
 
 export const navigation = [
@@ -48,112 +48,106 @@ export type HeroSlide = {
 export const heroSlides: HeroSlide[] = [
   {
     image: "/aligncode.png",
-    description: "",
+    description: "One workspace for inventory, pipeline, people, and reporting.",
   },
   {
     image: "/pleasing.jpg",
-    description: "Never let a lead slip through the cracks. Our intelligent CRM transforms unverified leads into a structured, visual sales pipeline."
+    description: "Capture leads, assign brokers, and move opportunities through a structured deal pipeline.",
   },
   {
     image: "/closeindays.png",
-    description: "Track every deal from the initial introduction through negotiation, while a built-in leaderboard keeps your brokerage team motivated and aligned."
+    description: "Search properties, inspect units and documents, and locate stock on the map.",
   },
   {
     image: "/rolebased.png",
-    description: "The platform is fully secure, offering tailored access levels for everyone involved.",
+    description: "Role-based access for agency administrators, brokers, owners, and tenants.",
   },
   {
     image: "/automatescale.png",
-    description: "Modern, scalable foundation built to elevate your real estate enterprise."
+    description: "Generate pitch packs and distribute listings without leaving the workspace.",
   },
   {
     image: "/elevatedemo.png",
-    description: "",
+    description: "Talk to us about a trial for your agency.",
     isClickable: true,
     url: "/contact",
-  }
+  },
 ];
 
 export const hero: { headline: string; subhead: string; badge?: string; punchline?: string } = {
-  headline: "Close more deals with one unified workspace.",
+  headline: "Run the brokerage from a single, hosted workspace.",
   subhead:
-    "A fully hosted SaaS platform - no servers, no IT overhead, no hosting costs. Just pay per month and save thousands in infrastructure and maintenance.",
-  badge: "SaaS - zero hosting costs",
-  punchline: "We align the code, you sell the abode.",
+    "Biscove brings together the work your team already does: property stock, maps, leads, deals, clients, reports, brochures, and listing distribution — with administration and billing built in.",
+  badge: "Hosted SaaS for agencies",
 };
 
 export const features: Feature[] = [
   {
-    title: "Deal pipeline CRM",
-    description: "Track leads, brokers and deals from first contact to signature.",
-    icon: "Briefcase",
-  },
-  {
-    title: "Property listings",
-    description: "Catalog portfolios with units, imagery and spatial metrics.",
+    title: "Property inventory",
+    description:
+      "Search and maintain listings with units, amenities, media, and a document vault. Locate stock on an interactive map.",
     icon: "Building2",
   },
   {
-    title: "Brochure automation",
-    description: "Instantly generate branded Client Pitch Packs that win buyers over.",
+    title: "Leads and deals",
+    description:
+      "Intake enquiries, suggest brokers, and progress deals from first contact through negotiation to close.",
+    icon: "Briefcase",
+  },
+  {
+    title: "People and CRM",
+    description:
+      "A directory of companies and contacts, plus dedicated records for owners and tenants tied to your portfolio.",
+    icon: "Users",
+  },
+  {
+    title: "Dashboards and reports",
+    description:
+      "Agency and broker views for pipeline activity, plus performance reports and analytics for leadership.",
+    icon: "BarChart3",
+  },
+  {
+    title: "Presentations and reach",
+    description:
+      "Build branded client pitch packs from selected stock, and syndicate listings to external portals from one record.",
     icon: "FileText",
   },
-  //{
-  //  title: "Image processing",
-  //  description: "Auto-resize, watermark and optimise property imagery on the fly.",
-  //  icon: "Image",
-  //},
   {
-    title: "Market syndication",
-    description: "Push listings to multiple channels from one source of truth.",
-    icon: "Globe",
-  },
-  {
-    title: "Multi-tenant security",
-    description: "Isolated workspaces per agency, broker and tenant.",
+    title: "Agency control",
+    description:
+      "Multi-tenant workspaces, roles and permissions, agency overview, data import, and subscription billing.",
     icon: "Shield",
-  },
-  {
-    title: "Zero hosting costs",
-    description: "Fully hosted SaaS - no servers, no IT overhead, no infrastructure bills.",
-    icon: "ServerOff",
   },
 ];
 
 export const values: Value[] = [
   {
-    title: "Broker-first",
-    description: "Every workflow is designed around the person who closes the deal.",
+    title: "Clarity",
+    description: "Stock, people, and pipeline live in one system of record — not scattered spreadsheets and inboxes.",
+    icon: "Eye",
+  },
+  {
+    title: "Accountability",
+    description: "Roles, permissions, and deal stages make ownership visible across the brokerage.",
     icon: "UserCheck",
   },
   {
-    title: "Trust",
-    description: "Transparent data, auditable pipelines, secure by default.",
-    icon: "HeartHandshake",
-  },
-  {
-    title: "Automation",
-    description: "Choreograph background Workers so humans focus on relationships.",
-    icon: "Bot",
-  },
-  {
-    title: "Craftsmanship",
-    description: "Pixel-perfect brochures and interfaces built to last.",
+    title: "Presentation quality",
+    description: "Pitch packs and listing distribution are produced from the same inventory your team already maintains.",
     icon: "Sparkles",
   },
   {
-    title: "Transparency",
-    description: "Open deal stages, shared documents, no hidden steps.",
-    icon: "Eye",
+    title: "Operational discipline",
+    description: "Imports, notifications, and administration sit alongside daily brokerage work, not in a separate tool.",
+    icon: "Shield",
   },
 ];
 
 export const impact: Stat[] = [
-  { value: "10k+", label: "Brochures generated" },
-  { value: "42s", label: "Avg. brochure turnaround" },
-  { value: "28", label: "Channels syndicated" },
-  { value: "99.9%", label: "Uptime" },
-  { value: "R50k+", label: "Saved on hosting per year" },
+  { value: "Inventory", label: "Listings, units, maps, documents" },
+  { value: "Pipeline", label: "Leads, matching, deals" },
+  { value: "People", label: "CRM, owners, tenants" },
+  { value: "Control", label: "Roles, reports, billing" },
 ];
 
 export const pricing: {
@@ -168,21 +162,21 @@ export const pricing: {
   {
     code: "PRIVATE",
     name: "Private",
-    description: "For growing agencies that need more power and reach.",
+    description: "For independent brokers who need a complete workspace.",
     monthlyPrice: 299,
     annualPrice: 2990,
     features: [
       "Up to 5 users",
       "20 property listings",
-      "Basic brochure generation",
+      "Brochure generation",
       "Email support",
-      "Standard CRM pipeline",
+      "Lead and deal pipeline",
     ],
   },
   {
     code: "SME_AGENCY",
     name: "SME Agency",
-    description: "Ideal for small agencies getting started with digital deal management.",
+    description: "For growing agencies that need capacity and branding.",
     monthlyPrice: 799,
     annualPrice: 7990,
     highlighted: true,
@@ -191,75 +185,50 @@ export const pricing: {
       "Unlimited listings",
       "Custom client pitch packs",
       "Priority support",
-      "Market syndication<sup>*</sup>",
+      "Market syndication",
       "Custom branding",
-      "Import properties and contact"
+      "Property and contact import",
     ],
   },
   {
     code: "ENTERPRISE",
     name: "Enterprise",
-    description: "Full-scale platform access for large organizations with custom needs.",
+    description: "For groups that need scale, onboarding, and API access.",
     monthlyPrice: 60000,
     annualPrice: 500000,
     features: [
-      "Unlimited users",
-      "Unlimited listings",
+      "Unlimited users and listings",
       "Custom client pitch packs",
-      "Priority support",
-      "Market syndication<sup>*</sup>",
-      "24/7 support",
-      "Import all your existing data - dedicated resource to onboard you!",
+      "Market syndication",
+      "Dedicated onboarding",
       "Dedicated account manager",
       "Developer API access",
       "Custom integrations",
-      "SLA guarantee",
-      "Advanced analytics",
-      "Intelligent Broker to Lead matching algorithm"
+      "SLA and advanced analytics",
+      "Broker-to-lead matching",
     ],
   },
 ];
 
-export const testimonials: { quote: string; name: string; role: string; logo: string }[] = [
-  {
-    quote:"The brochure Worker turned a 2-hour manual task into a 42-second click. Deals move faster now.",
-    name: "Thandi Mokoena",
-    role: "Director, Mokoena Properties",
-    logo: "M",
-  },
-  {
-    quote: "One workspace for CRM, listings and syndication. Our conversion rate improved noticeably.",
-    name: "Raj Patel",
-    role: "Head of Brokerage, Nexus Group",
-    logo: "N",
-  },
-];
-
 export const timeline: { year: string; event: string }[] = [
-  { year: "2015", event: "Founded to solve deal-closing fragmentation for brokers." },
-  { year: "2024", event: "Started developing system architecture." },
-  { year: "2026", event: "Goes live." },
+  { year: "2015", event: "Biscove is established to address fragmented brokerage operations." },
+  { year: "2024", event: "Platform architecture for inventory, CRM, and administration is designed." },
+  { year: "2026", event: "The hosted workspace opens to agencies." },
 ];
 
 export const leadership: TeamMember[] = [
   {
     name: "Esau Selomane",
-    role: "Chief Nerd",
+    role: "Founder",
     image: "/images/team/amara.jpg",
     linkedin: "https://www.linkedin.com/in/esau-selomane-49a68b24/",
   },
   {
     name: "Ntuthuko Sokutu",
-    role: "https://www.linkedin.com/in/ntuthuko-sokutu-449a44273/",
+    role: "Co-founder",
     image: "/images/team/derek.jpg",
     linkedin: "https://www.linkedin.com/in/ntuthuko-sokutu-449a44273/",
   },
-  /*{
-    name: "Siyabonga Dlamini",
-    role: "Head of Product",
-    image: "/images/team/siyabonga.jpg",
-    linkedin: "#",
-  },*/
 ];
 
 export type IconMap = {

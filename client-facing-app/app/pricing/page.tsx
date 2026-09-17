@@ -26,19 +26,18 @@ export default async function PricingPage() {
   const pricing = await loadPricing();
   const application = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:5173";
   return (
-    <section className="py-16 sm:py-20">
+    <section className="py-10 sm:py-12">
       <div className="container">
         <div className="mx-auto max-w-3xl text-center">
           <h1 className="text-4xl font-display font-extrabold tracking-tight text-white sm:text-5xl">
-            Pricing built for every stage
+            Pricing
           </h1>
           <p className="mt-4 text-lg text-slate-300">
-            Start small, scale fast. All plans include our core CRM, listings
-            and brochure automation.
+            Hosted access to inventory, pipeline, CRM, brochures, and administration. Choose a plan that matches your agency size.
           </p>
         </div>
 
-        <div className="mt-10">
+        <div className="mt-6">
           <div className="mx-auto max-w-2xl rounded-2xl border border-emerald-700 bg-emerald-900/30 p-4 text-center">
             <div className="flex items-center justify-center gap-2 text-emerald-300">
               <ServerOff className="h-5 w-5" />
@@ -51,7 +50,7 @@ export default async function PricingPage() {
         </div>
 
         {pricing.length === 0 && <p className="mt-10 text-center">Pricing is currently unavailable. <Link href="/contact">Contact sales for a quote.</Link></p>}
-        <div className="mt-16 grid gap-8 lg:grid-cols-3">
+        <div className="mt-10 grid gap-6 lg:grid-cols-3">
           {pricing.map((plan) => (
             <div
               key={plan.code}
@@ -112,7 +111,7 @@ export default async function PricingPage() {
           ))}
         </div>
 
-        <div className="mt-16 text-center">
+        <div className="mt-10 text-center">
           <p className="text-sm text-slate-400">
             All prices in ZAR. VAT excluded. Need a custom plan?{" "}
             <Link href="/contact" className="text-blue-400 hover:text-blue-400">

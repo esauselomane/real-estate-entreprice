@@ -11,23 +11,23 @@ export const metadata: Metadata = {
     template: "%s | Biscove Real Estate Technology",
   },
   description:
-    "One platform for full-lifecycle real-estate deals: CRM, listings, automated branded brochures and market syndication for brokers and agencies.",
+    "Hosted workspace for property inventory, leads and deals, CRM, reports, brochures, and listing distribution.",
   keywords: [
-    "real estate",
-    "CRM",
-    "brokers",
+    "real estate CRM",
+    "brokerage software",
     "property listings",
-    "brochure automation",
-    "market syndication",
+    "deal pipeline",
+    "listing syndication",
+    "South Africa",
   ],
   authors: [{ name: "Biscove Real Estate Technology" }],
   openGraph: {
     type: "website",
     locale: "en_ZA",
-    url: "https://realestate.example",
+    url: "https://www.biscovetech.com",
     title: "Biscove Real Estate Technology",
     description:
-      "CRM, property listings, automated branded brochures and market syndication.",
+      "Hosted workspace for inventory, pipeline, people, presentations, and agency administration.",
   },
 };
 
