@@ -17,7 +17,6 @@ ARTIFACT_REG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}"
 NETWORK="${NETWORK:-default}"
 SUBNET="${SUBNET:-default}"
 VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY:-}"
-
 IDENTITY_CONN_SECRET="identity-service-db-conn-${REGION}"
 PROPERTY_CONN_SECRET="property-service-db-conn-${REGION}"
 CRM_CONN_SECRET="crm-service-db-conn-${REGION}"
@@ -121,10 +120,12 @@ if [[ "$SERVICE_NAME" == "gateway" || "$SERVICE_NAME" == "property-service" || "
 fi
 
 if [ -n "${DOMAIN}" ]; then
+  echo "Was in if block"
   GATEWAY_PUBLIC_URL="https://api.${DOMAIN}"
   APP_PUBLIC_URL="https://app.${DOMAIN}"
   SITE_PUBLIC_URL="https://www.${DOMAIN}"
 else
+  echo "Was in else block"
   GATEWAY_PUBLIC_URL="${GATEWAY_URL}"
   APP_PUBLIC_URL="${FRONTEND_URL}"
   SITE_PUBLIC_URL="${MARKETING_URL}"
