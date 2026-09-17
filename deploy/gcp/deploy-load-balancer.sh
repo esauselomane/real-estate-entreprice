@@ -40,16 +40,16 @@ log "Step 3: Creating Backend Services..."
 for svc in frontend-client gateway client-facing; do
   gcloud compute backend-services create "${svc}-backend" --global --quiet 2>/dev/null || log "Backend ${svc}-backend already exists."
   
-  log "Adding NEG to backend service for ${svc}..."
+  log "Ensuring NEG is attached to backend service for ${svc}..."
   gcloud compute backend-services add-backend "${svc}-backend" \
     --global \
     --network-endpoint-group="${svc}-neg" \
-    --network-endpoint-group-region="${REGION}" --quiet 2>/dev/null || true
+    --network-endpoint-group-region="${REGION}" --quiet 2>/dev/null || log "NEG already attached to ${svc}."
 done
 
 log "Step 4: Creating Managed SSL Certificate for ${DOMAIN}..."
 gcloud compute ssl-certificates create "${CERT_NAME}" \
-  --domains="app.${DOMAIN},api.${DOMAIN},www.${DOMAIN}" \
+  --domains="${DOMAIN},app.${DOMAIN},api.${DOMAIN},www.${DOMAIN}" \
   --global --quiet 2>/dev/null || log "SSL Cert ${CERT_NAME} already exists."
 
 log "Step 5: Creating and configuring URL Map..."

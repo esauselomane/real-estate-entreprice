@@ -99,6 +99,27 @@ GATEWAY_URL="$(run_url gateway)"
 FRONTEND_URL="$(run_url frontend-client)"
 MARKETING_URL="$(run_url client-facing)"
 
+# CRITICAL: If these are empty, Ocelot will 404 on all downstream requests.
+if [[ "$SERVICE_NAME" == "gateway" ]]; then
+  if [ -z "${IDENTITY_URL}" ] || [ -z "${PROPERTY_URL}" ]; then
+    error "Backend URLs (Identity/Property) are missing. Deploy them before the gateway."
+  fi
+fi
+
+# Validate that dependent URLs are resolved if we are deploying a service that needs them
+if [[ "$SERVICE_NAME" == "gateway" || "$SERVICE_NAME" == "property-service" || "$SERVICE_NAME" == "crm-service" ]]; then
+  missing_deps=()
+  if [ -z "${IDENTITY_URL}" ]; then missing_deps+=("identity-service"); fi
+  if [[ "$SERVICE_NAME" == "gateway" ]]; then
+    if [ -z "${PROPERTY_URL}" ]; then missing_deps+=("property-service"); fi
+    if [ -z "${CRM_URL}" ]; then missing_deps+=("crm-service"); fi
+  fi
+  if [ ${#missing_deps[@]} -ne 0 ]; then
+    warn "Missing dependent service URLs: ${missing_deps[*]}. Downstream routing will fail."
+    warn "Ensure all backend services are deployed before the gateway."
+  fi
+fi
+
 if [ -n "${DOMAIN}" ]; then
   GATEWAY_PUBLIC_URL="https://api.${DOMAIN}"
   APP_PUBLIC_URL="https://app.${DOMAIN}"
@@ -109,16 +130,8 @@ else
   SITE_PUBLIC_URL="${MARKETING_URL}"
 fi
 
-# Build a comprehensive and sanitized CORS origins list
-CORS_LIST="http://localhost:5173,http://localhost:3000"
-if [ -n "${FRONTEND_URL}" ]; then CORS_LIST="${CORS_LIST},${FRONTEND_URL}"; fi
-if [ -n "${MARKETING_URL}" ]; then CORS_LIST="${CORS_LIST},${MARKETING_URL}"; fi
-if [ -n "${GATEWAY_URL}" ]; then CORS_LIST="${CORS_LIST},${GATEWAY_URL}"; fi
-
-if [ -n "${DOMAIN}" ]; then
-  # Add custom domains (root, app, and www) to the allowed list
-  CORS_LIST="https://app.${DOMAIN},https://www.${DOMAIN},https://${DOMAIN},${CORS_LIST}"
-fi
+# Allow all origins for testing purposes
+CORS_LIST="*"
 
 case "${SERVICE_NAME}" in
   frontend-client)
@@ -178,6 +191,8 @@ case "${SERVICE_NAME}" in
     append_env_var "${ENV_FILE}" ASPNETCORE_ENVIRONMENT Production
     append_env_var "${ENV_FILE}" ASPNETCORE_FORWARDEDHEADERS_ENABLED "true"
     append_env_var "${ENV_FILE}" DOWNSTREAM_SCHEME https
+    # Enable detailed CORS logging to help debug mismatches
+    append_env_var "${ENV_FILE}" Logging__LogLevel__Microsoft.AspNetCore.Cors Debug
     append_env_var "${ENV_FILE}" IDENTITY_HOST "$(host_from_url "${IDENTITY_URL}")"
     append_env_var "${ENV_FILE}" IDENTITY_PORT 443
     append_env_var "${ENV_FILE}" PROPERTY_HOST "$(host_from_url "${PROPERTY_URL}")"
@@ -197,12 +212,18 @@ case "${SERVICE_NAME}" in
       --image="$(artifact_image gateway)" \
       --region="${REGION}" \
       --project="${PROJECT_ID}" \
+      --platform=managed \
       --service-account="gateway-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
       --port=5000 \
+      --network="${NETWORK}" \
+      --subnet="${SUBNET}" \
+      --vpc-egress=private-ranges-only \
+      --execution-environment=gen2 \
       --cpu=1 \
       --memory=512Mi \
       --min-instances=1 \
       --max-instances=20 \
+      --ingress=all \
       --allow-unauthenticated \
       --env-vars-file="${ENV_FILE}" \
       --quiet
@@ -213,7 +234,9 @@ case "${SERVICE_NAME}" in
       --image="$(artifact_image frontend-client)" \
       --region="${REGION}" \
       --project="${PROJECT_ID}" \
+      --platform=managed \
       --service-account="frontend-client-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+      --execution-environment=gen2 \
       --port=80 \
       --cpu=1 \
       --memory=512Mi \
@@ -231,7 +254,9 @@ case "${SERVICE_NAME}" in
       --image="$(artifact_image client-facing)" \
       --region="${REGION}" \
       --project="${PROJECT_ID}" \
+      --platform=managed \
       --service-account="client-facing-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+      --execution-environment=gen2 \
       --port=80 \
       --cpu=1 \
       --memory=512Mi \

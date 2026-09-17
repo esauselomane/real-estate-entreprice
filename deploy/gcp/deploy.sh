@@ -360,10 +360,8 @@ deploy_gateway() {
   rm -f "${gateway_env}"
 }
 
-INITIAL_CORS="http://localhost:5173,http://localhost:3000"
-if [ -n "${DOMAIN}" ]; then
-  INITIAL_CORS="https://app.${DOMAIN},https://www.${DOMAIN},${INITIAL_CORS}"
-fi
+# Allow all origins for testing purposes
+INITIAL_CORS="*"
 
 deploy_gateway "${INITIAL_CORS}" "${GATEWAY_PUBLIC_URL:-https://placeholder.invalid}"
 GATEWAY_URL="$(run_url gateway)"
@@ -432,10 +430,8 @@ gcloud run deploy client-facing \
 FRONTEND_URL="$(run_url frontend-client)"
 MARKETING_URL="$(run_url client-facing)"
 
-FINAL_CORS="http://localhost:5173,http://localhost:3000,${FRONTEND_URL},${MARKETING_URL},${GATEWAY_URL}"
-if [ -n "${DOMAIN}" ]; then
-  FINAL_CORS="https://app.${DOMAIN},https://www.${DOMAIN},https://${DOMAIN},${FINAL_CORS}"
-fi
+# Allow all origins for testing purposes
+FINAL_CORS="*"
 deploy_gateway "${FINAL_CORS}" "${GATEWAY_PUBLIC_URL}"
 
 gcloud run services update crm-service \
