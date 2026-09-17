@@ -26,6 +26,133 @@ var developerPort = Environment.GetEnvironmentVariable("DEVELOPER_PORT") ?? "500
 
 var downstreamScheme = Environment.GetEnvironmentVariable("DOWNSTREAM_SCHEME") ?? "http";
 
+var ocelotJson = $@"{{
+  ""Routes"": [
+    {{
+      ""DownstreamPathTemplate"": ""/api/auth/{{everything}}"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
+      ""DownstreamHostAndPorts"": [
+        {{
+          ""Host"": ""{identityHost}"",
+          ""Port"": {identityPort}
+        }}
+      ],
+      ""UpstreamPathTemplate"": ""/gateway/auth/{{everything}}"",
+      ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
+    }},
+    {{
+      ""DownstreamPathTemplate"": ""/api/properties/{{everything}}"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
+      ""DownstreamHostAndPorts"": [
+        {{
+          ""Host"": ""{propertyHost}"",
+          ""Port"": {propertyPort}
+        }}
+      ],
+      ""UpstreamPathTemplate"": ""/gateway/properties/{{everything}}"",
+      ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
+    }},
+    {{
+      ""DownstreamPathTemplate"": ""/api/crm/{{everything}}"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
+      ""DownstreamHostAndPorts"": [
+        {{
+          ""Host"": ""{crmHost}"",
+          ""Port"": {crmPort}
+        }}
+      ],
+      ""UpstreamPathTemplate"": ""/gateway/crm/{{everything}}"",
+      ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
+    }},
+    {{
+      ""DownstreamPathTemplate"": ""/api/system/{{everything}}"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
+      ""DownstreamHostAndPorts"": [
+        {{
+          ""Host"": ""{identityHost}"",
+          ""Port"": {identityPort}
+        }}
+      ],
+      ""UpstreamPathTemplate"": ""/gateway/system/{{everything}}"",
+      ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
+    }},
+    {{
+      ""DownstreamPathTemplate"": ""/api/payments/{{everything}}"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
+      ""DownstreamHostAndPorts"": [
+        {{
+          ""Host"": ""{identityHost}"",
+          ""Port"": {identityPort}
+        }}
+      ],
+      ""UpstreamPathTemplate"": ""/gateway/payments/{{everything}}"",
+      ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
+    }},
+    {{
+      ""DownstreamPathTemplate"": ""/api/developer/{{everything}}"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
+      ""DownstreamHostAndPorts"": [
+        {{
+          ""Host"": ""{developerHost}"",
+          ""Port"": {developerPort}
+        }}
+      ],
+      ""UpstreamPathTemplate"": ""/gateway/developer/{{everything}}"",
+      ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
+    }},
+    {{
+      ""DownstreamPathTemplate"": ""/api/user/{{everything}}"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
+      ""DownstreamHostAndPorts"": [
+        {{
+          ""Host"": ""{identityHost}"",
+          ""Port"": {identityPort}
+        }}
+      ],
+      ""UpstreamPathTemplate"": ""/gateway/user/{{everything}}"",
+      ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
+    }},
+    {{
+      ""DownstreamPathTemplate"": ""/profiles/{{everything}}"",
+      ""DownstreamScheme"": ""{downstreamScheme}"",
+      ""DownstreamHostAndPorts"": [
+        {{
+          ""Host"": ""{identityHost}"",
+          ""Port"": {identityPort}
+        }}
+      ],
+      ""UpstreamPathTemplate"": ""/gateway/profiles/{{everything}}"",
+      ""UpstreamHttpMethod"": [ ""Get"" ]
+    }}
+  ],
+  ""GlobalConfiguration"": {{
+    ""BaseUrl"": ""{gatewayBaseUrl}""
+  }}
+}}";
+
+builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+{
+    ["Routes:0:DownstreamHostAndPorts:0:Host"] = identityHost,
+    ["Routes:0:DownstreamHostAndPorts:0:Port"] = identityPort,
+    ["Routes:1:DownstreamHostAndPorts:0:Host"] = propertyHost,
+    ["Routes:1:DownstreamHostAndPorts:0:Port"] = propertyPort,
+    ["Routes:2:DownstreamHostAndPorts:0:Host"] = crmHost,
+    ["Routes:2:DownstreamHostAndPorts:0:Port"] = crmPort,
+    ["Routes:3:DownstreamHostAndPorts:0:Host"] = identityHost,
+    ["Routes:3:DownstreamHostAndPorts:0:Port"] = identityPort,
+    ["Routes:4:DownstreamHostAndPorts:0:Host"] = identityHost,
+    ["Routes:4:DownstreamHostAndPorts:0:Port"] = identityPort,
+    ["Routes:5:DownstreamHostAndPorts:0:Host"] = developerHost,
+    ["Routes:5:DownstreamHostAndPorts:0:Port"] = developerPort,
+    ["Routes:6:DownstreamHostAndPorts:0:Host"] = identityHost,
+    ["Routes:6:DownstreamHostAndPorts:0:Port"] = identityPort,
+    ["Routes:7:DownstreamHostAndPorts:0:Host"] = identityHost,
+    ["Routes:7:DownstreamHostAndPorts:0:Port"] = identityPort,
+    ["GlobalConfiguration:BaseUrl"] = gatewayBaseUrl
+});
+
+builder.Configuration.AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(ocelotJson)));
+
 var allowedOrigins = (Environment.GetEnvironmentVariable("CORS_ORIGINS") ?? builder.Configuration["Cors:AllowedOrigins"] ?? "https://app.biscovetech.com,https://www.biscovetech.com,http://localhost:5173,http://localhost:3000")
   .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -46,6 +173,8 @@ builder.Services.AddOcelot(builder.Configuration);
 
 var app = builder.Build();
 
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "gateway" }));
+
 app.Use(async (context, next) =>
 {
   var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
@@ -63,5 +192,4 @@ app.Use(async (context, next) =>
 
 app.UseCors("CorsPolicy");
 await app.UseOcelot();
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "gateway" }));
 app.Run();
