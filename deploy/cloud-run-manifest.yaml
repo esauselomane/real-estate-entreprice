@@ -47,9 +47,9 @@ spec:
             - name: Jwt__Audience
               value: "RealEstateApp.Client"
             - name: Cors__AllowedOrigins__0
-              value: "https://app.yourdomain.com"
+              value: "https://app.biscovetech.com"
             - name: Cors__AllowedOrigins__1
-              value: "https://www.yourdomain.com"
+              value: "https://www.biscovetech.com"
           startupProbe:
             httpGet:
               path: /health
@@ -115,7 +115,7 @@ spec:
             - name: Kafka__BootstrapServers
               value: "kafka:9092"
             - name: Cors__AllowedOrigins__0
-              value: "https://app.yourdomain.com"
+              value: "https://app.biscovetech.com"
           startupProbe:
             httpGet:
               path: /health
@@ -170,11 +170,11 @@ spec:
             - name: Identity__BaseUrl
               value: "https://identity-service-xxx.a.run.app"
             - name: Gateway__BaseUrl
-              value: "https://gateway-xxx.a.run.app"
+              value: "https://api.biscovetech.com"
             - name: Kafka__BootstrapServers
               value: "kafka:9092"
             - name: Cors__AllowedOrigins__0
-              value: "https://app.yourdomain.com"
+              value: "https://app.biscovetech.com"
           startupProbe:
             httpGet:
               path: /health
@@ -256,9 +256,9 @@ spec:
             - name: ASPNETCORE_URLS
               value: http://*:8080
             - name: Cors__AllowedOrigins__0
-              value: "https://app.yourdomain.com"
+              value: "https://app.biscovetech.com"
             - name: Cors__AllowedOrigins__1
-              value: "https://www.yourdomain.com"
+              value: "https://www.biscovetech.com"
 ---
 apiVersion: serving.knative.dev/v1
 kind: Service
@@ -287,7 +287,7 @@ spec:
               memory: 512Mi
           env:
             - name: VITE_API_BASE_URL
-              value: "https://gateway-xxx.a.run.app"
+              value: "https://api.biscovetech.com"
             - name: NODE_ENV
               value: production
 ---
@@ -319,11 +319,11 @@ spec:
             - name: NODE_ENV
               value: production
             - name: NEXT_PUBLIC_GATEWAY_URL
-              value: "https://gateway-xxx.a.run.app"
+              value: "https://api.biscovetech.com"
             - name: NEXT_PUBLIC_APP_URL
-              value: "https://app.yourdomain.com"
+              value: "https://app.biscovetech.com"
             - name: NEXT_PUBLIC_SITE_URL
-              value: "https://www.yourdomain.com"
+              value: "https://www.biscovetech.com"
             - name: LEAD_API_URL
               value: "https://identity-service-xxx.a.run.app"
 ---
@@ -353,7 +353,7 @@ spec:
             - name: ASPNETCORE_ENVIRONMENT
               value: Production
             - name: Gateway__BaseUrl
-              value: "https://gateway-xxx.a.run.app"
+              value: "https://api.biscovetech.com"
             - name: Kafka__BootstrapServers
               value: "kafka:9092"
 ---

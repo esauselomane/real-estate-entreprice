@@ -200,4 +200,11 @@ public abstract class PropertyControllerBase : ControllerBase
         try { return JsonSerializer.Deserialize<List<DocumentMeta>>(json, JsonOptions) ?? new List<DocumentMeta>(); }
         catch { return new List<DocumentMeta>(); }
     }
+
+    protected static List<DocumentMeta> ParseVerificationDocumentMetadata(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json.Trim() == "[]") return new List<DocumentMeta>();
+        try { return JsonSerializer.Deserialize<List<DocumentMeta>>(json, JsonOptions) ?? new List<DocumentMeta>(); }
+        catch { return new List<DocumentMeta>(); }
+    }
 }

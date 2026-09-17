@@ -3,7 +3,7 @@
 #
 # Variables to substitute at deploy time:
 #   ${PROJECT_ID_HASH} — short hash of project ID (e.g., real-estate-enter-a1b2c3)
-#   ${DOMAIN} — your production domain
+#   DOMAIN — production domain (biscovetech.com)
 
 {
   "Routes": [
@@ -139,7 +139,7 @@
     }
   ],
   "GlobalConfiguration": {
-    "BaseUrl": "https://api.${DOMAIN}",
+    "BaseUrl": "https://api.biscovetech.com",
     "RequestIdKey": "X-Request-Id",
     "DownstreamScheme": "https"
   }
