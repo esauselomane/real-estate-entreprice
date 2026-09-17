@@ -169,5 +169,5 @@ append_env_var() {
 sql_private_ip() {
   gcloud sql instances describe "${SQL_INSTANCE}" \
     --project="${PROJECT_ID}" \
-    --format='value(ipAddresses[0].ipAddress)'
+    --format='value(ipAddresses.filter(type=PRIVATE).ipAddress)'
 }

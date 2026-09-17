@@ -35,6 +35,7 @@ SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo manual)"
 ARTIFACT_REG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}"
 SKIP_DOMAIN_MAPPING="${SKIP_DOMAIN_MAPPING:-0}"
 VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY:-}"
+FORCE_REBUILD="${FORCE_REBUILD:-0}"
 
 IDENTITY_CONN_SECRET="identity-service-db-conn-${REGION}"
 PROPERTY_CONN_SECRET="property-service-db-conn-${REGION}"
@@ -58,6 +59,7 @@ fi
 
 gcloud config set project "${PROJECT_ID}" --quiet
 log "Targeting project ${PROJECT_ID} in ${REGION} (tag ${SHORT_SHA})"
+log "Force rebuild is set to: ${FORCE_REBUILD}"
 
 log "Enabling required Google Cloud APIs..."
 gcloud services enable \
@@ -150,12 +152,15 @@ gcloud compute addresses describe google-managed-services-default \
     --project="${PROJECT_ID}" \
     --quiet
 
-gcloud services vpc-peerings connect \
-  --service=servicenetworking.googleapis.com \
-  --ranges=google-managed-services-default \
-  --network="${NETWORK}" \
-  --project="${PROJECT_ID}" \
-  --quiet 2>/dev/null || true
+log "Checking VPC peering..."
+if ! gcloud services vpc-peerings list --network="${NETWORK}" --project="${PROJECT_ID}" | grep -q "servicenetworking.googleapis.com"; then
+  gcloud services vpc-peerings connect \
+    --service=servicenetworking.googleapis.com \
+    --ranges=google-managed-services-default \
+    --network="${NETWORK}" \
+    --project="${PROJECT_ID}" \
+    --quiet
+fi
 create_sql_instance_if_needed() {
   if gcloud sql instances describe "${SQL_INSTANCE}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
     local existing_region
@@ -265,44 +270,190 @@ deploy_backend() {
     --quiet
 }
 
-log "Building backend images..."
-build_and_push_image identity-service backend-services/Identity.Microservice/Dockerfile
-build_and_push_image property-service backend-services/Property.Microservice/Dockerfile
-build_and_push_image crm-service backend-services/CRM.Microservice/Dockerfile
-build_and_push_image gateway api-gateway/Dockerfile
+# ============================================================
+#  Part 2 of 2: Building and Deploying All Services
+# ============================================================
 
+log "Building all service images..."
+build_and_push_image identity-service "backend-services/Identity.Microservice/Dockerfile"
+build_and_push_image property-service "backend-services/Property.Microservice/Dockerfile"
+build_and_push_image crm-service "backend-services/CRM.Microservice/Dockerfile"
+build_and_push_image gateway api-gateway/Dockerfile
+log "Deploying identity-service..."
 IDENTITY_ENV="$(mktemp)"
 append_env_var "${IDENTITY_ENV}" ASPNETCORE_ENVIRONMENT Production
-append_env_var "${IDENTITY_ENV}" Jwt__Issuer Identity.Microservice
-append_env_var "${IDENTITY_ENV}" Jwt__Audience RealEstateApp.Client
-if [ -n "${DOMAIN}" ]; then
-  append_env_var "${IDENTITY_ENV}" Cors__AllowedOrigins__0 "https://app.${DOMAIN}"
-  append_env_var "${IDENTITY_ENV}" Cors__AllowedOrigins__1 "https://www.${DOMAIN}"
-fi
-
+append_env_var "${IDENTITY_ENV}" CORS_ORIGINS "${INITIAL_CORS}"
+append_env_var "${IDENTITY_ENV}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
 deploy_backend identity-service 5001 identity-service-sa 1 1Gi 1 --no-cpu-throttling \
   --env-vars-file="${IDENTITY_ENV}" \
   --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest"
-
+rm -f "${IDENTITY_ENV}"
 IDENTITY_URL="$(run_url identity-service)"
 IDENTITY_HOST="$(host_from_url "${IDENTITY_URL}")"
-[ -n "${IDENTITY_URL}" ] || error "identity-service did not return a URL"
 
+log "Deploying property-service..."
 PROPERTY_ENV="$(mktemp)"
 append_env_var "${PROPERTY_ENV}" ASPNETCORE_ENVIRONMENT Production
 append_env_var "${PROPERTY_ENV}" Identity__BaseUrl "${IDENTITY_URL}"
-
 deploy_backend property-service 5002 property-service-sa 1 1.5Gi 1 --no-cpu-throttling \
   --env-vars-file="${PROPERTY_ENV}" \
   --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${PROPERTY_CONN_SECRET}:latest"
+rm -f "${PROPERTY_ENV}"
+PROPERTY_URL="$(run_url property-service)"
+PROPERTY_HOST="$(host_from_url "${PROPERTY_URL}")"
 
+log "Deploying crm-service..."
 CRM_ENV="$(mktemp)"
 append_env_var "${CRM_ENV}" ASPNETCORE_ENVIRONMENT Production
 append_env_var "${CRM_ENV}" Identity__BaseUrl "${IDENTITY_URL}"
-
 deploy_backend crm-service 5003 crm-service-sa 1 1.5Gi 1 --no-cpu-throttling \
   --env-vars-file="${CRM_ENV}" \
   --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${CRM_CONN_SECRET}:latest"
+rm -f "${CRM_ENV}"
+CRM_URL="$(run_url crm-service)"
+CRM_HOST="$(host_from_url "${CRM_URL}")"
 
-DEVELOPER_ENV="$(mktemp)"
-append_env_var "${DEVELOPER_ENV
+GATEWAY_PUBLIC_URL="https://api.${DOMAIN}"
+if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
+  GATEWAY_PUBLIC_URL=""
+fi
+
+deploy_gateway() {
+  local cors_origins=$1
+  local gateway_base=$2
+  local gateway_env
+  gateway_env="$(mktemp)"
+  append_env_var "${gateway_env}" ASPNETCORE_ENVIRONMENT Production
+  append_env_var "${gateway_env}" DOWNSTREAM_SCHEME https
+  append_env_var "${gateway_env}" IDENTITY_HOST "${IDENTITY_HOST}"
+  append_env_var "${gateway_env}" IDENTITY_PORT 443
+  append_env_var "${gateway_env}" PROPERTY_HOST "${PROPERTY_HOST}"
+  append_env_var "${gateway_env}" PROPERTY_PORT 443
+  append_env_var "${gateway_env}" CRM_HOST "${CRM_HOST}"
+  append_env_var "${gateway_env}" CRM_PORT 443
+  append_env_var "${gateway_env}" Gateway__BaseUrl "${gateway_base}"
+  append_env_var "${gateway_env}" CORS_ORIGINS "${cors_origins}"
+  append_env_var "${gateway_env}" ASPNETCORE_URLS "http://*:5000"
+
+  log "Deploying gateway..."
+  # FIX: Ensure old VPC connector and any specific ingress settings are reset
+  gcloud run services update gateway --clear-vpc-connector --region="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null || true
+
+  gcloud run deploy gateway \
+    --image="$(artifact_image gateway)" \
+    --region="${REGION}" \
+    --project="${PROJECT_ID}" \
+    --platform=managed \
+    --service-account="gateway-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+    --port=5000 \
+    --execution-environment=gen2 \
+    --cpu=1 \
+    --memory=512Mi \
+    --min-instances=1 \
+    --max-instances=20 \
+    --concurrency=200 \
+    --timeout=60 \
+    --allow-unauthenticated \
+    --ingress=all \
+    --env-vars-file="${gateway_env}" \
+    --quiet
+  rm -f "${gateway_env}"
+}
+
+INITIAL_CORS="http://localhost:5173,http://localhost:3000"
+if [ -n "${DOMAIN}" ]; then
+  INITIAL_CORS="https://app.${DOMAIN},https://www.${DOMAIN},${INITIAL_CORS}"
+fi
+
+deploy_gateway "${INITIAL_CORS}" "${GATEWAY_PUBLIC_URL:-https://placeholder.invalid}"
+GATEWAY_URL="$(run_url gateway)"
+[ -n "${GATEWAY_URL}" ] || error "gateway did not return a URL"
+if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
+  GATEWAY_PUBLIC_URL="${GATEWAY_URL}"
+fi
+
+FRONTEND_API_URL="${GATEWAY_PUBLIC_URL}"
+APP_PUBLIC_URL="https://app.${DOMAIN}"
+SITE_PUBLIC_URL="https://www.${DOMAIN}"
+if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
+  APP_PUBLIC_URL="${GATEWAY_URL}"
+  SITE_PUBLIC_URL="${GATEWAY_URL}"
+fi
+
+log "Building frontend images with public API URL ${FRONTEND_API_URL}..."
+FRONTEND_BUILD_ARGS=(--build-arg "VITE_API_BASE_URL=${FRONTEND_API_URL}")
+if [ -n "${VITE_GOOGLE_MAPS_API_KEY}" ]; then
+  FRONTEND_BUILD_ARGS+=(--build-arg "VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY}")
+fi
+build_and_push_image frontend-client frontend-client/Dockerfile "${FRONTEND_BUILD_ARGS[@]}"
+build_and_push_image client-facing client-facing-app/Dockerfile \
+  --build-arg "NEXT_PUBLIC_GATEWAY_URL=${FRONTEND_API_URL}" \
+  --build-arg "NEXT_PUBLIC_APP_URL=${APP_PUBLIC_URL}" \
+  --build-arg "NEXT_PUBLIC_SITE_URL=${SITE_PUBLIC_URL}"
+
+log "Deploying frontend-client..."
+gcloud run deploy frontend-client \
+  --image="$(artifact_image frontend-client)" \
+  --region="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --service-account="frontend-client-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --port=80 \
+  --cpu=1 \
+  --memory=512Mi \
+  --min-instances=0 \
+  --max-instances=10 \
+  --allow-unauthenticated \
+  --ingress=all \
+  --quiet
+
+log "Deploying client-facing..."
+CLIENT_ENV="$(mktemp)"
+append_env_var "${CLIENT_ENV}" NODE_ENV production
+append_env_var "${CLIENT_ENV}" LEAD_API_URL "${IDENTITY_URL}"
+append_env_var "${CLIENT_ENV}" NEXT_PUBLIC_GATEWAY_URL "${FRONTEND_API_URL}"
+append_env_var "${CLIENT_ENV}" NEXT_PUBLIC_APP_URL "${APP_PUBLIC_URL}"
+append_env_var "${CLIENT_ENV}" NEXT_PUBLIC_SITE_URL "${SITE_PUBLIC_URL}"
+
+gcloud run deploy client-facing \
+  --image="$(artifact_image client-facing)" \
+  --region="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --service-account="client-facing-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --port=80 \
+  --cpu=1 \
+  --memory=512Mi \
+  --min-instances=0 \
+  --max-instances=10 \
+  --allow-unauthenticated \
+  --ingress=all \
+  --env-vars-file="${CLIENT_ENV}" \
+  --quiet
+
+FRONTEND_URL="$(run_url frontend-client)"
+MARKETING_URL="$(run_url client-facing)"
+
+FINAL_CORS="http://localhost:5173,http://localhost:3000,${FRONTEND_URL},${MARKETING_URL},${GATEWAY_URL}"
+if [ -n "${DOMAIN}" ]; then
+  FINAL_CORS="https://app.${DOMAIN},https://www.${DOMAIN},https://${DOMAIN},${FINAL_CORS}"
+fi
+deploy_gateway "${FINAL_CORS}" "${GATEWAY_PUBLIC_URL}"
+
+gcloud run services update crm-service \
+  --region="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --update-env-vars="Gateway__BaseUrl=${GATEWAY_PUBLIC_URL}" \
+  --quiet
+
+if [ "${SKIP_DOMAIN_MAPPING}" != "1" ] && [ "${REGION}" != "africa-south1" ]; then
+  log "Mapping custom domains..."
+  gcloud beta run domain-mappings create --service=frontend-client --domain="app.${DOMAIN}" --region="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null \
+    || warn "frontend-client domain mapping already exists or failed."
+  gcloud beta run domain-mappings create --service=gateway --domain="api.${DOMAIN}" --region="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null \
+    || warn "gateway domain mapping already exists or failed."
+  gcloud beta run domain-mappings create --service=client-facing --domain="www.${DOMAIN}" --region="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null \
+    || warn "client-facing domain mapping already exists or failed."
+elif [ "${REGION}" == "africa-south1" ]; then
+  log "Skipping legacy domain mappings: feature not supported in ${REGION}. Use deploy-load-balancer.sh instead."
+fi
+
+log "Deployment of all services complete."
