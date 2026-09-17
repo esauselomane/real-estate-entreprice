@@ -29,7 +29,7 @@ var downstreamScheme = Environment.GetEnvironmentVariable("DOWNSTREAM_SCHEME") ?
 var ocelotJson = $@"{{
   ""Routes"": [
     {{
-      ""DownstreamPathTemplate"": ""/api/auth/{{everything}}"",
+      ""DownstreamPathTemplate"": ""/auth/{{everything}}"",
       ""DownstreamScheme"": ""{downstreamScheme}"",
       ""DownstreamHostAndPorts"": [
         {{
@@ -65,7 +65,7 @@ var ocelotJson = $@"{{
       ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
     }},
     {{
-      ""DownstreamPathTemplate"": ""/api/system/{{everything}}"",
+      ""DownstreamPathTemplate"": ""/system/{{everything}}"",
       ""DownstreamScheme"": ""{downstreamScheme}"",
       ""DownstreamHostAndPorts"": [
         {{
@@ -77,7 +77,7 @@ var ocelotJson = $@"{{
       ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
     }},
     {{
-      ""DownstreamPathTemplate"": ""/api/payments/{{everything}}"",
+      ""DownstreamPathTemplate"": ""/payments/{{everything}}"",
       ""DownstreamScheme"": ""{downstreamScheme}"",
       ""DownstreamHostAndPorts"": [
         {{
@@ -101,7 +101,7 @@ var ocelotJson = $@"{{
       ""UpstreamHttpMethod"": [ ""Get"", ""Post"", ""Put"", ""Delete"" ]
     }},
     {{
-      ""DownstreamPathTemplate"": ""/api/user/{{everything}}"",
+      ""DownstreamPathTemplate"": ""/user/{{everything}}"",
       ""DownstreamScheme"": ""{downstreamScheme}"",
       ""DownstreamHostAndPorts"": [
         {{
