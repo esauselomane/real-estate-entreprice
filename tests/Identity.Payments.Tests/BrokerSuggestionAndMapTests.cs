@@ -21,8 +21,14 @@ public sealed class BrokerSuggestionAndMapTests
         Assert.Contains("markers=color:red|-33.900000,18.400000|-33.800000,18.500000", decoded);
         Assert.Equal(36, decoded.Split("&path=").Length - 1);
         Assert.True(url!.Length < 16384);
-        Assert.Null(GoogleBrochureMapHelper.BuildUrl([(0, 0)], "sample-key"));
-        Assert.Null(GoogleBrochureMapHelper.BuildUrl([(-33.9, 18.4)], ""));
+    }
+
+    [Theory]
+    [InlineData("sample-key", 0, 0)] // Only origin point provided
+    [InlineData("", -33.9, 18.4)]   // Missing API key
+    public void MapBuildUrlReturnsNullForInvalidInput(string apiKey, double lat, double lon)
+    {
+        Assert.Null(GoogleBrochureMapHelper.BuildUrl([(lat, lon)], apiKey));
     }
 
     [Fact]

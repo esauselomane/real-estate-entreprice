@@ -24,7 +24,7 @@ read -r -p "Delete Cloud Run/SQL/Artifact Registry in ${PROJECT_ID} ${REGION}? T
 [ "${confirm}" = "destroy" ] || { echo "Aborted."; exit 1; }
 
 log "Deleting Cloud Run services in ${REGION}..."
-for svc in identity-service property-service crm-service developer-api gateway frontend-client client-facing; do
+for svc in identity-service property-service crm-service gateway frontend-client client-facing; do
   gcloud run services delete "${svc}" --region="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null || warn "${svc} not found"
 done
 
@@ -42,9 +42,7 @@ log "Deleting regional connection secrets..."
 for secret in \
   "identity-service-db-conn-${REGION}" \
   "property-service-db-conn-${REGION}" \
-  "crm-service-db-conn-${REGION}" \
-  "developer-api-db-conn-${REGION}" \
-  "developer-api-property-db-conn-${REGION}"; do
+  "crm-service-db-conn-${REGION}"; do
   gcloud secrets delete "${secret}" --project="${PROJECT_ID}" --quiet 2>/dev/null || warn "${secret} not found"
 done
 

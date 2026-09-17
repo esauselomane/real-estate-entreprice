@@ -45,9 +45,6 @@ dotnet sln "${SOLUTION_FILE}" add Api-Gateway/Api-Gateway.csproj
 echo "🔌 Coupling Event-Driven Brochure Generation Background Worker..."
 dotnet sln "${SOLUTION_FILE}" add backend-services/BrochureGeneration.Worker/BrochureGeneration.Worker.csproj
 
-echo "🔌 Coupling Shared Kafka Contracts Library..."
-dotnet sln "${SOLUTION_FILE}" add backend-services/Shared.Kafka/Shared.Kafka.csproj
-
 echo "🔌 Coupling Data Import Background Worker..."
 dotnet sln "${SOLUTION_FILE}" add backend-services/DataImport.Worker/DataImport.Worker.csproj
 

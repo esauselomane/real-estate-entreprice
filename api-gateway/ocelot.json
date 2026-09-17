@@ -2,13 +2,16 @@
   "Routes": [
     {
       "DownstreamPathTemplate": "/api/auth/{everything}",
-      "DownstreamScheme": "http",
+      "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
           "Host": "identity",
           "Port": 5001
         }
       ],
+      "HttpHandlerOptions": {
+        "DangerousAcceptAnyServerCertificateValidator": true
+      },
       "UpstreamPathTemplate": "/gateway/auth/{everything}",
       "UpstreamHttpMethod": [
         "Get",
@@ -36,13 +39,16 @@
     },
     {
       "DownstreamPathTemplate": "/api/crm/{everything}",
-      "DownstreamScheme": "http",
+      "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
           "Host": "crm",
           "Port": 5003
         }
       ],
+      "HttpHandlerOptions": {
+        "DangerousAcceptAnyServerCertificateValidator": true
+      },
       "UpstreamPathTemplate": "/gateway/crm/{everything}",
       "UpstreamHttpMethod": [
         "Get",
@@ -53,13 +59,16 @@
     },
     {
       "DownstreamPathTemplate": "/api/system/{everything}",
-      "DownstreamScheme": "http",
+      "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
           "Host": "identity",
           "Port": 5001
         }
       ],
+      "HttpHandlerOptions": {
+        "DangerousAcceptAnyServerCertificateValidator": true
+      },
       "UpstreamPathTemplate": "/gateway/system/{everything}",
       "UpstreamHttpMethod": [
         "Get",
@@ -70,13 +79,16 @@
     },
     {
       "DownstreamPathTemplate": "/api/payments/{everything}",
-      "DownstreamScheme": "http",
+      "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
           "Host": "identity",
           "Port": 5001
         }
       ],
+      "HttpHandlerOptions": {
+        "DangerousAcceptAnyServerCertificateValidator": true
+      },
       "UpstreamPathTemplate": "/gateway/payments/{everything}",
       "UpstreamHttpMethod": [
         "Get",
@@ -104,13 +116,16 @@
     },
     {
       "DownstreamPathTemplate": "/api/user/{everything}",
-      "DownstreamScheme": "http",
+      "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
           "Host": "identity",
           "Port": 5001
         }
       ],
+      "HttpHandlerOptions": {
+        "DangerousAcceptAnyServerCertificateValidator": true
+      },
       "UpstreamPathTemplate": "/gateway/user/{everything}",
       "UpstreamHttpMethod": [
         "Get",
@@ -120,13 +135,16 @@
     },
     {
       "DownstreamPathTemplate": "/profiles/{everything}",
-      "DownstreamScheme": "http",
+      "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
           "Host": "identity",
           "Port": 5001
         }
       ],
+      "HttpHandlerOptions": {
+        "DangerousAcceptAnyServerCertificateValidator": true
+      },
       "UpstreamPathTemplate": "/gateway/profiles/{everything}",
       "UpstreamHttpMethod": [
         "Get"
@@ -134,6 +152,7 @@
     }
   ],
   "GlobalConfiguration": {
-    "BaseUrl": "http://gateway:5000"
+    "BaseUrl": "http://gateway:5000",
+    "RouteIsCaseSensitive": false
   }
 }
