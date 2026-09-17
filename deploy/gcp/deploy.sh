@@ -61,7 +61,7 @@ fi
 # This must be defined BEFORE the services are deployed.
 if [ -n "${DOMAIN}" ]; then
   INITIAL_CORS="https://app.${DOMAIN},https://www.${DOMAIN},https://${DOMAIN},https://api.${DOMAIN}"
-  GATEWAY_PUBLIC_URL="https://api.${DOMAIN}"
+  GATEWAY_PUBLIC_URL="https://api.${DOMAIN}/gateway"
 else
   INITIAL_CORS="*"
   GATEWAY_PUBLIC_URL="" # Will be resolved via run_url
@@ -378,10 +378,19 @@ deploy_gateway() {
   rm -f "${gateway_env}"
 }
 deploy_gateway "${INITIAL_CORS}" "${GATEWAY_PUBLIC_URL:-https://placeholder.invalid}"
+
 GATEWAY_URL="$(run_url gateway)"
 [ -n "${GATEWAY_URL}" ] || error "gateway did not return a URL"
+
 if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
-  GATEWAY_PUBLIC_URL="${GATEWAY_URL}"
+  GATEWAY_PUBLIC_URL="${GATEWAY_URL}/gateway"
+fi
+
+# FIX: Redeploy the gateway now that we have the actual public URL. 
+# Ocelot and the Identity service need this for correct route matching and token validation.
+if [ -z "${DOMAIN}" ] || [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
+    log "Redeploying gateway with actual URL: ${GATEWAY_PUBLIC_URL}"
+    deploy_gateway "${INITIAL_CORS}" "${GATEWAY_PUBLIC_URL}"
 fi
 
 FRONTEND_API_URL="${GATEWAY_PUBLIC_URL}"
