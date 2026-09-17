@@ -27,7 +27,7 @@ out/
 # Documentation
 agents.md
 developer-api*
-google*
+google.* 
 
 # Block user-specific connection strings and local configurations
 appsettings.Development.json
