@@ -4,49 +4,46 @@ import IconByName from "@/components/ui/IconByName";
 export const metadata = {
   title: "Mission & Values",
   description:
-    "Our purpose, vision and the values that guide every feature we ship.",
+    "Why Biscove exists and the standards that shape the brokerage workspace.",
 };
 
 export default function MissionPage() {
   return (
-    <section className="py-16 sm:py-20">
+    <section className="py-10 sm:py-12">
       <div className="container">
         <div className="mx-auto max-w-3xl text-center">
           <h1 className="text-4xl font-display font-extrabold tracking-tight text-white sm:text-5xl">
-            Mission & Values
+            Mission &amp; values
           </h1>
         </div>
 
-        <div className="mt-12 rounded-3xl bg-slate-800/60 p-8 text-center ring-1 ring-slate-700 sm:p-12">
+        <div className="mt-8 rounded-3xl bg-slate-800/60 p-6 text-center ring-1 ring-slate-700 sm:p-8">
           <h2 className="text-xl font-display font-bold text-white">
-            Our mission
+            Mission
           </h2>
-          <blockquote className="mt-4 text-2xl font-medium italic text-slate-200">
-            To empower real-estate brokers and agencies with a single, intelligent
-            workspace that turns every deal stage into measurable progress — fast,
-            transparent, and beautifully automated.
+          <blockquote className="mt-3 text-xl font-medium text-slate-200 sm:text-2xl">
+            Give brokerages a single, hosted system of record for stock, clients, and deals — so operational work does not compete with selling.
           </blockquote>
         </div>
 
-        <div className="mt-12 rounded-3xl bg-gradient-to-br from-blue-600/10 to-emerald-500/10 p-8 text-center ring-1 ring-slate-700 sm:p-12">
+        <div className="mt-6 rounded-3xl bg-gradient-to-br from-blue-600/10 to-emerald-500/10 p-6 text-center ring-1 ring-slate-700 sm:p-8">
           <h2 className="text-xl font-display font-bold text-white">
-            Our vision
+            Vision
           </h2>
-          <p className="mt-4 text-slate-300">
-            A world where brokers close more deals with less friction — by
-            uniting every tool in the pipeline under one trusted interface.
+          <p className="mt-3 text-slate-300">
+            Agencies that can see inventory, pipeline health, and people in one place, with presentation and distribution that follow from that record.
           </p>
         </div>
 
-        <div className="mt-16">
+        <div className="mt-10">
           <h2 className="text-2xl font-display font-bold text-white">
-            Our values
+            Values
           </h2>
-          <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-6 grid gap-5 sm:grid-cols-2">
             {values.map((value) => (
               <div
                 key={value.title}
-                className="rounded-2xl border border-slate-700 bg-slate-800/60 p-6 shadow-lg shadow-black/20 transition-transform hover:-translate-y-0.5"
+                className="rounded-2xl border border-slate-700 bg-slate-800/60 p-6 shadow-lg shadow-black/20"
               >
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-900/40 text-emerald-400">
                   <IconByName name={value.icon} className="h-5 w-5" />
@@ -60,17 +57,17 @@ export default function MissionPage() {
           </div>
         </div>
 
-        <div className="mt-16">
-          <div className="grid grid-cols-2 gap-6 text-center sm:grid-cols-4">
+        <div className="mt-10">
+          <div className="grid grid-cols-2 gap-4 text-center sm:grid-cols-4">
             {impact.map((stat) => (
               <div
                 key={stat.label}
-                className="rounded-2xl border border-slate-700 bg-slate-800/60 py-6 shadow-lg shadow-black/20"
+                className="rounded-2xl border border-slate-700 bg-slate-800/60 px-3 py-5 shadow-lg shadow-black/20"
               >
-                <span className="block text-3xl font-extrabold text-blue-400">
+                <span className="block text-lg font-extrabold text-blue-400">
                   {stat.value}
                 </span>
-                <span className="mt-1 block text-sm text-slate-400">{stat.label}</span>
+                <span className="mt-1 block text-xs text-slate-400">{stat.label}</span>
               </div>
             ))}
           </div>

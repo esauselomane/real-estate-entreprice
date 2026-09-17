@@ -21,7 +21,7 @@ export default function Hero() {
   const next = () => setCurrent((prev) => (prev + 1) % heroSlides.length);
 
   return (
-    <section className="relative isolate overflow-hidden pt-4 pb-16 sm:pt-8 sm:pb-20">
+    <section className="relative isolate overflow-hidden pt-6 pb-10 sm:pt-8 sm:pb-12">
       <div
         aria-hidden="true"
         className="absolute -top-24 -left-24 h-80 w-80 rounded-full bg-blue-600/5 blur-3xl"
@@ -31,7 +31,7 @@ export default function Hero() {
         className="absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-emerald-500/5 blur-3xl"
       />
 
-      <div className="container relative z-10 grid items-center gap-12 lg:grid-cols-2 lg:py-8">
+      <div className="container relative z-10 grid items-center gap-8 lg:grid-cols-2">
         <div>
           {hero.badge && (
             <span className="inline-flex rounded-full bg-emerald-900/40 px-3 py-1 text-xs font-extrabold text-emerald-300 ring-1 ring-emerald-700">
@@ -41,14 +41,14 @@ export default function Hero() {
           <h1 className="mt-4 text-4xl font-display font-extrabold tracking-tight text-white sm:text-5xl">
             {hero.headline}
           </h1>
-          <p className="mt-5 text-lg text-slate-300">{hero.subhead}</p>
+          <p className="mt-4 text-lg text-slate-300">{hero.subhead}</p>
           {hero.punchline && (
             <p className="mt-2 text-base font-medium italic text-blue-400">
               {hero.punchline}
             </p>
           )}
 
-          <div className="mt-8 flex flex-wrap gap-4">
+          <div className="mt-6 flex flex-wrap gap-4">
             <Link href="/login">
               <button
                 type="button"
