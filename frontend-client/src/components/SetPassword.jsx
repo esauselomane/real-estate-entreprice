@@ -20,6 +20,7 @@ export default function SetPassword({ activationToken, recoveryToken, onPassword
       </div>
     );
   }
+  
 
   const handleSubmit = async (e) => {
     e.preventDefault();

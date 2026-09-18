@@ -1,7 +1,7 @@
 {
   "Routes": [
     {
-      "DownstreamPathTemplate": "/api/auth/{everything}",
+      "DownstreamPathTemplate": "/auth/{everything}",
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
@@ -58,7 +58,7 @@
       ]
     },
     {
-      "DownstreamPathTemplate": "/api/system/{everything}",
+      "DownstreamPathTemplate": "/system/{everything}",
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
@@ -78,7 +78,7 @@
       ]
     },
     {
-      "DownstreamPathTemplate": "/api/payments/{everything}",
+      "DownstreamPathTemplate": "/payments/{everything}",
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
@@ -115,7 +115,7 @@
       ]
     },
     {
-      "DownstreamPathTemplate": "/api/user/{everything}",
+      "DownstreamPathTemplate": "/user/{everything}",
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {

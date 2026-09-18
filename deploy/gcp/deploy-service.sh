@@ -17,7 +17,7 @@ ARTIFACT_REG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}"
 NETWORK="${NETWORK:-default}"
 SUBNET="${SUBNET:-default}"
 VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY:-}"
-
+FORCE_REBUILD="${FORCE_REBUILD:-1}"
 IDENTITY_CONN_SECRET="identity-service-db-conn-${REGION}"
 PROPERTY_CONN_SECRET="property-service-db-conn-${REGION}"
 CRM_CONN_SECRET="crm-service-db-conn-${REGION}"
@@ -121,17 +121,25 @@ if [[ "$SERVICE_NAME" == "gateway" || "$SERVICE_NAME" == "property-service" || "
 fi
 
 if [ -n "${DOMAIN}" ]; then
+  echo "Was in if block"
   GATEWAY_PUBLIC_URL="https://api.${DOMAIN}"
   APP_PUBLIC_URL="https://app.${DOMAIN}"
   SITE_PUBLIC_URL="https://www.${DOMAIN}"
 else
+  echo "Was in else block"
   GATEWAY_PUBLIC_URL="${GATEWAY_URL}"
   APP_PUBLIC_URL="${FRONTEND_URL}"
   SITE_PUBLIC_URL="${MARKETING_URL}"
 fi
 
-# Allow all origins for testing purposes
-CORS_LIST="*"
+# Compute specific origins for production to allow credentials (cookies/auth headers)
+# If DOMAIN is set, we must use specific origins because '*' is incompatible with AllowCredentials()
+if [ -n "${DOMAIN}" ]; then
+  CORS_LIST="https://app.${DOMAIN},https://www.${DOMAIN},https://${DOMAIN},https://api.${DOMAIN}"
+else
+  # Fallback for initial deployments or test environments
+  CORS_LIST="*"
+fi
 
 case "${SERVICE_NAME}" in
   frontend-client)
@@ -156,6 +164,7 @@ case "${SERVICE_NAME}" in
     append_env_var "${ENV_FILE}" ASPNETCORE_ENVIRONMENT Production
     append_env_var "${ENV_FILE}" ASPNETCORE_FORWARDEDHEADERS_ENABLED "true"
     append_env_var "${ENV_FILE}" CORS_ORIGINS "${CORS_LIST}"
+    append_env_var "${ENV_FILE}" Cors__AllowedOrigins "${CORS_LIST}"
     append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
     deploy_backend identity-service 5001 identity-service-sa 1 1Gi 1 --no-cpu-throttling \
       --env-vars-file="${ENV_FILE}" \
@@ -168,6 +177,7 @@ case "${SERVICE_NAME}" in
     append_env_var "${ENV_FILE}" ASPNETCORE_FORWARDEDHEADERS_ENABLED "true"
     append_env_var "${ENV_FILE}" Identity__BaseUrl "${IDENTITY_URL}"
     append_env_var "${ENV_FILE}" CORS_ORIGINS "${CORS_LIST}"
+    append_env_var "${ENV_FILE}" Cors__AllowedOrigins "${CORS_LIST}"
     append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
     deploy_backend property-service 5002 property-service-sa 1 1.5Gi 1 --no-cpu-throttling \
       --env-vars-file="${ENV_FILE}" \
@@ -181,53 +191,24 @@ case "${SERVICE_NAME}" in
     append_env_var "${ENV_FILE}" Identity__BaseUrl "${IDENTITY_URL}"
     append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
     append_env_var "${ENV_FILE}" CORS_ORIGINS "${CORS_LIST}"
+    append_env_var "${ENV_FILE}" Cors__AllowedOrigins "${CORS_LIST}"
     deploy_backend crm-service 5003 crm-service-sa 1 1.5Gi 1 --no-cpu-throttling \
       --env-vars-file="${ENV_FILE}" \
       --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${CRM_CONN_SECRET}:latest"
     rm -f "${ENV_FILE}"
     ;;
   gateway)
-    ENV_FILE="$(mktemp)"
-    append_env_var "${ENV_FILE}" ASPNETCORE_ENVIRONMENT Production
-    append_env_var "${ENV_FILE}" ASPNETCORE_FORWARDEDHEADERS_ENABLED "true"
-    append_env_var "${ENV_FILE}" DOWNSTREAM_SCHEME https
-    # Enable detailed CORS logging to help debug mismatches
-    append_env_var "${ENV_FILE}" Logging__LogLevel__Microsoft.AspNetCore.Cors Debug
-    append_env_var "${ENV_FILE}" IDENTITY_HOST "$(host_from_url "${IDENTITY_URL}")"
-    append_env_var "${ENV_FILE}" IDENTITY_PORT 443
-    append_env_var "${ENV_FILE}" PROPERTY_HOST "$(host_from_url "${PROPERTY_URL}")"
-    append_env_var "${ENV_FILE}" PROPERTY_PORT 443
-    append_env_var "${ENV_FILE}" CRM_HOST "$(host_from_url "${CRM_URL}")"
-    append_env_var "${ENV_FILE}" CRM_PORT 443
-    append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
-    # Ensure the gateway allows all relevant origins using standard environment variable names
-    append_env_var "${ENV_FILE}" CORS_ORIGINS "${CORS_LIST}"
-    append_env_var "${ENV_FILE}" AllowedOrigins "${CORS_LIST}"
-    append_env_var "${ENV_FILE}" ASPNETCORE_URLS "http://*:5000"
-
-    log "Ensuring legacy VPC connector is cleared for gateway..."
-    gcloud run services update gateway --clear-vpc-connector --region="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null || true
-
-    gcloud run deploy gateway \
-      --image="$(artifact_image gateway)" \
-      --region="${REGION}" \
-      --project="${PROJECT_ID}" \
-      --platform=managed \
-      --service-account="gateway-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
-      --port=5000 \
-      --network="${NETWORK}" \
-      --subnet="${SUBNET}" \
-      --vpc-egress=private-ranges-only \
-      --execution-environment=gen2 \
-      --cpu=1 \
-      --memory=512Mi \
-      --min-instances=1 \
-      --max-instances=20 \
-      --ingress=all \
-      --allow-unauthenticated \
-      --env-vars-file="${ENV_FILE}" \
-      --quiet
-    rm -f "${ENV_FILE}"
+    deploy_gateway \
+      "${CORS_LIST}" \
+      "${GATEWAY_PUBLIC_URL}" \
+      "$(host_from_url "${IDENTITY_URL}")" \
+      "$(host_from_url "${PROPERTY_URL}")" \
+      "$(host_from_url "${CRM_URL}")" \
+      "${PROJECT_ID}" \
+      "${REGION}" \
+      "${NETWORK}" \
+      "${SUBNET}" \
+      "$(artifact_image gateway)"
     ;;
   frontend-client)
     gcloud run deploy frontend-client \

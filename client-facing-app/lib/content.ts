@@ -24,9 +24,9 @@ export type TeamMember = {
 
 export const site = {
   name: process.env.NEXT_PUBLIC_SITE_NAME || "Biscove Real Estate Tech",
-  tagline: "The operating workspace for South African brokerages.",
+  tagline: "The digital backbone for South African brokerages.",
   description:
-    "A hosted platform for property inventory, lead and deal management, client records, branded presentations, listing distribution, and agency administration.",
+    "An integrated operating system for real estate professionals. Uniting property inventory, lead pipelines, and agency administration into a singular, high-performance workspace.",
   url: process.env.NEXT_PUBLIC_SITE_URL || "https://www.biscovetech.com",
 } as const;
 
@@ -77,8 +77,8 @@ export const heroSlides: HeroSlide[] = [
 export const hero: { headline: string; subhead: string; badge?: string; punchline?: string } = {
   headline: "Run the brokerage from a single, hosted workspace.",
   subhead:
-    "Biscove brings together the work your team already does: property stock, maps, leads, deals, clients, reports, brochures, and listing distribution — with administration and billing built in.",
-  badge: "Hosted SaaS for agencies",
+    "Biscove is more than software; it is the operating system for the modern brokerage. We’ve built the digital infrastructure that transforms fragmented property operations into a singular, professional environment—powering your inventory, your pipeline, and your growth.",
+  badge: "Enterprise Workspace for Agencies",
 };
 
 export const features: Feature[] = [
@@ -216,20 +216,13 @@ export const timeline: { year: string; event: string }[] = [
   { year: "2026", event: "The hosted workspace opens to agencies." },
 ];
 
-export const leadership: TeamMember[] = [
-  {
-    name: "Esau Selomane",
-    role: "Founder",
-    image: "/images/team/amara.jpg",
-    linkedin: "https://www.linkedin.com/in/esau-selomane-49a68b24/",
-  },
-  {
-    name: "Ntuthuko Sokutu",
-    role: "Co-founder",
-    image: "/images/team/derek.jpg",
-    linkedin: "https://www.linkedin.com/in/ntuthuko-sokutu-449a44273/",
-  },
-];
+export const story = {
+  title: "The Infrastructure for Excellence",
+  narrative:
+    "Biscove didn't start in a boardroom; it started in the field. We watched the friction that kept South African agencies from scaling—the leads lost in overflowing inboxes, the inventory scattered across spreadsheets, and the manual struggle of brochure creation. In 2015, we set out to build the backbone for the next generation of agencies.\n\nWe’ve engineered a hosted workspace that serves as the single source of truth for the entire brokerage. By uniting inventory, deal pipelines, and administration into one professional, tenant-isolated environment, we give administrators control and brokers the freedom to focus on human relationships. Today, Biscove is the silent engine driving South Africa's most professional real estate operations.",
+};
+
+export const leadership: TeamMember[] = [];
 
 export type IconMap = {
   [key: string]: string;
