@@ -188,7 +188,6 @@ export default function BibsyWidget() {
   };
 
   const handleEmail = (text: string) => {
-    if (!text.includes("@") || !text.includes(".")) {
     if (!emailRegex.test(text)) {
       addBot("That doesn't look like a valid email. Could you double-check?");
       return;
