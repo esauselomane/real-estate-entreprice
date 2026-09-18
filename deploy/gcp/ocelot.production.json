@@ -3,16 +3,38 @@
 #
 # Variables to substitute at deploy time:
 #   ${PROJECT_ID_HASH} — short hash of project ID (e.g., real-estate-enter-a1b2c3)
+#   africa-south1 — GCP region ID (e.g., uc for us-central1)
 #   DOMAIN — production domain (biscovetech.com)
 
 {
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Ocelot": "Debug"  
+    }
+  },
   "Routes": [
+    {
+      "DownstreamPathTemplate": "/health",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/health",
+      "UpstreamHttpMethod": [
+        "Get"
+      ]
+    },
     {
       "DownstreamPathTemplate": "/api/payments/{everything}",
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
-          "Host": "identity-service-${PROJECT_ID_HASH}.a.run.app",
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
           "Port": 443
         }
       ],
@@ -27,7 +49,7 @@
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
-          "Host": "identity-service-${PROJECT_ID_HASH}.a.run.app",
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
           "Port": 443
         }
       ],
@@ -44,7 +66,7 @@
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
-          "Host": "property-service-${PROJECT_ID_HASH}.a.run.app",
+          "Host": "property-service-${PROJECT_ID_HASH}.africa-south1.run.app",
           "Port": 443
         }
       ],
@@ -61,7 +83,7 @@
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
-          "Host": "crm-service-${PROJECT_ID_HASH}.a.run.app",
+          "Host": "crm-service-${PROJECT_ID_HASH}.africa-south1.run.app",
           "Port": 443
         }
       ],
@@ -78,7 +100,7 @@
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
-          "Host": "identity-service-${PROJECT_ID_HASH}.a.run.app",
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
           "Port": 443
         }
       ],
@@ -95,7 +117,7 @@
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
-          "Host": "developer-api-${PROJECT_ID_HASH}.a.run.app",
+          "Host": "developer-api-${PROJECT_ID_HASH}.africa-south1.run.app",
           "Port": 443
         }
       ],
@@ -112,7 +134,7 @@
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
-          "Host": "identity-service-${PROJECT_ID_HASH}.a.run.app",
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
           "Port": 443
         }
       ],
@@ -128,7 +150,7 @@
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {
-          "Host": "identity-service-${PROJECT_ID_HASH}.a.run.app",
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
           "Port": 443
         }
       ],

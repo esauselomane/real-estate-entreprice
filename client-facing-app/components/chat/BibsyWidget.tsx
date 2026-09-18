@@ -29,6 +29,7 @@ type LeadDraft = {
 
 const STORAGE_KEY = "bibsy-taught";
 const MAX_TAUGHT = 50;
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const teachRegex = /^(learn|teach)\s*[:\-]?\s*(.+?)\s*[:=]\s*(.+)$/i;
 
 export default function BibsyWidget() {
@@ -188,6 +189,7 @@ export default function BibsyWidget() {
 
   const handleEmail = (text: string) => {
     if (!text.includes("@") || !text.includes(".")) {
+    if (!emailRegex.test(text)) {
       addBot("That doesn't look like a valid email. Could you double-check?");
       return;
     }

@@ -1,0 +1,168 @@
+# Production Ocelot gateway config for Google Cloud Run.
+# This file replaces api-gateway/ocelot.json when deploying to GCP.
+#
+# Variables to substitute at deploy time:
+#   ${PROJECT_ID_HASH} — short hash of project ID (e.g., real-estate-enter-a1b2c3)
+#   africa-south1 — GCP region ID (e.g., uc for us-central1)
+#   DOMAIN — production domain (biscovetech.com)
+
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Ocelot": "Debug"  
+    }
+  },
+  "Routes": [
+    {
+      "DownstreamPathTemplate": "/health",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/health",
+      "UpstreamHttpMethod": [
+        "Get"
+      ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/payments/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/payments/{everything}",
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post"
+      ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/auth/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/auth/{everything}",
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/properties/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "property-service-${PROJECT_ID_HASH}.africa-south1.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/properties/{everything}",
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/crm/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "crm-service-${PROJECT_ID_HASH}.africa-south1.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/crm/{everything}",
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/system/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/system/{everything}",
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/developer/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "developer-api-${PROJECT_ID_HASH}.africa-south1.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/developer/{everything}",
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put",
+        "Delete"
+      ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/user/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/user/{everything}",
+      "UpstreamHttpMethod": [
+        "Get",
+        "Post",
+        "Put"
+      ]
+    },
+    {
+      "DownstreamPathTemplate": "/profiles/{everything}",
+      "DownstreamScheme": "https",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "identity-service-${PROJECT_ID_HASH}.africa-south1.run.app",
+          "Port": 443
+        }
+      ],
+      "UpstreamPathTemplate": "/gateway/profiles/{everything}",
+      "UpstreamHttpMethod": [
+        "Get"
+      ]
+    }
+  ],
+  "GlobalConfiguration": {
+    "BaseUrl": "https://api.biscovetech.com",
+    "RequestIdKey": "X-Request-Id",
+    "DownstreamScheme": "https"
+  }
+}
