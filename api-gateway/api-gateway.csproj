@@ -10,5 +10,15 @@
   <ItemGroup>
     <PackageReference Include="Ocelot" Version="25.0.0" />
   </ItemGroup>
+  <ItemGroup>
+  <Content Include="ocelot.json">
+    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+  </Content>
+  <!-- If you use ocelot.production.json, include it here too -->
+  <Content Include="ocelot.production.json">
+    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+  </Content>
+</ItemGroup>
+
 
 </Project>
