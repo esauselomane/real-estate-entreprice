@@ -86,7 +86,7 @@
         "Put",
         "Delete"
       ]
-    }
+    },
     {
       "DownstreamPathTemplate": "/api/system/{everything}",
       "DownstreamScheme": "https",
