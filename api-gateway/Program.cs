@@ -8,8 +8,9 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 builder.Logging.AddDebug();
 
-builder.Configuration.AddJsonFile("ocelot.json", optional: true, reloadOnChange: true);
+builder.Configuration.AddJsonFile("ocelot.{environment}.json", optional: true, reloadOnChange: true);
 builder.Configuration.AddEnvironmentVariables();
+string environment = builder.Environment.EnvironmentName;
 
 var gatewayBaseUrl = builder.Configuration["Gateway:BaseUrl"]
     ?? Environment.GetEnvironmentVariable("GATEWAY_BASE_URL")
