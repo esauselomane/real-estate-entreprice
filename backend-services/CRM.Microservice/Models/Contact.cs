@@ -26,6 +26,7 @@ namespace CRM.Microservice.Models
         public string TenantId { get; set; } = string.Empty;
 
         [Required]
+        [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
         public ContactType ContactType { get; set; }
 
         [Required]

@@ -6,6 +6,9 @@
     <Project Path="backend-services/Shared.Access/Shared.Access.csproj" />
     <Project Path="backend-services/Shared.Presentation/Shared.Presentation.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Identity.Payments.Tests/Identity.Payments.Tests.csproj" />
+  </Folder>
   <Project Path="api-gateway/api-gateway.csproj" />
   <Project Path="Developer.API/Developer.API.csproj" />
 </Solution>

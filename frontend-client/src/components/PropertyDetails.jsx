@@ -1,32 +1,49 @@
-import GoogleAddressPicker from './maps/GoogleAddressPicker.jsx';
+import GooglePropertyMapPicker from './maps/GooglePropertyMapPicker.jsx';
 import PropertyStaticMap from './maps/PropertyStaticMap.jsx';
 import { useState, useEffect } from 'react';
 import {
-   ArrowLeft, MapPin, FileText, User, Home, CheckCircle2,
+   ArrowLeft, FileText, User, Home, CheckCircle2,
    ExternalLink, Image, Plus, Trash2, Layers,
     Building, Check, Loader2, AlertCircle, FileSignature, Wrench, FolderLock, Pencil,
     X, Save, Upload, Download, History, ChevronDown, ChevronUp, Calendar,
-    ParkingMeter, Ship, Wind, Heart, Wifi, Zap, Shield, FileUp, Eye, EyeOff
+    ParkingMeter, Wind, Heart, Shield, FileUp, Eye, EyeOff
   } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import { crmService } from '../services/crmService.js';
 import { canManageUnits } from '../services/authService.js';
-import { usePermission } from '../contexts/PermissionContext.jsx';
 import Can from '../components/Can.jsx';
 import ContactPicker from '../components/ContactPicker.jsx';
 
+function hasValidCoordinates(latitude, longitude) {
+  if (latitude == null || longitude == null || String(latitude).trim() === '' || String(longitude).trim() === '') {
+    return false;
+  }
+
+  const numericLatitude = Number(latitude);
+  const numericLongitude = Number(longitude);
+  return Number.isFinite(numericLatitude) && Number.isFinite(numericLongitude) &&
+    Math.abs(numericLatitude) <= 90 && Math.abs(numericLongitude) <= 180;
+}
+
+function getMarketClassFromListingFlags(isForSale, isForRent) {
+  if (isForSale && isForRent) return 'Both';
+  if (isForSale) return 'Sale';
+  if (isForRent) return 'Rental';
+  return 'Off Market';
+}
+
 export default function PropertyDetails({ propertyId, onBack, onNavigateToClient }) {
-  const { hasPermission } = usePermission();
   const [property, setProperty] = useState(null);
   const [subUnits, setSubUnits] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [platforms, setPlatforms] = useState([]);
-  const [imagePreview, setImagePreview] = useState(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState('');
   const [isEditingProperty, setIsEditingProperty] = useState(false);
   const [propertyForm, setPropertyForm] = useState(null);
+  const [editErrorMessage, setEditErrorMessage] = useState('');
+  const [hasSelectedGoogleLocation, setHasSelectedGoogleLocation] = useState(false);
   // 🧩 PROPERTY-LEVEL OPERATIONS — operational records bound to this property (consolidated
   // from the standalone OperationsWorkspace so all property operations live on the property page).
   const [propertyOps, setPropertyOps] = useState([]);
@@ -39,7 +56,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const [amenitySaving, setAmenitySaving] = useState(false);
   const [amenityError, setAmenityError] = useState('');
   const [amenityForm, setAmenityForm] = useState({}); // { amenityTypeId, scope:'property'|'unit', unitId?, booleanValue, numberValue, notes }
-  const [amenityEditing, setAmenityEditing] = useState(null); // existing row being edited
   const [amenityTypes, setAmenityTypes] = useState([]); // catalogue for the add-form dropdown
 
   const handleSaveAmenity = async (e) => {
@@ -58,7 +74,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       const resp = await propertyService.getAmenities(propertyId);
       setAmenitiesData(resp);
       setAmenityForm({});
-      setAmenityEditing(null);
       setAmenityError('');
     } catch (err) {
       setAmenityError((err && err.message) || 'Failed to save amenity.');
@@ -744,23 +759,17 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       return;
     }
     setUnitDocUploading(true); setUnitDocError(''); setUnitDocSuccess('');
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(unitDocForm.file);
-    });
-      try {
-        await propertyService.uploadPropertyUnitDocument(property.propertyId, unitModalUnit.propertyUnitId, unitDocForm.file, {
-          name: unitDocForm.name.trim(),
-          description: unitDocForm.description.trim()
-        });
-        // Refresh the unit document list (server persists UnitDocumentsJson)
-        await loadUnitDocs();
-        setUnitDocSuccess('Document uploaded to server vault.');
-        setTimeout(() => setUnitDocSuccess(''), 2000);
-        resetDocForm();
-      } catch (err) {
+    try {
+      await propertyService.uploadPropertyUnitDocument(property.propertyId, unitModalUnit.propertyUnitId, unitDocForm.file, {
+        name: unitDocForm.name.trim(),
+        description: unitDocForm.description.trim()
+      });
+      // Refresh the unit document list (server persists UnitDocumentsJson)
+      await loadUnitDocs();
+      setUnitDocSuccess('Document uploaded to server vault.');
+      setTimeout(() => setUnitDocSuccess(''), 2000);
+      resetDocForm();
+    } catch (err) {
       setUnitDocError((err && err.message) || 'Could not upload this document.');
     } finally {
       setUnitDocUploading(false);
@@ -796,7 +805,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     const file = e.target.files[0];
     if (!file) return;
 
-    setImagePreview(URL.createObjectURL(file));
     setIsUploadingImage(true);
     setActionSuccessMessage('');
 
@@ -875,30 +883,57 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     }
   };
 
+  const handleEditLocationChange = (location) => {
+    setPropertyForm((previous) => (previous ? { ...previous, ...location } : previous));
+    setHasSelectedGoogleLocation(hasValidCoordinates(location.latitude, location.longitude));
+  };
+
+  const handleEditCoordinateChange = (field, value) => {
+    setPropertyForm((previous) => (previous ? { ...previous, [field]: value } : previous));
+    setHasSelectedGoogleLocation(false);
+  };
+
+  const openPropertyEditor = () => {
+    if (!property) return;
+    setPropertyForm({ ...property });
+    setHasSelectedGoogleLocation(hasValidCoordinates(property.latitude, property.longitude));
+    setEditErrorMessage('');
+    setIsEditingProperty(true);
+  };
+
   const handleSaveProperty = async (event) => {
     event.preventDefault();
+    if (!propertyForm) return;
+
+    const latitude = Number(propertyForm.latitude);
+    const longitude = Number(propertyForm.longitude);
+    if (!String(propertyForm.completeAddress ?? '').trim() || !hasSelectedGoogleLocation || !hasValidCoordinates(latitude, longitude)) {
+      setEditErrorMessage('Select a Google address or drag the pin on the map before saving. Manual coordinates are not accepted.');
+      return;
+    }
+
+    setEditErrorMessage('');
     try {
       const saved = await propertyService.updateProperty(propertyId, {
         ...propertyForm,
         propertyTypeId: Number(propertyForm.propertyTypeId || property.propertyTypeId),
         valuationPrice: Number(propertyForm.valuationPrice || 0),
-        salePrice: propertyForm.salePrice === '' ? null : Number(propertyForm.salePrice),
+        salePrice: propertyForm.salePrice === '' || propertyForm.salePrice == null ? null : Number(propertyForm.salePrice),
         tenantInstallationAllowance: Number(propertyForm.tenantInstallationAllowance || 0),
-        latitude: Number(propertyForm.latitude || 0), longitude: Number(propertyForm.longitude || 0),
-        // 🧬 Listing flags — preserve the user's checkbox selection through
-        // the save call. Coerce to strict booleans for the backend.
+        latitude,
+        longitude,
         isForSale: !!propertyForm.isForSale,
         isForRent: !!propertyForm.isForRent,
-        // 🧬 Derive the legacy MarketClass string for any consumer that still
-        // reads it (search criteria, syndication rules, etc).
-        marketClass: (() => {
-          const s = !!propertyForm.isForSale, r = !!propertyForm.isForRent;
-          return s && r ? 'Both' : s ? 'Sale' : r ? 'Rental' : 'Off Market';
-        })()
+        marketClass: getMarketClassFromListingFlags(!!propertyForm.isForSale, !!propertyForm.isForRent)
       });
-      setProperty(saved); setSubUnits(saved.subUnits || subUnits); setIsEditingProperty(false);
+      setProperty(saved);
+      setSubUnits(saved.subUnits || subUnits);
+      setIsEditingProperty(false);
+      setEditErrorMessage('');
       setActionSuccessMessage('Property details saved to the backend.');
-    } catch (err) { setErrorMessage((err && err.message) || 'Could not save property details.'); }
+    } catch (err) {
+      setEditErrorMessage(err?.message || err || 'Could not save property details.');
+    }
   };
 
   if (isLoading) {
@@ -1024,7 +1059,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
             </div>
 
             <Can permission="properties:edit">
-              <button type="button" onClick={() => { setPropertyForm({ ...property }); setIsEditingProperty(true); }} className="mb-4 text-xs font-bold text-blue-300 border border-blue-900 rounded-lg px-3 py-1.5 hover:bg-blue-950">Edit property details</button>
+              <button type="button" onClick={openPropertyEditor} className="mb-4 text-xs font-bold text-blue-300 border border-blue-900 rounded-lg px-3 py-1.5 hover:bg-blue-950">Edit property details</button>
             </Can>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-slate-950/60 rounded-xl border border-slate-800/80 my-4">
@@ -2190,12 +2225,40 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       {isEditingProperty && propertyForm && (
         <div className="fixed inset-0 z-50 p-4 bg-black/70 overflow-y-auto">
           <form onSubmit={handleSaveProperty} className="max-w-3xl mx-auto my-8 bg-slate-900 border border-slate-700 rounded-2xl p-6 space-y-4">
-            <h3 className="text-white font-bold">Edit property details</h3>
-<GoogleAddressPicker onSelect={address => setPropertyForm(previous => ({ ...previous, ...address }))} />
+            <div className="flex items-center justify-between">
+              <h3 className="text-white font-bold">Edit property details</h3>
+              <button type="button" onClick={() => setIsEditingProperty(false)} className="text-slate-400 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            {editErrorMessage && (
+              <div className="p-2 bg-red-950/30 border border-red-900 rounded-lg text-red-300 text-xs">
+                {editErrorMessage}
+              </div>
+            )}
+            <GooglePropertyMapPicker
+              address={propertyForm.completeAddress}
+              latitude={propertyForm.latitude}
+              longitude={propertyForm.longitude}
+              onChange={handleEditLocationChange}
+              required
+              height={280}
+            />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {[
-                ['completeAddress', 'Address'], ['erfSpatialSize', 'Erf size'], ['titleDeedType', 'Title deed type'], ['portfolioZoning', 'Zoning'], ['linkedOwnerId', 'Owner record ID'], ['valuationPrice', 'Valuation'], ['salePrice', 'Sale price'], ['tenantInstallationAllowance', 'TI allowance'], ['latitude', 'Latitude'], ['longitude', 'Longitude']
-              ].map(([key, label]) => <label key={key} className="text-[10px] text-slate-400 uppercase">{label}<input value={propertyForm[key] ?? ''} onChange={e => setPropertyForm({ ...propertyForm, [key]: e.target.value, ...(key === 'completeAddress' ? { latitude: '', longitude: '' } : {}) })} className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case" /></label>)}
+                ['erfSpatialSize', 'Erf size'], ['titleDeedType', 'Title deed type'], ['portfolioZoning', 'Zoning'], ['linkedOwnerId', 'Owner record ID'], ['valuationPrice', 'Valuation'], ['salePrice', 'Sale price'], ['tenantInstallationAllowance', 'TI allowance'], ['latitude', 'Latitude'], ['longitude', 'Longitude']
+              ].map(([key, label]) => (
+                <label key={key} className="text-[10px] text-slate-400 uppercase">
+                  {label}
+                  <input
+                    value={propertyForm[key] ?? ''}
+                    onChange={(event) => (key === 'latitude' || key === 'longitude'
+                      ? handleEditCoordinateChange(key, event.target.value)
+                      : setPropertyForm((previous) => (previous ? { ...previous, [key]: event.target.value } : previous)))}
+                    className="mt-1 w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white normal-case"
+                  />
+                </label>
+              ))}
               <div className="md:col-span-2 text-[10px] text-slate-400 uppercase">
                 Listing Type
                 <div className="mt-1 flex gap-4 p-3 bg-slate-950 border border-slate-700 rounded-lg normal-case">
@@ -2203,7 +2266,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                     <input
                       type="checkbox"
                       checked={!!propertyForm.isForSale}
-                      onChange={(e) => setPropertyForm({ ...propertyForm, isForSale: e.target.checked })}
+                      onChange={(e) => setPropertyForm((previous) => (previous ? { ...previous, isForSale: e.target.checked } : previous))}
                       className="rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
                     />
                     For Sale
@@ -2212,7 +2275,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                     <input
                       type="checkbox"
                       checked={!!propertyForm.isForRent}
-                      onChange={(e) => setPropertyForm({ ...propertyForm, isForRent: e.target.checked })}
+                      onChange={(e) => setPropertyForm((previous) => (previous ? { ...previous, isForRent: e.target.checked } : previous))}
                       className="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500"
                     />
                     To Rent
@@ -2221,7 +2284,12 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                 <p className="text-[10px] text-slate-500 mt-1">Tick both to market the property as For Sale and To Rent.</p>
               </div>
             </div>
-             <div className="flex gap-3"><button type="button" onClick={() => setIsEditingProperty(false)} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Cancel</button><Can permission="properties:edit"><button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">Save property</button></Can></div>
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setIsEditingProperty(false)} className="flex-1 py-2 border border-slate-700 rounded-xl text-xs">Cancel</button>
+              <Can permission="properties:edit">
+                <button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold">Save property</button>
+              </Can>
+            </div>
           </form>
         </div>
       )}
