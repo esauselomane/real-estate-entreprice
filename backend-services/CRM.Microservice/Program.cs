@@ -104,7 +104,32 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<CRMDbContext>();
+    var agencyRepository = scope.ServiceProvider.GetRequiredService<IAgencyRepository>();
+    var brokerRepository = scope.ServiceProvider.GetRequiredService<IBrokerRepository>();
+    var leadRepository = scope.ServiceProvider.GetRequiredService<ILeadRepository>();
+    var dealRepository = scope.ServiceProvider.GetRequiredService<IDealRepository>();
+    var companyRepository = scope.ServiceProvider.GetRequiredService<ICompanyRepository>();
+    var legalEntityRepository = scope.ServiceProvider.GetRequiredService<ILegalEntityRepository>();
+    var contactRepository = scope.ServiceProvider.GetRequiredService<IContactRepository>();
+    var geographyRepository = scope.ServiceProvider.GetRequiredService<IGeographyRepository>();
+    var brochureCardRepository = scope.ServiceProvider.GetRequiredService<IBrochureCardRepository>();
+    var dealBrokerSplitRepository = scope.ServiceProvider.GetRequiredService<IDealBrokerSplitRepository>();
+    var notificationRepository = scope.ServiceProvider.GetRequiredService<INotificationRepository>();
+
     db.Database.Migrate();
+    await CRMSeedData.EnsureSeededAsync(
+        db,
+        agencyRepository,
+        brokerRepository,
+        leadRepository,
+        dealRepository,
+        companyRepository,
+        legalEntityRepository,
+        contactRepository,
+        geographyRepository,
+        brochureCardRepository,
+        dealBrokerSplitRepository,
+        notificationRepository);
 }
 
 if (app.Environment.IsDevelopment())
