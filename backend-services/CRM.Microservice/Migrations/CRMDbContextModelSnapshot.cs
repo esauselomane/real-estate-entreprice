@@ -195,6 +195,107 @@ namespace CRM.Microservice.Migrations
                     b.ToTable("BrochureCardLines");
                 });
 
+            modelBuilder.Entity("CRM.Microservice.Models.BrokerMonthlyTarget", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("BrokerId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("TargetCommission")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("BrokerMonthlyTargets");
+                });
+
+            modelBuilder.Entity("CRM.Microservice.Models.BrokerPerformanceMetrics", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AvgCommissionGenerated")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("AvgDaysToClose")
+                        .HasColumnType("decimal(7,1)");
+
+                    b.Property<decimal>("AvgDealValue")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("BrokerId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("ComputedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("CrmHygieneScore")
+                        .HasColumnType("decimal(7,2)");
+
+                    b.Property<decimal>("GeoSpecializationScore")
+                        .HasColumnType("decimal(7,2)");
+
+                    b.Property<decimal>("LeadToDealConversionRate")
+                        .HasColumnType("decimal(7,2)");
+
+                    b.Property<DateTime>("MetricDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("OverallScore")
+                        .HasColumnType("decimal(7,2)");
+
+                    b.Property<string>("PriceBandScore")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PropertyTypeConversionScore")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("StageVelocityScore")
+                        .HasColumnType("decimal(7,2)");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("TotalDealsWon")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TotalLeadsAssigned")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("BrokerPerformanceMetrics");
+                });
+
             modelBuilder.Entity("CRM.Microservice.Models.BrokerRecord", b =>
                 {
                     b.Property<string>("BrokerId")

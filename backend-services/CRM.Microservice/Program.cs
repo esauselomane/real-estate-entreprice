@@ -92,6 +92,7 @@ builder.Services.AddSingleton<IJobQueue<DataImportJob>, JobQueue<DataImportJob>>
 // Register background services
 builder.Services.AddHostedService<BrochureGenerationBackgroundService>();
 builder.Services.AddHostedService<DataImportBackgroundService>();
+builder.Services.AddHostedService<BrokerMetricsBackgroundJob>();
 
 // Register services
 builder.Services.AddScoped<PermissionCheckService>();
