@@ -37,14 +37,14 @@ namespace CRM.Microservice.Data
             BackfillColumn(context, "AgencyRecords", "TrialEndDate", "datetime2 NULL");
         }
 
-        public static void EnsureSeeded(CRMDbContext context, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, ILeadRepository leadRepository, IDealRepository dealRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, IGeographyRepository geographyRepository, IBrochureCardRepository brochureCardRepository, IDealBrokerSplitRepository dealBrokerSplitRepository, INotificationRepository notificationRepository)
+        public static async Task EnsureSeededAsync(CRMDbContext context, IAgencyRepository agencyRepository, IBrokerRepository brokerRepository, ILeadRepository leadRepository, IDealRepository dealRepository, ICompanyRepository companyRepository, ILegalEntityRepository legalEntityRepository, IContactRepository contactRepository, IGeographyRepository geographyRepository, IBrochureCardRepository brochureCardRepository, IDealBrokerSplitRepository dealBrokerSplitRepository, INotificationRepository notificationRepository)
         {
             if (context == null)
             {
                 throw new ArgumentNullException(nameof(context));
             }
 
-            context.Database.EnsureCreated();
+            await context.Database.EnsureCreatedAsync();
 
             EnsureSchemaBackfill(context);
 
