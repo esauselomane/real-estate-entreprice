@@ -38,6 +38,8 @@ public sealed class EmailService(IOptions<EmailSettings> options, ILogger<EmailS
         using var client = new SmtpClient(settings.Host, settings.Port)
         {
             EnableSsl = settings.EnableSsl,
+            DeliveryMethod = SmtpDeliveryMethod.Network,
+            UseDefaultCredentials = false,
             Credentials = new NetworkCredential(settings.Username, settings.Password)
         };
         try { await client.SendMailAsync(message); }

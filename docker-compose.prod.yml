@@ -75,7 +75,14 @@ services:
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
       - Cors__AllowedOrigins=${CORS_ORIGINS}
-      - Email__SupportAddress=${SUPPORT_EMAIL}
+      - Email__SupportEmail=${SUPPORT_EMAIL:-admin@biscovetech.com}
+      - Email__Host=${EMAIL_HOST:-smtp.gmail.com}
+      - Email__Port=${EMAIL_PORT:-587}
+      - Email__EnableSsl=${EMAIL_ENABLE_SSL:-true}
+      - Email__Username=${EMAIL_USERNAME:-admin@biscovetech.com}
+      - Email__Password=${EMAIL_PASSWORD:-}
+      - Email__FromAddress=${EMAIL_FROM_ADDRESS:-admin@biscovetech.com}
+      - Email__FromName=${EMAIL_FROM_NAME:-Biscove Real Estate Tech}
       - Email__AdminEmail=${ADMIN_EMAIL}
       - Email__PlatformAdminEmail=${PLATFORM_ADMIN_EMAIL}
       - Email__AgencyAdminEmail=${AGENCY_ADMIN_EMAIL}
@@ -247,8 +254,7 @@ services:
       dockerfile: frontend-client/Dockerfile
       args:
         VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY:-}
-      args:
-        - VITE_API_BASE_URL=${NEXT_PUBLIC_GATEWAY_URL}
+        VITE_API_BASE_URL: ${NEXT_PUBLIC_GATEWAY_URL}
     container_name: realestate-frontend-client
     ports:
       - "${FRONTEND_CLIENT_PORT:-80}:80"

@@ -1,67 +1,24 @@
-import GoogleAddressPicker from './maps/GoogleAddressPicker.jsx';
+import GooglePropertyMapPicker from './maps/GooglePropertyMapPicker.jsx';
+import GooglePropertyMap from './maps/GooglePropertyMap.jsx';
+import { getPropertyTypeColor } from './maps/googlePropertyMapUtils.js';
 import { useState, useEffect, useMemo } from 'react';
-import { MapPin, Building2, SlidersHorizontal, Loader2, Layers, ListCollapse, Search, Plus, X, Save } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
-import L from 'leaflet';
+import { Building2, SlidersHorizontal, Loader2, Layers, ListCollapse, Search, Plus, X, Save } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
-import { useAuth } from '../contexts/AuthContext.jsx';
-import { usePermission } from '../contexts/PermissionContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
 
-// 🗺️ Vite + Leaflet default-marker icon patch — the bundler can't resolve the PNG
-// asset URLs otherwise, which leaves markers invisible. Resolved once per load.
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl:   'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl:         'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
-});
+function hasValidCoordinates(latitude, longitude) {
+  if (latitude == null || longitude == null || String(latitude).trim() === '' || String(longitude).trim() === '') {
+    return false;
+  }
 
-// 🎨 Item 1: one marker colour per property type so sector types are
-// instantly scannable on the canvas (Residential=blue, Commercial=amber, …).
-const TYPE_COLORS = {
-  Residential: '#3b82f6',
-  Commercial:  '#f59e0b',
-  Retail:      '#10b981',
-  Industrial:  '#ef4444',
-  Default:     '#6474a5'
-};
-
-const coloredMarkerIcon = (color) => L.divIcon({
-  className: 'property-type-marker',
-  html: `<svg width="26" height="38" viewBox="0 0 26 38" fill="none" xmlns="http://www.w3.org/2000/svg">` +
-    `<path d="M13 0C5.8 0 0 5.8 0 13c0 10.5 11.5 18.5 11.9 18.7.1.1 1.5 1.3 3.2 2.7.3.2.5.2.7 0 1.7-1.4 3.1-2.6 3.2-2.7C26 23.5 26 13 26 13 26 5.8 20.2 0 13 0z" fill="${color}" stroke="white" stroke-width="1.5"/>` +
-    `<circle cx="13" cy="13" r="5" fill="white" stroke="${color}" stroke-width="1.5"/>` +
-    `</svg>`,
-  iconSize: [26, 38],
-  iconAnchor: [13, 38],
-  popupAnchor: [0, -36]
-});
-
-// 🎯 Map auto-fit: child component that uses the Leaflet map instance to
-// re-fit the viewport every time the asset list changes. The old approach
-// (using `key={mappableAssets.length}` on <MapContainer>) forced a full
-// remount of the map, which destroyed zoom/pan state and made the map
-// "jump" on every filter change. This version keeps the map alive and
-// just calls `fitBounds` with a smooth animation.
-function MapAutoFit({ bounds }) {
-  const map = useMap();
-  useEffect(() => {
-    if (!bounds) return;
-    // pad: [fractionX, fractionY] adds padding around the bounds so
-    // markers on the edge of the cluster don't get clipped by the legend
-    // or sidebar.
-    map.fitBounds(bounds, { padding: [60, 60], maxZoom: 14, animate: true, duration: 0.5 });
-  }, [map, bounds]);
-  return null;
+  const numericLatitude = Number(latitude);
+  const numericLongitude = Number(longitude);
+  return Number.isFinite(numericLatitude) && Number.isFinite(numericLongitude) &&
+    Math.abs(numericLatitude) <= 90 && Math.abs(numericLongitude) <= 180;
 }
 
-const DEFAULT_CENTER = [-33.9249, 18.4207]; // Cape Town fallback
-
 export default function PropertyMapWorkspace({ onSelectProperty }) {
-  const { userRole } = useAuth();
-  const { hasPermission } = usePermission();
   const { activeTenantId, isResolvingSubtree } = useTenant();
   const [properties, setProperties] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -73,6 +30,7 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [hasSelectedGoogleLocation, setHasSelectedGoogleLocation] = useState(false);
 
   const [propertyForm, setPropertyForm] = useState({
     completeAddress: '',
@@ -118,22 +76,21 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
   }, [properties]);
 
   const search = searchTerm.trim().toLowerCase();
-  const filteredMapAssets = properties.filter((p) => {
-    if (activeTypeFilter !== 'All' && p.propertyTypeDetails?.name !== activeTypeFilter) return false;
+  const filteredMapAssets = useMemo(() => properties.filter((property) => {
+    if (activeTypeFilter !== 'All' && property.propertyTypeDetails?.name !== activeTypeFilter) return false;
     if (search) {
       return (
-        String(p.completeAddress || '').toLowerCase().includes(search) ||
-        String(p.portfolioZoning || '').toLowerCase().includes(search) ||
-        String(p.propertyId || '').toLowerCase().includes(search)
+        String(property.completeAddress || '').toLowerCase().includes(search) ||
+        String(property.portfolioZoning || '').toLowerCase().includes(search) ||
+        String(property.propertyId || '').toLowerCase().includes(search)
       );
     }
     return true;
-  });
+  }), [properties, activeTypeFilter, search]);
 
-  const mappableAssets = filteredMapAssets.filter(
-    (p) => p.latitude != null && p.longitude != null &&
-      !isNaN(Number(p.latitude)) && !isNaN(Number(p.longitude))
-  );
+  const mappableAssets = useMemo(() => filteredMapAssets.filter((property) =>
+    hasValidCoordinates(property.latitude, property.longitude)
+  ), [filteredMapAssets]);
 
   // 🏷️ Legend data: count of markers per property type, plus a count of
   // For-Sale / For-Rent / Both so the legend stays accurate when the
@@ -155,7 +112,7 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
     return {
       byType: Object.entries(byType)
         .sort((a, b) => b[1] - a[1])
-        .map(([name, count]) => ({ name, count, color: TYPE_COLORS[name] || TYPE_COLORS.Default })),
+        .map(([name, count]) => ({ name, count, color: getPropertyTypeColor(name) })),
       forSale,
       forRent,
       both,
@@ -163,17 +120,6 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
     };
   }, [mappableAssets]);
 
-  const { center, bounds } = useMemo(() => {
-    if (!mappableAssets.length) return { center: DEFAULT_CENTER, bounds: null };
-    const lats = mappableAssets.map((p) => Number(p.latitude));
-    const lngs = mappableAssets.map((p) => Number(p.longitude));
-    const b = L.latLngBounds(
-      [Math.min(...lats), Math.min(...lngs)],
-      [Math.max(...lats), Math.max(...lngs)]
-    );
-    const c = [lats.reduce((a, b2) => a + b2, 0) / lats.length, lngs.reduce((a, b2) => a + b2, 0) / lngs.length];
-    return { center: c, bounds: b.isValid() && mappableAssets.length > 1 ? b : null };
-  }, [mappableAssets]);
 
   const openProperty = (propertyId) => {
     setSelectedMapMarkerId(propertyId);
@@ -190,10 +136,14 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
     });
     setSaveError('');
     setSaveSuccess(false);
+    setHasSelectedGoogleLocation(false);
     setShowAddModal(true);
   };
 
   const handleFormChange = (field, value) => {
+    if (field === 'latitude' || field === 'longitude') {
+      setHasSelectedGoogleLocation(false);
+    }
     setPropertyForm((prev) => {
       const next = { ...prev, [field]: value };
       // 🧬 Derive the legacy MarketClass string from the two independent
@@ -208,18 +158,35 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
     });
   };
 
-  const handleSaveProperty = async (e) => {
-    e.preventDefault();
+  const handleMapClick = () => {
+    setSelectedMapMarkerId(null);
+  };
+
+  const handlePropertyLocationChange = (location) => {
+    setPropertyForm((previous) => ({ ...previous, ...location }));
+    setHasSelectedGoogleLocation(hasValidCoordinates(location.latitude, location.longitude));
+  };
+
+  const handleSaveProperty = async (event) => {
+    event.preventDefault();
     setSaveError('');
     setSaveSuccess(false);
+
+    const latitude = Number(propertyForm.latitude);
+    const longitude = Number(propertyForm.longitude);
     if (!propertyForm.completeAddress.trim()) {
       setSaveError('Property address is required.');
+      return;
+    }
+    if (!hasSelectedGoogleLocation || !hasValidCoordinates(latitude, longitude)) {
+      setSaveError('Select a Google address or drop a pin on the map before creating the property.');
       return;
     }
     if (!propertyForm.isForSale && !propertyForm.isForRent) {
       setSaveError('Select at least one listing type (For Sale or For Rent).');
       return;
     }
+
     setIsSaving(true);
     try {
       await propertyService.createProperty({
@@ -227,8 +194,8 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
         valuationPrice: Number(propertyForm.valuationPrice) || 0,
         salePrice: propertyForm.salePrice ? Number(propertyForm.salePrice) : null,
         tenantInstallationAllowance: Number(propertyForm.tenantInstallationAllowance) || 0,
-        latitude: Number(propertyForm.latitude) || 0,
-        longitude: Number(propertyForm.longitude) || 0,
+        latitude,
+        longitude,
         propertyTypeId: Number(propertyForm.propertyTypeId) || 1,
         isForSale: !!propertyForm.isForSale,
         isForRent: !!propertyForm.isForRent
@@ -237,17 +204,12 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
       setShowAddModal(false);
       const assets = await propertyService.searchProperties([], 'All', null, null);
       setProperties(assets || []);
-    } catch (err) {
-      setSaveError(err || 'Failed to create property.');
+    } catch (error) {
+      setSaveError(error || 'Failed to create property.');
     } finally {
       setIsSaving(false);
     }
   };
-
-  function MapClickHandler() {
-    useMapEvents({ click: () => setSelectedMapMarkerId(null) });
-    return null;
-  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-[calc(100vh-12rem)] animate-fade-in">
@@ -360,16 +322,12 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
         </div>
       </div>
 
-      {/* 🗺️ RIGHT SIDE PANEL: INTERACTIVE LEAFLET MAP */}
+      {/* 🗺️ RIGHT SIDE PANEL: GOOGLE MAP */}
       <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl flex flex-col h-[50vh] lg:h-full relative overflow-hidden p-3 min-h-[450px]">
         <div className="absolute top-5 left-5 z-10 bg-slate-950/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] font-semibold text-slate-300 flex items-center gap-2 shadow-lg shadow-black/40">
           <Layers size={12} className="text-blue-500 animate-pulse" /> Live Multi-Tenant Mapping Canvas
         </div>
 
-        {/* 🏷️ MAP LEGEND — bottom-right overlay. Shows the marker colour
-            for each property type and the count of currently visible
-            markers per type / per listing eligibility so the user can
-            decode the map at a glance. Updates live as filters change. */}
         {mappableAssets.length > 0 && (
           <div className="absolute bottom-5 right-5 z-10 bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-xl shadow-lg shadow-black/40 p-3 w-56 text-[11px] text-slate-200 max-h-[60%] overflow-y-auto">
             <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Marker Legend</div>
@@ -401,73 +359,13 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
           </div>
         )}
 
-        {mappableAssets.length === 0 ? (
-          <div className="w-full h-full bg-slate-950 rounded-xl border border-slate-800/80 flex flex-col items-center justify-center text-center p-6 relative">
-            <div className="absolute inset-0 bg-radial-gradient from-blue-500/5 via-transparent to-transparent pointer-events-none"></div>
-            <div className="max-w-md space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-blue-950 border border-blue-900 flex items-center justify-center text-blue-400 mx-auto shadow-md">
-                <MapPin size={22} />
-              </div>
-              <div>
-                <h3 className="text-white font-bold text-base tracking-tight">No mappable assets</h3>
-                <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                  Displaying <span className="text-blue-400 font-bold">0</span> real estate assets on the map canvas.
-                  Adjust the sector filter or search term to reveal coordinate pairs.
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <MapContainer
-            // 🔑 Stable key so the map instance survives filter changes —
-            // `mappableAssets.length` as key was forcing a full remount,
-            // which reset the zoom/pan and made the map "jump" every time
-            // a tenant filter or type filter changed. We use
-            // MapAutoFit (below) to programmatically fitBounds when the
-            // marker set actually changes.
-            key="property-map-canvas"
-            center={center}
-            bounds={bounds || undefined}
-            zoom={bounds ? undefined : 11}
-            className="w-full h-full rounded-xl z-0"
-          >
-            <MapClickHandler />
-            <MapAutoFit bounds={bounds} />
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-             {mappableAssets.map((prop) => (
-               <Marker
-                 key={prop.propertyId}
-                 position={[Number(prop.latitude), Number(prop.longitude)]}
-                 icon={coloredMarkerIcon(TYPE_COLORS[prop.propertyTypeDetails?.name] || TYPE_COLORS.Default)}
-                 eventHandlers={{
-                  click: () => {
-                    setSelectedMapMarkerId(prop.propertyId);
-                  }
-                }}
-              >
-                <Popup>
-                  <div className="text-xs w-56">
-                    <div className="font-bold text-slate-100">{prop.completeAddress}</div>
-                    <div className="text-slate-300 mt-0.5">#{prop.propertyId} · {prop.propertyTypeDetails?.name || '—'} · {prop.portfolioZoning || '—'}</div>
-                    <div className="mt-1 flex gap-1.5">
-                      {prop.isForSale && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-900">For Sale</span>}
-                      {prop.isForRent && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-900">For Rent</span>}
-                    </div>
-                    <button
-                      onClick={() => openProperty(prop.propertyId)}
-                      className="mt-1.5 text-blue-400 font-semibold underline"
-                    >
-                      Open asset details →
-                    </button>
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
-          </MapContainer>
-        )}
+        <GooglePropertyMap
+          properties={mappableAssets}
+          selectedPropertyId={selectedMapMarkerId}
+          onSelectProperty={openProperty}
+          onMapClick={handleMapClick}
+          className="h-full"
+        />
       </div>
 
       {/* 🏗️ ADD PROPERTY MODAL */}
@@ -491,17 +389,14 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
             {saveSuccess && <div className="mb-3 p-2 bg-emerald-950/30 border border-emerald-900 rounded-lg text-emerald-300 text-xs">Property created successfully!</div>}
 
             <form onSubmit={handleSaveProperty} className="grid grid-cols-2 gap-3">
-<GoogleAddressPicker onSelect={address => setPropertyForm(previous => ({ ...previous, ...address }))} />
-              <div className="col-span-2">
-                <label className="block text-[10px] text-slate-400 uppercase mb-1">Complete Address *</label>
-                <input
-                  type="text" required
-                  value={propertyForm.completeAddress}
-                  onChange={(e) => setPropertyForm(previous => ({ ...previous, completeAddress: e.target.value, latitude: '', longitude: '' }))}
-                  placeholder="123 Main Street, City, Country"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
-                />
-              </div>
+              <GooglePropertyMapPicker
+                address={propertyForm.completeAddress}
+                latitude={propertyForm.latitude}
+                longitude={propertyForm.longitude}
+                onChange={handlePropertyLocationChange}
+                required
+                height={300}
+              />
 
               <div>
                 <label className="block text-[10px] text-slate-400 uppercase mb-1">Erf / Spatial Size</label>

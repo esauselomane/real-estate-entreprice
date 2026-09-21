@@ -1,6 +1,4 @@
 using System.Data;
-using System.Net;
-using System.Net.Mail;
 using Identity.Microservice.Data;
 using Identity.Microservice.Models;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +23,7 @@ public sealed class BillingNotificationWorker(IServiceScopeFactory scopes, IConf
     {
         using var scope = scopes.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var emailSender = scope.ServiceProvider.GetRequiredService<IBillingNotificationEmailSender>();
         await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         await database.Database.ExecuteSqlRawAsync("DECLARE @result int; EXEC @result = sp_getapplock @Resource='billing-notifications', @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=1000; IF @result < 0 THROW 50001, 'Notifications busy', 1;", cancellationToken);
         var now = DateTime.UtcNow;
@@ -37,20 +36,17 @@ public sealed class BillingNotificationWorker(IServiceScopeFactory scopes, IConf
                 database.BillingNotifications.Add(new BillingNotification { EventKey = key, Recipient = tenant.ContactEmail, Template = "trial-ending" });
         }
         await database.SaveChangesAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(configuration["Email:Host"]))
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
         var pending = await database.BillingNotifications.Where(item => item.SentAt == null && item.Attempts < 5 && (item.NextAttemptAt == null || item.NextAttemptAt <= now)).Take(20).ToListAsync(cancellationToken);
         foreach (var item in pending)
         {
-            if (string.IsNullOrWhiteSpace(configuration["Email:Host"])) break;
             try
             {
-                var content = new Shared.Presentation.Email.EmailContent("Biscove Real Estate Tech", BillingEmailTemplates.Subject(item.Template), "Hello,", BillingEmailTemplates.Body(item.Template), UseSystemLogo: true);
-                using var message = Shared.Presentation.Email.EmailLayout.CreateMessage(configuration["Email:FromAddress"]!, item.Recipient, content);
-                using var client = new SmtpClient(configuration["Email:Host"], configuration.GetValue("Email:Port", 587))
-                {
-                    EnableSsl = configuration.GetValue("Email:EnableSsl", true),
-                    Credentials = new NetworkCredential(configuration["Email:Username"], configuration["Email:Password"])
-                };
-                await client.SendMailAsync(message, cancellationToken);
+                await emailSender.SendAsync(item.Recipient, item.Template, cancellationToken);
                 item.SentAt = now;
                 item.Error = null;
             }

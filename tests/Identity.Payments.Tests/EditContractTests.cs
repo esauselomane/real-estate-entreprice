@@ -19,6 +19,13 @@ public sealed class EditContractTests
     }
 
     [Fact]
+    public void ContactCreationAcceptsContactTypeNames()
+    {
+        var request = JsonSerializer.Deserialize<Contact>("""{"fullName":"Test","contactType":"Seller"}""", Options);
+        Assert.Equal(ContactType.Seller, request!.ContactType);
+    }
+
+    [Fact]
     public void ContactUpdateAcceptsMultipleTypesWithoutTenantOrNavigationData()
     {
         var request = JsonSerializer.Deserialize<UpdateContactRequest>("""{"fullName":"Test contact","contactType":"Buyer,Seller"}""", Options);

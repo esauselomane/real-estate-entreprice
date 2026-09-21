@@ -58,7 +58,7 @@
       ]
     },
     {
-      "DownstreamPathTemplate": "/system/{everything}",
+      "DownstreamPathTemplate": "/api/system/{everything}",
       "DownstreamScheme": "https",
       "DownstreamHostAndPorts": [
         {

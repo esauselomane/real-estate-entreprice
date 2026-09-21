@@ -1,16 +1,32 @@
-import GoogleAddressPicker from './maps/GoogleAddressPicker.jsx';
+import GooglePropertyMapPicker from './maps/GooglePropertyMapPicker.jsx';
 import { useState, useEffect, useCallback } from 'react';
 import { MapPin, X, SlidersHorizontal, Building2, Loader2, Pencil } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
-import { usePermission } from '../contexts/PermissionContext.jsx';
 import Can from '../components/Can.jsx';
 import Pagination from '../components/Pagination.jsx';
 
-const PAGE_SIZE = 20;
 const LOAD_ALL_PAGE_SIZE = 100000;
 
+function hasValidCoordinates(latitude, longitude) {
+  if (latitude == null || longitude == null || String(latitude).trim() === '' || String(longitude).trim() === '') {
+    return false;
+  }
+
+  const numericLatitude = Number(latitude);
+  const numericLongitude = Number(longitude);
+  return Number.isFinite(numericLatitude) && Number.isFinite(numericLongitude) &&
+    Math.abs(numericLatitude) <= 90 && Math.abs(numericLongitude) <= 180;
+}
+
+function getListingFlags(marketClass) {
+  const normalizedMarketClass = String(marketClass || '').toLowerCase();
+  return {
+    isForSale: normalizedMarketClass === 'sale' || normalizedMarketClass === 'both',
+    isForRent: normalizedMarketClass === 'rent' || normalizedMarketClass === 'rental' || normalizedMarketClass === 'both'
+  };
+}
+
 export default function PropertySearch({ onSelectProperty }) {
-  const { hasPermission } = usePermission();
   // Search parameters states
   const [selectedLocations, setSelectedLocations] = useState([]);
   const [locationInput, setLocationInput] = useState('');
@@ -26,8 +42,9 @@ export default function PropertySearch({ onSelectProperty }) {
   const [totalCount, setTotalCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [editingProperty, setEditingProperty] = useState(null);
-  const [propertyForm, setPropertyForm] = useState({ completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold', portfolioZoning: '', marketClass: 'Sale', propertyTypeId: '', valuationPrice: '', salePrice: '', latitude: '', longitude: '', linkedOwnerId: '', soleMandate: false, soleMandateStart: '', soleMandateEnd: '' });
-  const criteriaKey = `${selectedLocations.join('|')}::${propertyType}::${minSize}::${maxSize}::${listingType}`;
+  const [editErrorMessage, setEditErrorMessage] = useState('');
+  const [hasSelectedGoogleLocation, setHasSelectedGoogleLocation] = useState(false);
+  const [propertyForm, setPropertyForm] = useState({ completeAddress: '', erfSpatialSize: '', titleDeedType: 'Freehold', portfolioZoning: '', marketClass: 'Sale', propertyTypeId: '', valuationPrice: '', salePrice: '', latitude: '', longitude: '', linkedOwnerId: '', isForSale: false, isForRent: false, soleMandate: false, soleMandateStart: '', soleMandateEnd: '' });
 
   // 📜 Single-shot fetch — every filter change requests page 1 with a
   // deliberately huge pageSize so the full set returns in one round-trip.
@@ -79,6 +96,16 @@ export default function PropertySearch({ onSelectProperty }) {
     setSelectedLocations(selectedLocations.filter(loc => loc !== locToRemove));
   };
 
+  const handleEditLocationChange = (location) => {
+    setPropertyForm((previous) => ({ ...previous, ...location }));
+    setHasSelectedGoogleLocation(hasValidCoordinates(location.latitude, location.longitude));
+  };
+
+  const handleEditCoordinateChange = (field, value) => {
+    setPropertyForm((previous) => ({ ...previous, [field]: value }));
+    setHasSelectedGoogleLocation(false);
+  };
+
   const openEditProperty = async (propertyId) => {
     try {
       const prop = await propertyService.getPropertyById(propertyId);
@@ -93,13 +120,17 @@ export default function PropertySearch({ onSelectProperty }) {
         propertyTypeId: String(prop.propertyTypeId || ''),
         valuationPrice: String(prop.valuationPrice || ''),
         salePrice: String(prop.salePrice || ''),
-        latitude: String(prop.latitude || ''),
-        longitude: String(prop.longitude || ''),
+        latitude: String(prop.latitude ?? ''),
+        longitude: String(prop.longitude ?? ''),
         linkedOwnerId: prop.linkedOwnerId || '',
+        isForSale: !!prop.isForSale,
+        isForRent: !!prop.isForRent,
         soleMandate: !!mandate,
         soleMandateStart: mandate ? mandate.startDate?.slice(0, 10) : '',
         soleMandateEnd: mandate ? mandate.endDate?.slice(0, 10) : ''
       });
+      setHasSelectedGoogleLocation(hasValidCoordinates(prop.latitude, prop.longitude));
+      setEditErrorMessage('');
 
     } catch (err) { alert(err || 'Failed to load property.'); }
   };
@@ -107,15 +138,26 @@ export default function PropertySearch({ onSelectProperty }) {
   const handleUpdateProperty = async (e) => {
     e.preventDefault();
     if (!editingProperty) return;
+
+    const latitude = Number(propertyForm.latitude);
+    const longitude = Number(propertyForm.longitude);
+    if (!propertyForm.completeAddress.trim() || !hasSelectedGoogleLocation || !hasValidCoordinates(latitude, longitude)) {
+      setEditErrorMessage('Select a Google address or drag the pin on the map before saving. Manual coordinates are not accepted.');
+      return;
+    }
+
+    const listingFlags = getListingFlags(propertyForm.marketClass);
     try {
       await propertyService.updateProperty(editingProperty.propertyId, {
         ...propertyForm,
-        propertyTypeId: parseInt(propertyForm.propertyTypeId) || 0,
-        valuationPrice: parseFloat(propertyForm.valuationPrice) || 0,
-        salePrice: parseFloat(propertyForm.salePrice) || 0,
-        latitude: parseFloat(propertyForm.latitude) || 0,
-        longitude: parseFloat(propertyForm.longitude) || 0,
-        linkedOwnerId: propertyForm.linkedOwnerId
+        propertyTypeId: Number(propertyForm.propertyTypeId) || 0,
+        valuationPrice: Number(propertyForm.valuationPrice) || 0,
+        salePrice: propertyForm.salePrice === '' ? null : Number(propertyForm.salePrice),
+        latitude,
+        longitude,
+        linkedOwnerId: propertyForm.linkedOwnerId,
+        isForSale: listingFlags.isForSale,
+        isForRent: listingFlags.isForRent
       });
       // 📜 Sole-mandate: separate from the property PUT. Ticked = open a
       // new active mandate (server auto-closes any previous one). Unticked
@@ -140,10 +182,10 @@ export default function PropertySearch({ onSelectProperty }) {
         }
       }
       setEditingProperty(null);
-
-
-
-    } catch (err) { alert(err || 'Failed to update property.'); }
+      setEditErrorMessage('');
+    } catch (err) {
+      setEditErrorMessage(err?.message || err || 'Failed to update property.');
+    }
   };
 
   return (
@@ -360,9 +402,20 @@ export default function PropertySearch({ onSelectProperty }) {
               <button type="button" onClick={() => { setEditingProperty(null);   }} className="text-slate-400 hover:text-white"><X size={14} /></button>
             </div>
             <form onSubmit={handleUpdateProperty} className="space-y-3">
-<GoogleAddressPicker onSelect={address => setPropertyForm(previous => ({ ...previous, ...address }))} />
+              {editErrorMessage && (
+                <div className="p-2 bg-red-950/30 border border-red-900 rounded-lg text-red-300 text-xs">
+                  {editErrorMessage}
+                </div>
+              )}
+              <GooglePropertyMapPicker
+                address={propertyForm.completeAddress}
+                latitude={propertyForm.latitude}
+                longitude={propertyForm.longitude}
+                onChange={handleEditLocationChange}
+                required
+                height={260}
+              />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-1 md:col-span-2"><label className="text-[10px] text-slate-400 uppercase">Complete Address</label><input required type="text" value={propertyForm.completeAddress} onChange={(e) => setPropertyForm({ ...propertyForm, completeAddress: e.target.value, latitude: '', longitude: '' })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">ERF Size</label><input type="text" value={propertyForm.erfSpatialSize} onChange={(e) => setPropertyForm({ ...propertyForm, erfSpatialSize: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Title Deed Type</label><select value={propertyForm.titleDeedType} onChange={(e) => setPropertyForm({ ...propertyForm, titleDeedType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"><option>Freehold</option><option>Sectional Title</option><option>Leasehold</option></select></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Zoning</label><input type="text" value={propertyForm.portfolioZoning} onChange={(e) => setPropertyForm({ ...propertyForm, portfolioZoning: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
@@ -370,8 +423,8 @@ export default function PropertySearch({ onSelectProperty }) {
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Property Type ID</label><input type="number" value={propertyForm.propertyTypeId} onChange={(e) => setPropertyForm({ ...propertyForm, propertyTypeId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Valuation Price (R)</label><input type="number" value={propertyForm.valuationPrice} onChange={(e) => setPropertyForm({ ...propertyForm, valuationPrice: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Sale Price (R)</label><input type="number" value={propertyForm.salePrice} onChange={(e) => setPropertyForm({ ...propertyForm, salePrice: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Latitude</label><input type="number" step="any" value={propertyForm.latitude} onChange={(e) => setPropertyForm({ ...propertyForm, latitude: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
-                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Longitude</label><input type="number" step="any" value={propertyForm.longitude} onChange={(e) => setPropertyForm({ ...propertyForm, longitude: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Latitude</label><input type="number" step="any" value={propertyForm.latitude} onChange={(e) => handleEditCoordinateChange('latitude', e.target.value)} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
+                <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Longitude</label><input type="number" step="any" value={propertyForm.longitude} onChange={(e) => handleEditCoordinateChange('longitude', e.target.value)} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1 md:col-span-2"><label className="text-[10px] text-slate-400 uppercase">Linked Owner ID</label><input type="text" value={propertyForm.linkedOwnerId} onChange={(e) => setPropertyForm({ ...propertyForm, linkedOwnerId: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
               </div>
 

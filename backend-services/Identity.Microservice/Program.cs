@@ -57,6 +57,7 @@ builder.Services.Configure<PaymentSettings>(builder.Configuration.GetSection("Pa
 builder.Services.AddScoped<IPaymentGatewayFactory, PaymentGatewayFactory>();
 builder.Services.AddScoped<PaymentOrchestrationService>();
 builder.Services.AddHostedService<BillingNotificationWorker>();
+builder.Services.AddScoped<IBillingNotificationEmailSender, BillingNotificationEmailSender>();
 
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
