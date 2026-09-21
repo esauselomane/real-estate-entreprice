@@ -30,8 +30,8 @@ public sealed class EmailService(IOptions<EmailSettings> options, ILogger<EmailS
     {
         if (string.IsNullOrWhiteSpace(settings.Host))
         {
-            logger.LogInformation("Email queued for simulation: {Subject}. SMTP is not configured.", content.Subject);
-            return;
+            logger.LogWarning("System email delivery failed for {Subject}: SMTP is not configured.", content.Subject);
+            throw new InvalidOperationException("SMTP is not configured.");
         }
         using var message = EmailLayout.CreateMessage(settings.FromAddress, recipient, content);
         if (!string.IsNullOrWhiteSpace(settings.SupportEmail)) message.ReplyToList.Add(new MailAddress(settings.SupportEmail));
@@ -43,6 +43,10 @@ public sealed class EmailService(IOptions<EmailSettings> options, ILogger<EmailS
             Credentials = new NetworkCredential(settings.Username, settings.Password)
         };
         try { await client.SendMailAsync(message); }
-        catch (Exception exception) { logger.LogError(exception, "System email delivery failed for {Subject}", content.Subject); }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "System email delivery failed for {Subject}", content.Subject);
+            throw;
+        }
     }
 }

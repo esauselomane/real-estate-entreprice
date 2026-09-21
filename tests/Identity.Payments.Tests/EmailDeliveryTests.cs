@@ -14,6 +14,15 @@ namespace Identity.Payments.Tests;
 public sealed class EmailDeliveryTests
 {
     [Fact]
+    public async Task EmailDeliveryFailsWhenSmtpIsNotConfigured()
+    {
+        var service = new EmailService(Options.Create(new EmailSettings()), NullLogger<EmailService>.Instance);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.SendEmailAsync("recipient@example.com", "Subject", "<p>Body</p>"));
+    }
+
+    [Fact]
     public async Task PasswordSetupEmailIsDeliveredThroughConfiguredSmtp()
     {
         await using var smtp = new LocalSmtpServer();

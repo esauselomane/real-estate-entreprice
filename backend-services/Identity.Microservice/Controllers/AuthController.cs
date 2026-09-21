@@ -20,18 +20,20 @@ namespace Identity.Microservice.Controllers
         private readonly ITenantRepository _tenantRepository;
         private readonly ISystemRoleRepository _systemRoleRepository;
         private readonly IUserAccessClaimRepository _userAccessClaimRepository;
+        private readonly IRepository<LeadCaptureRequest> _leadCaptureRepository;
         private readonly TokenService _tokenService;
         private readonly ILogger<AuthController> _logger;
         private readonly IEmailService _emailService;
         private readonly IConfiguration _configuration;
 
-        public AuthController(IdentityDbContext dbContext, TokenService tokenService, ILogger<AuthController> logger, IEmailService emailService, IConfiguration configuration, IUserRepository userRepository, ITenantRepository tenantRepository, ISystemRoleRepository systemRoleRepository, IUserAccessClaimRepository userAccessClaimRepository)
+        public AuthController(IdentityDbContext dbContext, TokenService tokenService, ILogger<AuthController> logger, IEmailService emailService, IConfiguration configuration, IUserRepository userRepository, ITenantRepository tenantRepository, ISystemRoleRepository systemRoleRepository, IUserAccessClaimRepository userAccessClaimRepository, IRepository<LeadCaptureRequest> leadCaptureRepository)
         {
             _dbContext = dbContext;
             _userRepository = userRepository;
             _tenantRepository = tenantRepository;
             _systemRoleRepository = systemRoleRepository;
             _userAccessClaimRepository = userAccessClaimRepository;
+            _leadCaptureRepository = leadCaptureRepository;
             _tokenService = tokenService;
             _logger = logger;
             _emailService = emailService;
@@ -408,74 +410,112 @@ namespace Identity.Microservice.Controllers
                 return BadRequest(new { message = "An account with this email already exists. Please log in." });
             }
 
-            // Generate a unique tenant ID for the new trial agency
-            var tenantId = "TEN-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
-            var activationToken = Guid.NewGuid().ToString("N");
-            var trialStartDate = DateTime.UtcNow;
-            var trialEndDate = trialStartDate.AddDays(14);
-
-            // Create TenantAgency record (Identity DB)
-            var tenant = new TenantAgency
+            var lead = new LeadCaptureRequest
             {
-                TenantId = tenantId,
-                AgencyName = request.AgencyName,
-                ContactEmail = request.AdminEmail,
-                HeadquartersAddress = request.HeadquartersAddress,
-                BrokerageLicense = request.BrokerageLicense,
-                OperationalStatus = "TrialPending",
-                IsTrial = true,
-                TrialExtensionAppliedAt = DateTime.UtcNow,
-                TrialStartDate = trialStartDate,
-                TrialEndDate = trialEndDate,
-                CreatedAt = DateTime.UtcNow
-            };
-            _tenantRepository.Add(tenant);
-
-            // Create the pending admin user account
-            var adminUser = new UserAccount
-            {
-                UserId = "USR-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper(),
-                TenantId = tenantId,
                 FullName = request.AdminFullName,
                 Email = request.AdminEmail,
-                PasswordHash = string.Empty, // No password until activation
-                SystemRole = "AgencyAdmin", // Trial registration creates a tenant-scoped administrator
-                AccountStatus = "PendingActivation", // Cannot log in until password is set
-                IsTrial = true,
-                TrialStartDate = trialStartDate,
-                TrialEndDate = trialEndDate,
-                LicenseNumber = request.BrokerageLicense,
-                ActivationToken = activationToken,
-                ActivationTokenExpiry = trialStartDate.AddHours(48),
-                CreatedAt = DateTime.UtcNow
+                Phone = request.AdminPhone,
+                Company = request.AgencyName,
+                UserType = LeadUserType.Agency,
+                Source = "onboarding",
+                Message = "Trial agency onboarding request",
+                Status = LeadStatus.New
             };
-            _userRepository.Add(adminUser);
-            _userAccessClaimRepository.Add(new UserAccessClaim
+            _leadCaptureRepository.Add(lead);
+            try
             {
-                UserId = adminUser.UserId,
-                CanDeleteProperties = false,
-                CanExportFinancialReports = true,
-                CanBypassValuationStages = false
-            });
-
-            await _dbContext.SaveChangesAsync();
-
-            _logger.LogInformation("Trial onboarding complete: TenantId={TenantId} UserId={UserId} Email={Email} TrialEnds={TrialEndDate}",
-                tenantId, adminUser.UserId, request.AdminEmail, trialEndDate);
-
-            // Send activation email with secure link
-            var frontendUrl = _configuration.GetSection("Urls:FrontendClient").Get<string>() ?? $"{Request.Scheme}://{Request.Host}";
-            var activationLink = $"{frontendUrl}/set-password?token={activationToken}";
-            await _emailService.SendPasswordSetupEmailAsync(
-                request.AdminEmail, request.AdminFullName, activationLink, request.AgencyName);
-
-            return Ok(new
+                await _dbContext.SaveChangesAsync();
+            }
+            catch (Exception exception)
             {
-                message = "Trial agency created. Check your email to set your password and activate your account.",
-                tenantId = tenantId,
-                trialEndDate = trialEndDate,
-                adminEmail = request.AdminEmail
-            });
+                _logger.LogError(exception, "Trial onboarding lead could not be saved for email: {Email}", request.AdminEmail);
+                return StatusCode(502, new { message = "Your details could not be saved. Please try again." });
+            }
+            _logger.LogInformation("Trial onboarding lead saved: LeadId={LeadId} Email={Email}", lead.Id, request.AdminEmail);
+
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            try
+            {
+                // Generate a unique tenant ID for the new trial agency
+                var tenantId = "TEN-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
+                var activationToken = Guid.NewGuid().ToString("N");
+                var trialStartDate = DateTime.UtcNow;
+                var trialEndDate = trialStartDate.AddDays(14);
+
+                // Create TenantAgency record (Identity DB)
+                var tenant = new TenantAgency
+                {
+                    TenantId = tenantId,
+                    AgencyName = request.AgencyName,
+                    ContactEmail = request.AdminEmail,
+                    HeadquartersAddress = request.HeadquartersAddress,
+                    BrokerageLicense = request.BrokerageLicense,
+                    OperationalStatus = "TrialPending",
+                    IsTrial = true,
+                    TrialExtensionAppliedAt = DateTime.UtcNow,
+                    TrialStartDate = trialStartDate,
+                    TrialEndDate = trialEndDate,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _tenantRepository.Add(tenant);
+
+                // Create the pending admin user account
+                var adminUser = new UserAccount
+                {
+                    UserId = "USR-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper(),
+                    TenantId = tenantId,
+                    FullName = request.AdminFullName,
+                    Email = request.AdminEmail,
+                    PasswordHash = string.Empty, // No password until activation
+                    SystemRole = "AgencyAdmin", // Trial registration creates a tenant-scoped administrator
+                    AccountStatus = "PendingActivation", // Cannot log in until password is set
+                    IsTrial = true,
+                    TrialStartDate = trialStartDate,
+                    TrialEndDate = trialEndDate,
+                    LicenseNumber = request.BrokerageLicense,
+                    ActivationToken = activationToken,
+                    ActivationTokenExpiry = trialStartDate.AddHours(48),
+                    CreatedAt = DateTime.UtcNow
+                };
+                _userRepository.Add(adminUser);
+                _userAccessClaimRepository.Add(new UserAccessClaim
+                {
+                    UserId = adminUser.UserId,
+                    CanDeleteProperties = false,
+                    CanExportFinancialReports = true,
+                    CanBypassValuationStages = false
+                });
+
+                await _dbContext.SaveChangesAsync();
+
+                // Send activation email with secure link
+                var frontendUrl = _configuration.GetSection("Urls:FrontendClient").Get<string>() ?? $"{Request.Scheme}://{Request.Host}";
+                var activationLink = $"{frontendUrl}/set-password?token={activationToken}";
+                await _emailService.SendPasswordSetupEmailAsync(
+                    request.AdminEmail, request.AdminFullName, activationLink, request.AgencyName);
+
+                await transaction.CommitAsync();
+                _logger.LogInformation("Trial onboarding complete: TenantId={TenantId} UserId={UserId} Email={Email} TrialEnds={TrialEndDate}",
+                    tenantId, adminUser.UserId, request.AdminEmail, trialEndDate);
+
+                return Ok(new
+                {
+                    message = "Trial agency created. Check your email to set your password and activate your account.",
+                    tenantId = tenantId,
+                    trialEndDate = trialEndDate,
+                    adminEmail = request.AdminEmail
+                });
+            }
+            catch (Exception exception)
+            {
+                await transaction.RollbackAsync();
+                _logger.LogError(exception, "Trial onboarding failed for email: {Email} Agency: {AgencyName}",
+                    request.AdminEmail, request.AgencyName);
+                return StatusCode(502, new
+                {
+                    message = "Trial agency could not be activated because the confirmation email could not be sent. Please try again."
+                });
+            }
         }
 
          // --- 🔐 ENDPOINT: SET PASSWORD via activation token — activates user and agency ---
