@@ -225,6 +225,15 @@ namespace CRM.Microservice.Controllers
                 var areaIdStrings = request.AreaIds.Select(id => id.ToString()).ToList();
                 query = query.Where(c => c.AreaInterestIds != null && areaIdStrings.Any(s => c.AreaInterestIds.Contains(s)));
             }
+            // 📵 Free-text search across name, email, and phone — case-insensitive.
+            if (!string.IsNullOrWhiteSpace(request.Search))
+            {
+                var searchTerm = request.Search.Trim().ToLower();
+                query = query.Where(c =>
+                    c.FullName.ToLower().Contains(searchTerm) ||
+                    c.EmailAddress.ToLower().Contains(searchTerm) ||
+                    c.PhoneNumber.ToLower().Contains(searchTerm));
+            }
             var ordered = query.OrderBy(c => c.FullName);
             var aggregates = new Dictionary<string, Dictionary<string, int>>(StringComparer.OrdinalIgnoreCase)
             {

@@ -11,5 +11,12 @@ namespace CRM.Microservice.DTOs
         public decimal? BudgetMax { get; set; }
         public List<int>? AreaIds { get; set; }
         public string? Area { get; set; }
+
+        /// <summary>
+        /// Free-text search applied across a contact's name, email, and phone
+        /// (case-insensitive substring). Powers the ContactPicker / buyer-seller
+        /// lookup on the Deal add/edit form.
+        /// </summary>
+        public string? Search { get; set; }
     }
 }
