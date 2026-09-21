@@ -3,9 +3,8 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const IDENTITY_API = process.env.LEAD_API_URL
-  ? process.env.LEAD_API_URL.replace("/api/system/lead-requests", "/api/auth")
-  : "https://api.biscovetech.com/gateway/auth";
+const IDENTITY_API = process.env.ONBOARDING_API_URL
+  ?? "https://api.biscovetech.com/gateway/auth";
 
 export async function POST(request: Request) {
   try {

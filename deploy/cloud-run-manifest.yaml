@@ -325,7 +325,9 @@ spec:
             - name: NEXT_PUBLIC_SITE_URL
               value: "https://www.biscovetech.com"
             - name: LEAD_API_URL
-              value: "https://identity-service-xxx.a.run.app"
+              value: "https://api.biscovetech.com/gateway/system/lead-requests"
+            - name: ONBOARDING_API_URL
+              value: "https://api.biscovetech.com/gateway/auth"
 ---
 apiVersion: serving.knative.dev/v1
 kind: Service

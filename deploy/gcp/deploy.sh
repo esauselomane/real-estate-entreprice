@@ -400,6 +400,9 @@ if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
   APP_PUBLIC_URL="${GATEWAY_URL}"
   SITE_PUBLIC_URL="${GATEWAY_URL}"
 fi
+CLIENT_GATEWAY_PUBLIC_URL="${GATEWAY_PUBLIC_URL%/gateway}"
+LEAD_API_URL="${FRONTEND_API_URL%/}/system/lead-requests"
+ONBOARDING_API_URL="${FRONTEND_API_URL%/}/auth"
 
 log "Building frontend images with public API URL ${FRONTEND_API_URL}..."
 FRONTEND_BUILD_ARGS=(--build-arg "VITE_API_BASE_URL=${FRONTEND_API_URL}")
@@ -408,7 +411,7 @@ if [ -n "${VITE_GOOGLE_MAPS_API_KEY}" ]; then
 fi
 build_and_push_image frontend-client frontend-client/Dockerfile "${FRONTEND_BUILD_ARGS[@]}"
 build_and_push_image client-facing client-facing-app/Dockerfile \
-  --build-arg "NEXT_PUBLIC_GATEWAY_URL=${FRONTEND_API_URL}" \
+  --build-arg "NEXT_PUBLIC_GATEWAY_URL=${CLIENT_GATEWAY_PUBLIC_URL}" \
   --build-arg "NEXT_PUBLIC_APP_URL=${APP_PUBLIC_URL}" \
   --build-arg "NEXT_PUBLIC_SITE_URL=${SITE_PUBLIC_URL}"
 
@@ -430,8 +433,9 @@ gcloud run deploy frontend-client \
 log "Deploying client-facing..."
 CLIENT_ENV="$(mktemp)"
 append_env_var "${CLIENT_ENV}" NODE_ENV production
-append_env_var "${CLIENT_ENV}" LEAD_API_URL "${IDENTITY_URL}"
-append_env_var "${CLIENT_ENV}" NEXT_PUBLIC_GATEWAY_URL "${FRONTEND_API_URL}"
+append_env_var "${CLIENT_ENV}" LEAD_API_URL "${LEAD_API_URL}"
+append_env_var "${CLIENT_ENV}" ONBOARDING_API_URL "${ONBOARDING_API_URL}"
+append_env_var "${CLIENT_ENV}" NEXT_PUBLIC_GATEWAY_URL "${CLIENT_GATEWAY_PUBLIC_URL}"
 append_env_var "${CLIENT_ENV}" NEXT_PUBLIC_APP_URL "${APP_PUBLIC_URL}"
 append_env_var "${CLIENT_ENV}" NEXT_PUBLIC_SITE_URL "${SITE_PUBLIC_URL}"
 
