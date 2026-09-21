@@ -55,7 +55,7 @@ export default function ContactForm() {
   return (
     <form
       onSubmit={handleSubmit}
-      className="grid gap-4 rounded-2xl border border-slate-200/70 bg-white p-6 shadow-card"
+      className="grid gap-4 rounded-2xl border border-slate-200/70 bg-white p-6 shadow-card [color-scheme:light]"
     >
       {state === "success" && (
         <p className="flex items-center gap-2 rounded-lg bg-emerald-50 p-2 text-sm font-medium text-emerald-800">
@@ -79,7 +79,7 @@ export default function ContactForm() {
             name="name"
             type="text"
             placeholder="Your full name"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
           />
         </div>
         <div>
@@ -91,7 +91,7 @@ export default function ContactForm() {
             name="email"
             type="email"
             placeholder="you@example.com"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
           />
         </div>
       </div>
@@ -105,7 +105,7 @@ export default function ContactForm() {
             name="phone"
             type="tel"
             placeholder="+27 82 000 0000"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
           />
         </div>
         <div>
@@ -116,7 +116,7 @@ export default function ContactForm() {
             name="company"
             type="text"
             placeholder="Agency or company name"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
           />
         </div>
       </div>
@@ -129,7 +129,7 @@ export default function ContactForm() {
           <select
             name="userType"
             defaultValue="Individual"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
           >
             <option value="Individual">Individual / Property owner</option>
             <option value="Agency">Agency / Brokerage</option>
@@ -142,7 +142,7 @@ export default function ContactForm() {
           <select
             name="package"
             defaultValue=""
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
           >
             <option value="">Select a package</option>
             <option value="SMEAgency">SME Agency — R299/mo</option>
@@ -172,7 +172,7 @@ export default function ContactForm() {
           name="message"
           rows={4}
           placeholder="Tell us about your needs..."
-          className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
+          className="w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
         />
       </div>
 
