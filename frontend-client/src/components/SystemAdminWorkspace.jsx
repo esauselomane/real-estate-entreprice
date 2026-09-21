@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Building2, UserPlus, Users, Pencil, Trash2, ShieldCheck, Tag, ChevronRight, X, Settings, CircleX, Mail, RefreshCw, AlertCircle, BarChart3, TrendingUp, Banknote, Trophy, Upload } from 'lucide-react';
+import { Building2, UserPlus, Users, Pencil, Trash2, ShieldCheck, Tag, Package, ChevronRight, X, Settings, CircleX, Mail, RefreshCw, AlertCircle, BarChart3, TrendingUp, Banknote, Trophy, Upload } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
 import { crmService } from '../services/crmService.js';
 import { systemRolesService } from '../services/systemRolesService.js';
@@ -15,10 +15,10 @@ import AmenityTypesWorkspace from './AmenityTypesWorkspace.jsx';
 
 export default function SystemAdminWorkspace({ defaultTab }) {
   const { userRole: currentUserRole, activeProfile } = useAuth();
-  const canManageSubscriptionPackages = activeProfile?.originalRole === 'SuperAdmin';
+  const isSuperAdmin = currentUserRole === 'PlatformAdmin';
+  const canManageSubscriptionPackages = isSuperAdmin;
   const { hasPermission } = usePermission();
   const { activeTenantId, activeAgency, isAllTenants } = useTenant();
-  const isSuperAdmin = currentUserRole === 'PlatformAdmin';
   const canManageAgencies = isSuperAdmin || currentUserRole === 'AgencyAdmin';
   const [activeTab, setActiveTab] = useState(defaultTab || (isSuperAdmin ? 'agencies' : 'users'));
 
@@ -329,10 +329,19 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     <div className="space-y-6 animate-fade-in">
       {error && <div className="p-3 rounded-xl border border-red-900 bg-red-950/40 text-red-300 text-xs">{error}</div>}
 
-      {canManageSubscriptionPackages && <button onClick={() => setActiveTab('subscription-packages')} className="px-4 py-2 rounded-xl bg-blue-600 text-white">Subscription packages</button>}
-      {activeTab === 'subscription-packages' && canManageSubscriptionPackages && <SubscriptionPackagesAdmin />}
       {/* 🎛️ DRILL-NAVIGATION MENU */}
       <div className="flex gap-2 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl shadow-xl overflow-x-auto">
+        {canManageSubscriptionPackages && (
+          <button
+            onClick={() => setActiveTab('subscription-packages')}
+            type="button"
+            className={`text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'subscription-packages' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <Package size={12} className="inline mr-1.5" /> Subscription packages
+          </button>
+        )}
         {canManageAgencies && (
         <button
           onClick={() => setActiveTab('agencies')}
@@ -389,6 +398,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
             </Can>
           )}
       </div>
+
+      {activeTab === 'subscription-packages' && canManageSubscriptionPackages && <SubscriptionPackagesAdmin />}
 
       {activeTenantId && (
         <div className="text-[11px] text-slate-300 bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 flex items-center gap-2">

@@ -77,11 +77,11 @@ public class PresentationAndReportingTests
     }
 
     [Fact]
-    public void PackageManagementRequiresExactSuperAdminRole()
+    public void PackageManagementAllowsCanonicalAndLegacySuperAdminRoles()
     {
         var policy = Attribute.GetCustomAttribute(typeof(Identity.Microservice.Controllers.PricingPackagesController),
             typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute)) as Microsoft.AspNetCore.Authorization.AuthorizeAttribute;
-        Assert.Equal("SuperAdmin", policy?.Roles);
+        Assert.Equal("SuperAdmin,PlatformAdmin", policy?.Roles);
     }
 
     [Fact]

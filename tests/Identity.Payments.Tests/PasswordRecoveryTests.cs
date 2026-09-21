@@ -29,10 +29,15 @@ public sealed class PasswordRecoveryTests
         await service.RequestAsync("unknown@example.com");
         Assert.Empty(email.Body);
         await service.RequestAsync(user.Email);
+        Assert.Equal(user.Email, email.Recipient);
+        Assert.Equal("Reset your password", email.Subject);
         var rawToken = Regex.Match(email.Body, "recoveryToken=([A-F0-9]{64})").Groups[1].Value;
         Assert.Equal(64, rawToken.Length);
         Assert.NotEqual(rawToken, (await database.PasswordRecoveryTokens.SingleAsync()).TokenHash);
         Assert.True(await service.ResetAsync(rawToken, "new-password"));
+        Assert.Equal(user.Email, email.Recipient);
+        Assert.Equal("Your password has been reset", email.Subject);
+        Assert.Equal(2, email.SendCount);
         Assert.NotEqual("new-password", user.PasswordHash);
         Assert.True(AccountPasswordHelper.Verify(user, "new-password"));
         Assert.False(AccountPasswordHelper.Verify(user, "old-password"));
@@ -61,12 +66,27 @@ public sealed class PasswordRecoveryTests
 
     private sealed class CapturingEmail : IEmailService
     {
+        public string Recipient { get; private set; } = string.Empty;
+        public string Subject { get; private set; } = string.Empty;
         public string Body { get; private set; } = string.Empty;
+        public int SendCount { get; private set; }
+
         public Task SendEmailAsync(string recipient, string subject, string body)
         {
+            Recipient = recipient;
+            Subject = subject;
             Body = body;
+            SendCount++;
             return Task.CompletedTask;
         }
-        public Task SendPasswordSetupEmailAsync(string recipient, string name, string link, string agency) => Task.CompletedTask;
+
+        public Task SendPasswordSetupEmailAsync(string recipient, string name, string link, string agency)
+        {
+            Recipient = recipient;
+            Subject = "Welcome — set up your account";
+            Body = link;
+            SendCount++;
+            return Task.CompletedTask;
+        }
     }
 }

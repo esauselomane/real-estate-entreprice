@@ -79,7 +79,7 @@ export const bibsyKnowledge: BibsyEntry[] = [
   {
     question: "How do I contact you?",
     answer:
-      "Use the Contact page, or email " + (process.env.NEXT_PUBLIC_CONTACT_EMAIL || "esauselo@gmail.com") + ".",
+      "Use the Contact page, or email " + (process.env.NEXT_PUBLIC_CONTACT_EMAIL || "admin@biscovetech.com") + ".",
     keywords: ["contact", "email", "reach", "support", "hello"],
     apiHint: "none",
   },

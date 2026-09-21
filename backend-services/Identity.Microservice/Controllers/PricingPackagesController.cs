@@ -8,10 +8,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Identity.Microservice.Controllers;
 
-/// <summary>SuperAdmin-only catalogue maintenance; package codes and existing payment agreements remain stable.</summary>
+/// <summary>Platform-administrator-only catalogue maintenance; package codes and existing payment agreements remain stable.</summary>
 [ApiController]
 [Route("api/system/pricing-packages")]
-[Authorize(Roles = "SuperAdmin")]
+[Authorize(Roles = "SuperAdmin,PlatformAdmin")]
 public sealed class PricingPackagesController(IdentityDbContext database) : ControllerBase
 {
     [HttpGet]
