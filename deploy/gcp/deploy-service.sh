@@ -131,6 +131,9 @@ else
   APP_PUBLIC_URL="${FRONTEND_URL}"
   SITE_PUBLIC_URL="${MARKETING_URL}"
 fi
+VITE_GATEWAY_PUBLIC_URL="${GATEWAY_PUBLIC_URL%/}/gateway"
+LEAD_API_URL="${GATEWAY_PUBLIC_URL%/}/gateway/system/lead-requests"
+ONBOARDING_API_URL="${GATEWAY_PUBLIC_URL%/}/gateway/auth"
 
 # Compute specific origins for production to allow credentials (cookies/auth headers)
 # If DOMAIN is set, we must use specific origins because '*' is incompatible with AllowCredentials()
@@ -144,7 +147,7 @@ fi
 case "${SERVICE_NAME}" in
   frontend-client)
     build_and_push_image frontend-client "$(dockerfile_for frontend-client)" \
-      --build-arg "VITE_API_BASE_URL=${GATEWAY_PUBLIC_URL}" \
+      --build-arg "VITE_API_BASE_URL=${VITE_GATEWAY_PUBLIC_URL}" \
       --build-arg "VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY}"
     ;;
   client-facing)
@@ -227,7 +230,8 @@ case "${SERVICE_NAME}" in
   client-facing)
     ENV_FILE="$(mktemp)"
     append_env_var "${ENV_FILE}" NODE_ENV production
-    append_env_var "${ENV_FILE}" LEAD_API_URL "${IDENTITY_URL}"
+    append_env_var "${ENV_FILE}" LEAD_API_URL "${LEAD_API_URL}"
+    append_env_var "${ENV_FILE}" ONBOARDING_API_URL "${ONBOARDING_API_URL}"
     append_env_var "${ENV_FILE}" NEXT_PUBLIC_GATEWAY_URL "${GATEWAY_PUBLIC_URL}"
     append_env_var "${ENV_FILE}" NEXT_PUBLIC_APP_URL "${APP_PUBLIC_URL}"
     append_env_var "${ENV_FILE}" NEXT_PUBLIC_SITE_URL "${SITE_PUBLIC_URL}"
