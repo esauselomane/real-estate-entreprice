@@ -46,6 +46,11 @@ namespace CRM.Microservice.Controllers
         {
         }
 
+        private static string? NormalizeParentAgencyId(string? parentAgencyId)
+        {
+            return string.IsNullOrWhiteSpace(parentAgencyId) ? null : parentAgencyId.Trim();
+        }
+
         [HttpGet("operations")]
         public async Task<IActionResult> GetOperationalRecords([FromQuery] int page = 1, [FromQuery] string? module = null, [FromQuery] int? propertyId = null, [FromQuery] int? propertyUnitId = null, [FromQuery] string? tenantId = null)
         {
@@ -417,6 +422,7 @@ namespace CRM.Microservice.Controllers
         [HttpPost("agencies")]
         public async Task<IActionResult> CreateAgency([FromBody] CreateAgencyRequest request)
         {
+            var parentAgencyId = NormalizeParentAgencyId(request.ParentAgencyId);
             var agency = new AgencyRecord
             {
                 AgencyId = "AG-" + Guid.NewGuid().ToString("N"),
@@ -427,7 +433,7 @@ namespace CRM.Microservice.Controllers
                 ContactEmail = request.ContactEmail,
                 HeadquartersAddress = request.HeadquartersAddress,
                 BrokerageLicense = request.BrokerageLicense,
-                ParentAgencyId = request.ParentAgencyId,
+                ParentAgencyId = parentAgencyId,
                 IsTrial = request.IsTrial,
                 TrialStartDate = request.TrialStartDate,
                 TrialEndDate = request.TrialEndDate
@@ -514,16 +520,21 @@ namespace CRM.Microservice.Controllers
             agency.IsTrial = updatedAgency.IsTrial;
             agency.TrialStartDate = updatedAgency.TrialStartDate;
             agency.TrialEndDate = updatedAgency.TrialEndDate;
-            if (GetCurrentCanonicalRole() == "AgencyAdmin" && updatedAgency.ParentAgencyId != agency.ParentAgencyId)
+            var requestedParentAgencyId = NormalizeParentAgencyId(updatedAgency.ParentAgencyId);
+            if (GetCurrentCanonicalRole() == "AgencyAdmin" && requestedParentAgencyId != agency.ParentAgencyId)
                 return BadRequest(new { message = "Only a platform administrator can change the agency hierarchy." });
-            if (!string.IsNullOrWhiteSpace(updatedAgency.ParentAgencyId))
+            if (requestedParentAgencyId == null)
             {
-                if (updatedAgency.ParentAgencyId == agencyId)
+                agency.ParentAgencyId = null;
+            }
+            else
+            {
+                if (requestedParentAgencyId == agencyId)
                     return BadRequest(new { message = "An agency cannot be its own parent." });
-                var parentExists = await AgencyRepository.Query().AnyAsync(a => a.AgencyId == updatedAgency.ParentAgencyId);
+                var parentExists = await AgencyRepository.Query().AnyAsync(a => a.AgencyId == requestedParentAgencyId);
                 if (!parentExists)
-                    return BadRequest(new { message = $"ParentAgencyId '{updatedAgency.ParentAgencyId}' not found." });
-                agency.ParentAgencyId = updatedAgency.ParentAgencyId;
+                    return BadRequest(new { message = $"ParentAgencyId '{requestedParentAgencyId}' not found." });
+                agency.ParentAgencyId = requestedParentAgencyId;
             }
             await DbContext.SaveChangesAsync();
             return Ok(agency);
