@@ -6,10 +6,12 @@ import { systemRolesService } from '../services/systemRolesService.js';
 import { permissionsService } from '../services/permissionsService.js';
 import { authService } from '../services/authService.js';
 import { leadCaptureService } from '../services/leadCaptureService.js';
+import apiClient from '../services/apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 import { useTenant } from '../contexts/TenantContext.jsx';
 import Can from '../components/Can.jsx';
+import Pagination from '../components/Pagination.jsx';
 import SubscriptionPackagesAdmin from './subscriptions/SubscriptionPackagesAdmin.jsx';
 import AmenityTypesWorkspace from './AmenityTypesWorkspace.jsx';
 
@@ -26,6 +28,10 @@ export default function SystemAdminWorkspace({ defaultTab }) {
   const [agencySearch, setAgencySearch] = useState('');
   const filteredAgencies = agencies.filter(agency => [agency.name, agency.tradingName, agency.agencyId, agency.tenantId, agency.contactEmail].some(value => String(value || '').toLowerCase().includes(agencySearch.trim().toLowerCase())));
   const [systemUsers, setSystemUsers] = useState([]);
+  const [usersPage, setUsersPage] = useState(1);
+  const usersPageSize = 20;
+  const [usersSearch, setUsersSearch] = useState('');
+  const [usersTotal, setUsersTotal] = useState(0);
   const [agencyContacts, setAgencyContacts] = useState({});
   const [roles, setRoles] = useState([]);
   const [allPermissions, setAllPermissions] = useState([]);
@@ -98,12 +104,16 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     catch (err) { console.error('Unable to load permissions:', err); }
   };
 
-  const loadUsers = async () => {
-    try { setSystemUsers(await authService.getUsers() || []); }
-    catch (err) { setError((err && err.message) || 'Unable to load user directory.'); }
+  const loadUsers = async (page = usersPage, search = usersSearch) => {
+    try {
+      const res = await authService.getUsers({ page, pageSize: usersPageSize, search });
+      setSystemUsers((res && res.items) || []);
+      setUsersTotal(res?.totalCount || 0);
+      setUsersPage(res?.page || page);
+    } catch (err) { setError((err && err.message) || 'Unable to load user directory.'); }
   };
 
-  const loadData = async () => { await Promise.all([loadAgencies(), loadBrokers(), loadUsers(), isSuperAdmin && loadRoles(), isSuperAdmin && loadPermissions()]); };
+  const loadData = async () => { await Promise.all([loadAgencies(), loadBrokers(), loadUsers(1, ''), isSuperAdmin && loadRoles(), isSuperAdmin && loadPermissions()]); };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadData(); }, [activeTenantId]);
@@ -606,9 +616,12 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                const targetTenantId = editingUser?.tenantId || newUserTenantId || activeAgency?.tenantId || activeProfile?.tenantId;
                const targetAgency = agencies.find(agency => agency.tenantId === targetTenantId);
                if (!editingUser && userForm.systemRole === 'Broker' && !targetAgency) throw new Error('Select the agency for this broker.');
-               if (editingUser && editingUser.userId) {
-                 await authService.updateUserRole(editingUser.userId, userForm.systemRole);
-               } else {
+                if (editingUser && editingUser.userId) {
+                  await authService.updateUserRole(editingUser.userId, userForm.systemRole);
+                  if (userForm.password) {
+                    await authService.adminResetPassword(editingUser.userId, userForm.password);
+                  }
+                } else {
                   const createdUser = await authService.registerUser({
                    tenantId: targetTenantId,
                    fullName: userForm.fullName,
@@ -646,7 +659,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
             <input value={userForm.fullName} onChange={(e) => setUserForm({ ...userForm, fullName: e.target.value })} placeholder="Full name" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
             <div className="grid grid-cols-2 gap-3">
               <input value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} type="email" placeholder="Email" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
-              <input value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} type="text" placeholder={editingUser ? 'Leave blank to keep' : 'Password'} className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
+              <input value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} type="password" placeholder={editingUser ? 'Leave blank to keep' : 'Password'} autoComplete="new-password" className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />
             </div>
                 {!editingUser && <label className="block text-xs text-slate-400">Agency
                   <select value={newUserTenantId || activeAgency?.tenantId || activeProfile?.tenantId || ''} onChange={event => setNewUserTenantId(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white">
@@ -676,6 +689,13 @@ export default function SystemAdminWorkspace({ defaultTab }) {
           {/* 🕵️ USER ROSTER */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
             <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4"><Users size={14} className="text-violet-500" /> User roster ({currentUserRole === 'PlatformAdmin' ? 'All tenants' : 'Your tenant'})</div>
+            <input
+              type="text"
+              placeholder="Search users..."
+              value={usersSearch}
+              onChange={(e) => { const next = e.target.value; setUsersSearch(next); setUsersPage(1); loadUsers(1, next); }}
+              className="w-full mb-3 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-600"
+            />
             <div className="space-y-3">
               {systemUsers.map((u) => (
                 <div key={u.userId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 flex justify-between items-center">
@@ -720,6 +740,14 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   </div>
                 </div>
               ))}
+            </div>
+            <div className="mt-3">
+              <Pagination
+                page={usersPage}
+                pageSize={usersPageSize}
+                totalCount={usersTotal}
+                onPageChange={(p) => { setUsersPage(p); loadUsers(p, usersSearch); }}
+              />
             </div>
           </div>
         </div>
@@ -967,7 +995,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
              <div className="flex items-center gap-2 text-white font-bold uppercase tracking-[0.2em] text-[10px] mb-4">
                <Upload size={14} className="text-orange-400" /> Import Data
              </div>
-              <p className="text-xs text-slate-500 mb-4">Import properties, units, and contacts from a single Excel file. Imports are processed asynchronously via Kafka and you will be notified when complete.</p>
+               <p className="text-xs text-slate-500 mb-4">Import CRM, Property and Identity seed data from a single Excel workbook. The template contains one sheet per table (Agencies, Brokers, Contacts, Companies, LegalEntities, Leads, Deals, Geography, Properties, Units, PropertyTypes, AmenityTypes, TenantAgencies, UserAccounts). Imports are processed asynchronously via the import queue and you will be notified when complete.</p>
 
               <div className="mb-4">
                 <label className="block text-[10px] uppercase tracking-widest text-slate-500 mb-1 font-bold">Excel File</label>
@@ -977,11 +1005,12 @@ export default function SystemAdminWorkspace({ defaultTab }) {
               <div className="flex gap-2 mb-4">
                 <button type="button" onClick={async () => {
                   try {
-                    const blob = await (await fetch('/api/properties/import/template')).blob();
+                    const response = await apiClient.get('/properties/import/template', { responseType: 'blob' });
+                    const blob = response.data;
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = 'property-import-template.xlsx';
+                    a.download = 'system-data-template.xlsx';
                     a.click();
                     URL.revokeObjectURL(url);
                   } catch { alert('Failed to download template.'); }
@@ -991,18 +1020,12 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                   if (!importFile) return;
                   setImportPolling(true);
                   setImportStatus(null);
-                  try {
-                    const buffer = await importFile.arrayBuffer();
-                    const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
-                    const res = await fetch('/api/properties/import/upload', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ fileName: importFile.name, base64Content: base64 })
-                    });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.message || 'Upload failed');
-                    setImportJobId(data.jobId);
-                  } catch (err) { alert(err.message); setImportPolling(false); }
+                   try {
+                     const buffer = await importFile.arrayBuffer();
+                     const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+                     const response = await apiClient.post('/properties/import/upload', { fileName: importFile.name, base64Content: base64 });
+                     setImportJobId(response.data.jobId);
+                   } catch (err) { alert(err.message); setImportPolling(false); }
                 }} className="px-4 py-2 rounded-xl bg-orange-600 text-white text-xs font-bold hover:bg-orange-500 disabled:opacity-40 cursor-pointer">Upload & Import</button>
               </div>
 

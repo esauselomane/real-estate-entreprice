@@ -48,6 +48,8 @@ namespace Property.Microservice.Services.BackgroundJobs
 
     /// <summary>
     /// Data import job - replaces DataImport Kafka events.
+    /// Drives the unified multi-sheet workbook processor that owns Property tables
+    /// directly and delegates CRM/Identity tables to their batch import endpoints.
     /// </summary>
     public record DataImportJob(
         string JobId,
@@ -55,7 +57,8 @@ namespace Property.Microservice.Services.BackgroundJobs
         string FileName,
         string Base64Content,
         string TenantId,
-        string RequestedBy
+        string RequestedBy,
+        string AuthorizationHeader
     );
 
     /// <summary>

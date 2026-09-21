@@ -106,9 +106,9 @@ export default function BrokerDashboard() {
   // and is linked here via the shared email address.
   const loadUsers = useCallback(async () => {
     try {
-      const users = await authService.getUsers();
+      const userPage = await authService.getUsers({ page: 1, pageSize: 100 });
       const idx = {};
-      (Array.isArray(users) ? users : []).forEach((u) => {
+      (userPage && Array.isArray(userPage.items) ? userPage.items : []).forEach((u) => {
         if (u?.email) idx[String(u.email).toLowerCase()] = u.UserId || u.userId;
       });
       setUserIndex(idx);

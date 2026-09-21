@@ -316,8 +316,13 @@ namespace Identity.Microservice.Controllers
         }
 
         // --- 🏢 ENDPOINT: List user accounts for role assignment (PlatformAdmin: all tenants; AgencyAdmin: own tenant)
+        //   Supports optional server-side pagination (?page=&pageSize=) and a case-insensitive
+        //   substring search (?search=) across name, email, tenant, and system role.
         [HttpGet("users")]
-        public async Task<IActionResult> GetUsers()
+        public async Task<IActionResult> GetUsers(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] string? search = null)
         {
             var callerRole = GetCurrentCanonicalRole();
             var callerUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -334,24 +339,60 @@ namespace Identity.Microservice.Controllers
 
             var callerTenantId = User.FindFirst("TenantId")?.Value;
             if (callerRole == "PlatformAdmin")
-                _logger.LogInformation("GetUsers: listing all tenant users by {CallerUserId}", callerUserId);
+                _logger.LogInformation("GetUsers: listing tenant users by {CallerUserId} (page {Page} size {PageSize} search '{Search}')", callerUserId, page, pageSize, search);
             else
-                _logger.LogInformation("GetUsers: listing tenant {TenantId} users by {CallerUserId}", callerTenantId, callerUserId);
+                _logger.LogInformation("GetUsers: listing tenant {TenantId} users by {CallerUserId} (page {Page} size {PageSize} search '{Search}')", callerTenantId, callerUserId, page, pageSize, search);
 
-            var visibleTenants = await GetAgencySubtreeTenantIdsAsync(callerTenantId);
-            var users = callerRole == "PlatformAdmin"
-                ? await _userRepository.Query().ToListAsync()
-                : await _userRepository.Query().Where(u => visibleTenants.Contains(u.TenantId)).ToListAsync();
+            if (page < 1) page = 1;
+            var effectivePageSize = Math.Clamp(pageSize, 1, 100);
 
-            return Ok(users.Select(u => new
+            // The query is built once and narrowed by tenant scope, then by the optional
+            // search term, before applying a deterministic order + paging window so the
+            // page boundaries stay stable as the roster changes.
+            var query = _userRepository.Query();
+            if (callerRole != "PlatformAdmin")
             {
-                u.UserId,
-                u.FullName,
-                u.Email,
-                u.TenantId,
-                u.SystemRole,
-                u.AccountStatus
-            }));
+                var visibleTenants = await GetAgencySubtreeTenantIdsAsync(callerTenantId);
+                query = query.Where(u => visibleTenants.Contains(u.TenantId));
+            }
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var normalizedSearch = search.Trim();
+                query = query.Where(u =>
+                    u.FullName.Contains(normalizedSearch) ||
+                    u.Email.Contains(normalizedSearch) ||
+                    u.TenantId.Contains(normalizedSearch) ||
+                    u.SystemRole.Contains(normalizedSearch));
+            }
+
+            var totalCount = await query.CountAsync();
+            var users = await query
+                .OrderBy(u => u.UserId)
+                .Skip((page - 1) * effectivePageSize)
+                .Take(effectivePageSize)
+                .ToListAsync();
+
+            var totalPages = (int)Math.Ceiling(totalCount / (double)effectivePageSize);
+
+            return Ok(new
+            {
+                items = users.Select(u => new
+                {
+                    u.UserId,
+                    u.FullName,
+                    u.Email,
+                    u.TenantId,
+                    u.SystemRole,
+                    u.AccountStatus
+                }).ToArray(),
+                totalCount,
+                page,
+                pageSize = effectivePageSize,
+                totalPages,
+                hasPrevious = page > 1,
+                hasNext = page < totalPages
+            });
         }
 
         // --- 🔧 ENDPOINT: Assign / change (add or remove) a role on a user account.
@@ -388,6 +429,51 @@ namespace Identity.Microservice.Controllers
             return Ok(new { message = "User role updated.", userId = target.UserId, systemRole = target.SystemRole });
         }
 
+        // --- 🔐 ENDPOINT: Admin reset of a user's password (no current password required).
+        //   A PlatformAdmin may reset any user's password; an AgencyAdmin may only reset
+        //   users within their agency subtree. The new credential is hashed with the same
+        //   AccountPasswordHelper used at login, so it never fails the verification path.
+        [Authorize]
+        [HttpPut("users/{userId}/password")]
+        public async Task<IActionResult> ResetUserPassword(string userId, [FromBody] UserPasswordUpdateRequest request)
+        {
+            var callerRole = GetCurrentCanonicalRole();
+            if (callerRole == null || (callerRole != "PlatformAdmin" && callerRole != "AgencyAdmin"))
+            {
+                _logger.LogWarning("ResetUserPassword: forbidden — caller role {CallerRole} cannot reset passwords", callerRole);
+                return Forbid();
+            }
+
+            var callerTenantId = User.FindFirst("TenantId")?.Value;
+            var callerUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var target = await _userRepository.Query().FirstOrDefaultAsync(u => u.UserId == userId);
+            if (target == null) return NotFound(new { message = "Target account not found." });
+
+            // An agency admin may only reset passwords for users inside their subtree.
+            if (callerRole == "AgencyAdmin" && !(await GetAgencySubtreeTenantIdsAsync(callerTenantId)).Contains(target.TenantId))
+                return Forbid();
+
+            if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 6)
+                return BadRequest(new { message = "New password must be at least 6 characters." });
+
+            try
+            {
+                // Hash with the same helper used at login so the new password is immediately valid.
+                target.PasswordHash = AccountPasswordHelper.Hash(target, request.NewPassword);
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation("Password reset by {CallerUserId} ({CallerRole}) for target {TargetUserId} ({TargetEmail})",
+                    callerUserId, callerRole, target.UserId, target.Email);
+
+                return Ok(new { message = "Password updated successfully.", userId = target.UserId });
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Password reset failed for target {TargetUserId} by {CallerUserId}", target.UserId, callerUserId);
+                return StatusCode(500, new { message = "Password could not be updated. Please try again." });
+            }
+        }
+
         // --- 🎯 ENDPOINT: TRIAL ONBOARDING — create agency + pending admin user, send activation email ---
         [HttpPost("trial/onboarding")]
         [AllowAnonymous]
@@ -407,7 +493,7 @@ namespace Identity.Microservice.Controllers
             if (existingUser)
             {
                 _logger.LogWarning("Trial onboarding: email already registered: {Email}", request.AdminEmail);
-                return BadRequest(new { message = "An account with this email already exists. Please log in." });
+                return Ok(new { message = "If that email address is available, we have sent a verification link to complete your registration. Please check your inbox and spam folder." });
             }
 
             var lead = new LeadCaptureRequest
@@ -598,6 +684,196 @@ namespace Identity.Microservice.Controllers
                 "Agent" => "Broker",
                 _ => role
             };
+        }
+
+        // --- 📥 ENDPOINT: PLATFORM-ADMIN BATCH IMPORT (tenant + user seed data) ---
+        // Accepts a multi-sheet payload keyed by sheet name ("TenantAgencies",
+        // "UserAccounts"). Each sheet is a list of column-name → value rows.
+        // Platform-admin only; rows are stamped with their own TenantId from the
+        // document so a full tenant+user hierarchy can be seeded in one upload.
+        [Authorize]
+        [HttpPost("import")]
+        public async Task<IActionResult> ImportBatch([FromBody] IdentityBatchImportRequest request)
+        {
+            if (GetCurrentCanonicalRole() != "PlatformAdmin")
+            {
+                _logger.LogWarning("ImportBatch rejected: caller role is not PlatformAdmin.");
+                return Forbid();
+            }
+
+            var results = new Dictionary<string, IdentityBatchSheetResult>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var sheetEntry in request.Sheets)
+            {
+                var errors = new List<string>();
+                IdentityBatchSheetResult sheetResult;
+
+                switch (sheetEntry.Key)
+                {
+                    case "TenantAgencies":
+                        sheetResult = ImportTenantAgencies(sheetEntry.Value, errors);
+                        break;
+                    case "UserAccounts":
+                        sheetResult = ImportUserAccounts(sheetEntry.Value, request.TenantId, errors);
+                        break;
+                    default:
+                        sheetResult = new IdentityBatchSheetResult(0, 0, new List<string> { $"Unknown sheet '{sheetEntry.Key}' skipped." });
+                        break;
+                }
+
+                results[sheetEntry.Key] = sheetResult;
+            }
+
+            await _dbContext.SaveChangesAsync();
+
+            _logger.LogInformation("Identity batch import completed across {SheetCount} sheets.", request.Sheets.Count);
+
+            return Ok(new IdentityBatchImportResponse { Sheets = results });
+        }
+
+        private IdentityBatchSheetResult ImportTenantAgencies(List<Dictionary<string, string>> rows, List<string> errors)
+        {
+            var imported = 0;
+            foreach (var row in rows)
+            {
+                try
+                {
+                    var tenant = new TenantAgency
+                    {
+                        TenantId = row.GetValueOrDefault("TenantId") ?? string.Empty,
+                        AgencyName = row.GetValueOrDefault("AgencyName") ?? string.Empty,
+                        LogoInitials = row.GetValueOrDefault("LogoInitials") ?? string.Empty,
+                        ContactEmail = row.GetValueOrDefault("ContactEmail") ?? string.Empty,
+                        HeadquartersAddress = row.GetValueOrDefault("HeadquartersAddress") ?? string.Empty,
+                        OperationalStatus = row.GetValueOrDefault("OperationalStatus") ?? "Active",
+                        BrokerageLicense = row.GetValueOrDefault("BrokerageLicense") ?? string.Empty,
+                        ParentTenantId = ParseNullableString(row.GetValueOrDefault("ParentTenantId")),
+                        PeachCustomerId = ParseNullableString(row.GetValueOrDefault("PeachCustomerId")),
+                        SubscriptionStatus = ParseSubscriptionStatus(row.GetValueOrDefault("SubscriptionStatus")),
+                        SubscriptionEndsAt = ParseDateTime(row.GetValueOrDefault("SubscriptionEndsAt")),
+                        ActiveSubscriptionId = ParseNullableInt(row.GetValueOrDefault("ActiveSubscriptionId")),
+                        IsTrial = ParseBool(row.GetValueOrDefault("IsTrial")),
+                        TrialStartDate = ParseDateTime(row.GetValueOrDefault("TrialStartDate")),
+                        TrialEndDate = ParseDateTime(row.GetValueOrDefault("TrialEndDate")),
+                        CreatedAt = ParseDateTime(row.GetValueOrDefault("CreatedAt")) ?? DateTime.UtcNow
+                    };
+
+                    if (string.IsNullOrWhiteSpace(tenant.TenantId))
+                    {
+                        throw new InvalidOperationException("TenantId is required for TenantAgency import.");
+                    }
+
+                    _dbContext.TenantAgencies.Add(tenant);
+                    imported++;
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"TenantAgency row: {ex.Message}");
+                }
+            }
+
+            return new IdentityBatchSheetResult(imported, errors.Count, errors);
+        }
+
+        private IdentityBatchSheetResult ImportUserAccounts(List<Dictionary<string, string>> rows, string fallbackTenantId, List<string> errors)
+        {
+            var imported = 0;
+            foreach (var row in rows)
+            {
+                try
+                {
+                    var tenantId = row.GetValueOrDefault("TenantId") ?? fallbackTenantId;
+                    var passwordHash = row.GetValueOrDefault("PasswordHash") ?? string.Empty;
+
+                    var user = new UserAccount
+                    {
+                        UserId = row.GetValueOrDefault("UserId") ?? string.Empty,
+                        TenantId = tenantId,
+                        FullName = row.GetValueOrDefault("FullName") ?? string.Empty,
+                        Email = row.GetValueOrDefault("Email") ?? string.Empty,
+                        SystemRole = row.GetValueOrDefault("SystemRole") ?? "Broker",
+                        AvatarUrl = row.GetValueOrDefault("AvatarUrl") ?? string.Empty,
+                        AccountStatus = row.GetValueOrDefault("AccountStatus") ?? "Active",
+                        LicenseNumber = row.GetValueOrDefault("LicenseNumber") ?? string.Empty,
+                        LicenseExpiry = ParseDateTime(row.GetValueOrDefault("LicenseExpiry")),
+                        IsTrial = ParseBool(row.GetValueOrDefault("IsTrial")),
+                        TrialStartDate = ParseDateTime(row.GetValueOrDefault("TrialStartDate")),
+                        TrialEndDate = ParseDateTime(row.GetValueOrDefault("TrialEndDate")),
+                        CreatedAt = ParseDateTime(row.GetValueOrDefault("CreatedAt")) ?? DateTime.UtcNow
+                    };
+
+                    if (string.IsNullOrWhiteSpace(user.UserId))
+                    {
+                        user.UserId = "USR-" + Guid.NewGuid().ToString("N")[..8].ToUpper();
+                    }
+
+                    if (string.IsNullOrWhiteSpace(passwordHash))
+                    {
+                        passwordHash = AccountPasswordHelper.Hash(user, "Password123!");
+                    }
+                    else if (!passwordHash.StartsWith("identity-v3:", StringComparison.Ordinal))
+                    {
+                        passwordHash = AccountPasswordHelper.Hash(user, passwordHash);
+                    }
+
+                    user.PasswordHash = passwordHash;
+
+                    _dbContext.UserAccounts.Add(user);
+
+                    _dbContext.UserAccessClaims.Add(new UserAccessClaim
+                    {
+                        UserId = user.UserId,
+                        CanDeleteProperties = user.SystemRole == "PlatformAdmin" || user.SystemRole == "SuperAdmin",
+                        CanExportFinancialReports = true,
+                        CanBypassValuationStages = user.SystemRole == "PlatformAdmin" || user.SystemRole == "SuperAdmin"
+                    });
+
+                    imported++;
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"UserAccount row: {ex.Message}");
+                }
+            }
+
+            return new IdentityBatchSheetResult(imported, errors.Count, errors);
+        }
+
+        private static string? ParseNullableString(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            return value.Trim();
+        }
+
+        private static int ParseNullableInt(string? value)
+        {
+            return int.TryParse(value, out var result) ? result : 0;
+        }
+
+        private static bool ParseBool(string? value, bool defaultValue = false)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return defaultValue;
+
+            return bool.TryParse(value, out var result) ? result : defaultValue;
+        }
+
+        private static DateTime? ParseDateTime(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            return DateTime.TryParse(value, out var result) ? result : null;
+        }
+
+        private static SubscriptionStatus ParseSubscriptionStatus(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return SubscriptionStatus.Trialing;
+
+            return Enum.TryParse<SubscriptionStatus>(value, true, out var parsed) ? parsed : SubscriptionStatus.Trialing;
         }
 
         // 🌳 BFS over TenantAgencies.ParentTenantId — return all child tenant ids

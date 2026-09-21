@@ -99,25 +99,43 @@ export const authService = {
     }
   },
 
-  // --- 👥 USER ROLE ADMINISTRATION (add / remove / reassign a SystemRole on an account) ---
-  getUsers: async () => {
-    try {
-      const response = await apiClient.get('/auth/users', { params: tenantQueryParams() });
-      return response.data;
-    } catch (error) {
-      throw new Error(toMessage(error.response?.data?.message, 'User directory sync failed.'));
-    }
-  },
-   updateUserRole: async (userId, systemRole) => {
-    try {
-      const response = await apiClient.put(`/auth/users/${userId}/role`, { systemRole });
-      return response.data;
-    } catch (error) {
-      throw new Error(toMessage(error.response?.data?.message, 'Role reassignment failed.'));
-    }
-  },
+   // --- 👥 USER ROLE ADMINISTRATION (list / add / remove / reassign a SystemRole on an account) ---
+   // List is paginated + searchable. Returns the paged envelope
+   // { items, totalCount, page, pageSize, totalPages, hasPrevious, hasNext }.
+   getUsers: async (options = {}) => {
+     try {
+       const { page, pageSize, search } = options || {};
+       const params = { ...tenantQueryParams() };
+       if (page != null) params.page = page;
+       if (pageSize != null) params.pageSize = pageSize;
+       if (search) params.search = search;
+       const response = await apiClient.get('/auth/users', { params });
+       return response.data;
+     } catch (error) {
+       throw new Error(toMessage(error.response?.data?.message, 'User directory sync failed.'));
+     }
+   },
+    updateUserRole: async (userId, systemRole) => {
+     try {
+       const response = await apiClient.put(`/auth/users/${userId}/role`, { systemRole });
+       return response.data;
+     } catch (error) {
+       throw new Error(toMessage(error.response?.data?.message, 'Role reassignment failed.'));
+     }
+   },
 
-   // --- 🚫 DEACTIVATE / disable a user account ( AgencyAdmin: own-tenant only ) ---
+   // --- 🔐 ADMIN password reset for an existing user (current password not required).
+   // PlatformAdmin may reset any account; AgencyAdmin may only reset users in their agency.
+    adminResetPassword: async (userId, newPassword) => {
+     try {
+       const response = await apiClient.put(`/auth/users/${userId}/password`, { newPassword });
+       return response.data;
+     } catch (error) {
+       throw new Error(toMessage(error.response?.data?.message, 'Failed to update password.'), { cause: error });
+     }
+   },
+
+    // --- 🚫 DEACTIVATE / disable a user account ( AgencyAdmin: own-tenant only ) ---
    disableUser: async (userId) => {
      try {
        const response = await apiClient.put(`/auth/users/${userId}/disable`);
