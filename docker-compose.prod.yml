@@ -253,7 +253,7 @@ services:
       context: .
       dockerfile: frontend-client/Dockerfile
       args:
-        VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY:-}
+        VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY:-AIzaSyA_ISwPvfaEwCvFl0Q3yCneBa6s_sLuYBk}
         VITE_API_BASE_URL: ${NEXT_PUBLIC_GATEWAY_URL}
     container_name: realestate-frontend-client
     ports:
