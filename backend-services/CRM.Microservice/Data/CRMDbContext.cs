@@ -27,14 +27,6 @@ namespace CRM.Microservice.Data
         {
         }
 
-        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-        {
-            // Tables are managed via raw SQL in Program.cs (EnsureCreated + idempotent ALTERs),
-            // so suppress the pending-model-changes warning that Migrate() raises for entities
-            // whose schema is created outside of EF migrations.
-            optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
-        }
-
         public DbSet<CRMCompany> CRMCompanies { get; set; }
         public DbSet<AgencyRecord> AgencyRecords { get; set; }
         public DbSet<BrokerRecord> BrokerRecords { get; set; }
