@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+RESEND_SECRET_VERSION="${RESEND_SECRET_VERSION:-3}"
+
 PROJECT_ID="${PROJECT_ID:-}"
 REGION="${REGION:-africa-south1}"
 DOMAIN="${DOMAIN:-biscovetech.com}"
@@ -34,6 +36,12 @@ if [ "$#" -ne 1 ]; then
 fi
 
 SERVICE_NAME=$1
+if [[ "${SERVICE_NAME}" == "identity-service" || "${SERVICE_NAME}" == "crm-service" ]]; then
+  if ! secret_exists resend-api-token; then
+    error "Create the resend-api-token secret in Secret Manager before deploying. See deploy/gcp/README.md."
+  fi
+  grant_secret_accessor "${SERVICE_NAME}-sa@${PROJECT_ID}.iam.gserviceaccount.com" resend-api-token
+fi
 gcloud config set project "${PROJECT_ID}" --quiet
 
 dockerfile_for() {
@@ -169,9 +177,10 @@ case "${SERVICE_NAME}" in
     append_env_var "${ENV_FILE}" CORS_ORIGINS "${CORS_LIST}"
     append_env_var "${ENV_FILE}" Cors__AllowedOrigins "${CORS_LIST}"
     append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
+    append_env_var "${ENV_FILE}" Urls__FrontendClient "${APP_PUBLIC_URL}"
     deploy_backend identity-service 5001 identity-service-sa 1 1Gi 1 --no-cpu-throttling \
       --env-vars-file="${ENV_FILE}" \
-      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest"
+      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest,Resend__ApiToken=resend-api-token:${RESEND_SECRET_VERSION}"
     rm -f "${ENV_FILE}"
     ;;
   property-service)
@@ -195,9 +204,10 @@ case "${SERVICE_NAME}" in
     append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
     append_env_var "${ENV_FILE}" CORS_ORIGINS "${CORS_LIST}"
     append_env_var "${ENV_FILE}" Cors__AllowedOrigins "${CORS_LIST}"
+    append_env_var "${ENV_FILE}" Frontend__BaseUrl "${APP_PUBLIC_URL}"
     deploy_backend crm-service 5003 crm-service-sa 1 1.5Gi 1 --no-cpu-throttling \
       --env-vars-file="${ENV_FILE}" \
-      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${CRM_CONN_SECRET}:latest"
+      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${CRM_CONN_SECRET}:latest,Resend__ApiToken=resend-api-token:${RESEND_SECRET_VERSION}"
     rm -f "${ENV_FILE}"
     ;;
   gateway)

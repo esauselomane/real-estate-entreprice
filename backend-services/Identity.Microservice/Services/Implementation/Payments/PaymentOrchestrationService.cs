@@ -254,11 +254,10 @@ public sealed class PaymentOrchestrationService(
 
     private void QueueNotification(TenantAgency tenant, SubscriptionStatus previous, SubscriptionStatus current, string eventId)
     {
-        if (previous == current) return;
+        if (previous == current && current != SubscriptionStatus.Active) return;
         var template = current switch
         {
-            SubscriptionStatus.Active when previous == SubscriptionStatus.PastDue => "recovered",
-            SubscriptionStatus.Active => "welcome",
+            SubscriptionStatus.Active => "payment-approved",
             SubscriptionStatus.PastDue => "payment-failed",
             SubscriptionStatus.Paused => "past-due",
             SubscriptionStatus.Cancelled => "cancelled",

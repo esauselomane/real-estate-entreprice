@@ -119,6 +119,76 @@ public sealed class RegistrationEmailTests
         Assert.Empty(database.UserAccessClaims);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UserRegistrationInvitesPendingAccountOrRollsBackOnEmailFailure(bool failDelivery)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var database = new IdentityDbContext(new DbContextOptionsBuilder<IdentityDbContext>().UseSqlite(connection).Options);
+        await database.Database.EnsureCreatedAsync();
+        database.TenantAgencies.Add(new TenantAgency { TenantId = "agency", AgencyName = "Test Agency", OperationalStatus = "Suspended" });
+        database.SystemRoles.Add(new SystemRoleDefinition { Name = "Broker", IsActive = true });
+        await database.SaveChangesAsync();
+        var capturedEmail = new CapturingEmail();
+        IEmailService email = failDelivery ? new FailingEmail() : capturedEmail;
+        var controller = CreateRegistrationController(database, email);
+        var newUser = new UserAccount
+        {
+            TenantId = "agency", FullName = "Esau", Email = "recipient@example.com", SystemRole = "Broker",
+            PasswordHash = "must-not-be-used", IsTrial = true
+        };
+        var result = await controller.RegisterUser(newUser);
+        database.ChangeTracker.Clear();
+        if (failDelivery)
+        {
+            Assert.Equal(502, Assert.IsType<ObjectResult>(result).StatusCode);
+            Assert.Empty(database.UserAccounts);
+            Assert.Empty(database.UserAccessClaims);
+            return;
+        }
+
+        Assert.IsType<OkObjectResult>(result);
+        var savedUser = await database.UserAccounts.SingleAsync();
+        Assert.Equal("PendingActivation", savedUser.AccountStatus);
+        Assert.Empty(savedUser.PasswordHash);
+        Assert.False(savedUser.IsTrial);
+        Assert.Equal("recipient@example.com", capturedEmail.Recipient);
+        Assert.Contains(savedUser.ActivationToken, capturedEmail.Body);
+        Assert.Contains("Test Agency", capturedEmail.Body);
+        Assert.True(savedUser.ActivationTokenExpiry > DateTime.UtcNow);
+        Assert.Single(database.UserAccessClaims);
+        var activationResult = await controller.SetPassword(new SetPasswordRequest
+        {
+            ActivationToken = savedUser.ActivationToken,
+            NewPassword = "TestPassword123!", ConfirmPassword = "TestPassword123!"
+        });
+        Assert.IsType<OkObjectResult>(activationResult);
+        Assert.Equal("Active", savedUser.AccountStatus);
+        Assert.True(Identity.Microservice.Services.Accounts.AccountPasswordHelper.Verify(savedUser, "TestPassword123!"));
+        Assert.Equal("Suspended", (await database.TenantAgencies.SingleAsync()).OperationalStatus);
+    }
+
+    private static AuthController CreateRegistrationController(IdentityDbContext database, IEmailService email)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Urls:FrontendClient"] = "https://app.example.com" }).Build();
+        var controller = new AuthController(database, new TokenService(), NullLogger<AuthController>.Instance, email, configuration,
+            new UserRepository(database, NullLogger<Repository<UserAccount>>.Instance),
+            new TenantRepository(database, NullLogger<Repository<TenantAgency>>.Instance),
+            new SystemRoleRepository(database, NullLogger<Repository<SystemRoleDefinition>>.Instance),
+            new UserAccessClaimRepository(database, NullLogger<Repository<UserAccessClaim>>.Instance),
+            new LeadCaptureRequestRepository(database, NullLogger<Repository<LeadCaptureRequest>>.Instance));
+        var identity = new System.Security.Claims.ClaimsIdentity(
+            [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "PlatformAdmin")], "test");
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = new System.Security.Claims.ClaimsPrincipal(identity) }
+        };
+        return controller;
+    }
+
     private sealed class CapturingEmail : IEmailService
     {
         public string Recipient { get; private set; } = string.Empty;
@@ -145,9 +215,9 @@ public sealed class RegistrationEmailTests
     private sealed class FailingEmail : IEmailService
     {
         public Task SendEmailAsync(string recipient, string subject, string body) =>
-            throw new InvalidOperationException("SMTP unavailable");
+            throw new InvalidOperationException("Email provider unavailable");
 
         public Task SendPasswordSetupEmailAsync(string recipient, string name, string link, string agency) =>
-            throw new InvalidOperationException("SMTP unavailable");
+            throw new InvalidOperationException("Email provider unavailable");
     }
 }

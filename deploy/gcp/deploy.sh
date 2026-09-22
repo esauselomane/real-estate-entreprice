@@ -22,6 +22,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+RESEND_SECRET_VERSION="${RESEND_SECRET_VERSION:-3}"
+
 PROJECT_ID="${PROJECT_ID:-}"
 REGION="${REGION:-africa-south1}"
 DOMAIN="${DOMAIN:-biscovetech.com}"
@@ -154,6 +156,10 @@ if [ -n "${DOMAIN}" ]; then
   ensure_secret_if_missing support-email "support@${DOMAIN}"
 fi
 
+if ! secret_exists resend-api-token; then
+  error "Create the resend-api-token secret in Secret Manager before deploying. See deploy/gcp/README.md."
+fi
+
 log "Configuring Private Services Access for Cloud SQL..."
 gcloud compute addresses describe google-managed-services-default \
   --global \
@@ -249,6 +255,8 @@ done
 grant_secret_accessor "identity-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${IDENTITY_CONN_SECRET}"
 grant_secret_accessor "property-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${PROPERTY_CONN_SECRET}"
 grant_secret_accessor "crm-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${CRM_CONN_SECRET}"
+grant_secret_accessor "identity-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" resend-api-token
+grant_secret_accessor "crm-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" resend-api-token
 
 deploy_backend() {
   local name=$1
@@ -303,7 +311,7 @@ append_env_var "${IDENTITY_ENV}" AllowedOrigins "${INITIAL_CORS}"
 append_env_var "${IDENTITY_ENV}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
 deploy_backend identity-service 5001 identity-service-sa 1 1Gi 1 --no-cpu-throttling \
   --env-vars-file="${IDENTITY_ENV}" \
-  --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest"
+  --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest,Resend__ApiToken=resend-api-token:${RESEND_SECRET_VERSION}"
 rm -f "${IDENTITY_ENV}"
 IDENTITY_URL="$(run_url identity-service)"
 IDENTITY_HOST="$(host_from_url "${IDENTITY_URL}")"
@@ -329,7 +337,7 @@ append_env_var "${CRM_ENV}" CORS_ORIGINS "${INITIAL_CORS}"
 append_env_var "${CRM_ENV}" Cors__AllowedOrigins "${INITIAL_CORS}"
 deploy_backend crm-service 5003 crm-service-sa 1 1.5Gi 1 --no-cpu-throttling \
   --env-vars-file="${CRM_ENV}" \
-  --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${CRM_CONN_SECRET}:latest"
+  --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${CRM_CONN_SECRET}:latest,Resend__ApiToken=resend-api-token:${RESEND_SECRET_VERSION}"
 rm -f "${CRM_ENV}"
 CRM_URL="$(run_url crm-service)"
 CRM_HOST="$(host_from_url "${CRM_URL}")"
@@ -456,10 +464,19 @@ gcloud run deploy client-facing \
 
 FRONTEND_URL="$(run_url frontend-client)"
 MARKETING_URL="$(run_url client-facing)"
+EMAIL_APP_URL="https://app.${DOMAIN}"
+if [ "${SKIP_DOMAIN_MAPPING}" = "1" ]; then
+  EMAIL_APP_URL="${FRONTEND_URL}"
+fi
+gcloud run services update identity-service \
+  --region="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --update-env-vars="Urls__FrontendClient=${EMAIL_APP_URL}" \
+  --quiet
 gcloud run services update crm-service \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
-  --update-env-vars="Gateway__BaseUrl=${GATEWAY_PUBLIC_URL}" \
+  --update-env-vars="Gateway__BaseUrl=${GATEWAY_PUBLIC_URL},Frontend__BaseUrl=${EMAIL_APP_URL}" \
   --quiet
 
 if [ "${SKIP_DOMAIN_MAPPING}" != "1" ] && [ "${REGION}" != "africa-south1" ]; then

@@ -148,7 +148,7 @@ export const authService = {
   // --- 📝 TRIAL ACCOUNT: Set password from activation token ---
    setTrialPassword: async (token, password) => {
      try {
-       const response = await apiClient.post('/auth/trial/set-password', { token, password });
+       const response = await apiClient.post('/auth/trial/set-password', { activationToken: token, newPassword: password, confirmPassword: password });
        return response.data;
      } catch (error) {
        throw new Error(toMessage(error.response?.data?.message, 'Failed to set trial password.'));

@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Identity.Microservice.Services.Implementation.Payments;
 
 /// <summary>Delivers committed notifications with bounded retries and schedules local trial warnings.</summary>
-public sealed class BillingNotificationWorker(IServiceScopeFactory scopes, IConfiguration configuration, ILogger<BillingNotificationWorker> logger) : BackgroundService
+public sealed class BillingNotificationWorker(IServiceScopeFactory scopes, ILogger<BillingNotificationWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -36,11 +36,6 @@ public sealed class BillingNotificationWorker(IServiceScopeFactory scopes, IConf
                 database.BillingNotifications.Add(new BillingNotification { EventKey = key, Recipient = tenant.ContactEmail, Template = "trial-ending" });
         }
         await database.SaveChangesAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(configuration["Email:Host"]))
-        {
-            await transaction.CommitAsync(cancellationToken);
-            return;
-        }
         var pending = await database.BillingNotifications.Where(item => item.SentAt == null && item.Attempts < 5 && (item.NextAttemptAt == null || item.NextAttemptAt <= now)).Take(20).ToListAsync(cancellationToken);
         foreach (var item in pending)
         {

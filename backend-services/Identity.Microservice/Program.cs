@@ -1,3 +1,4 @@
+using Shared.Presentation.Email;
 using Identity.Microservice.Data;
 using Identity.Microservice.DTOs;
 using Identity.Microservice.Models;
@@ -14,6 +15,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddTransactionalEmail(builder.Configuration);
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
