@@ -1,12 +1,13 @@
 using System.Net;
-using System.Net.Sockets;
-using System.Text;
-using System.Text.RegularExpressions;
+using System.Text.Json;
 using Identity.Microservice.Models;
 using Identity.Microservice.Services;
 using Identity.Microservice.Services.Implementation.Payments;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Resend;
+using Shared.Presentation.Email;
 using Xunit;
 
 namespace Identity.Payments.Tests;
@@ -14,281 +15,115 @@ namespace Identity.Payments.Tests;
 public sealed class EmailDeliveryTests
 {
     [Fact]
-    public async Task EmailDeliveryFailsWhenSmtpIsNotConfigured()
+    public void MissingApiTokenFailsConfigurationValidation()
     {
-        var service = new EmailService(Options.Create(new EmailSettings()), NullLogger<EmailService>.Instance);
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.SendEmailAsync("recipient@example.com", "Subject", "<p>Body</p>"));
+        var configuration = new ConfigurationBuilder().Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTransactionalEmail(configuration);
+        using var provider = services.BuildServiceProvider();
+        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<ResendClientOptions>>().Value);
     }
 
     [Fact]
-    public async Task PasswordSetupEmailIsDeliveredThroughConfiguredSmtp()
+    public async Task PasswordSetupIncludesBrandingLinkReplyToAndInlineLogo()
     {
-        await using var smtp = new LocalSmtpServer();
-        var service = CreateEmailService(smtp);
-
-        await service.SendPasswordSetupEmailAsync(
-            "new.admin@example.com",
-            "Amina Khan",
-            "https://app.example.com/set-password?token=activation-token",
-            "Acme & Co");
-
-        var message = await smtp.GetReceivedMessageAsync();
-        Assert.Equal("new.admin@example.com", message.Recipient);
-        Assert.Equal("Welcome — set up your account", DecodeEncodedWords(message.Subject));
-        var passwordSetupBody = DecodeMimePart(message.Body, "html");
-        Assert.Contains("https://app.example.com/set-password?token=activation-token", passwordSetupBody);
-        Assert.Contains("Acme &amp; Co", passwordSetupBody);
+        using var handler = new ResendTestHandler();
+        using var provider = CreateProvider(handler);
+        var service = new EmailService(Options.Create(CreateSettings()), provider.GetRequiredService<IEmailDelivery>());
+        await service.SendPasswordSetupEmailAsync("recipient@example.com", "Esau", "https://app.example.com/set-password?token=test", "Acme & Co");
+        using var document = JsonDocument.Parse(handler.Body!);
+        var email = document.RootElement;
+        Assert.Equal("/emails", handler.RequestPath);
+        Assert.Equal("Bearer test-api-key", handler.Authorization);
+        Assert.Equal("recipient@example.com", email.GetProperty("to")[0].GetString());
+        Assert.Equal("Welcome — set up your account", email.GetProperty("subject").GetString());
+        Assert.Contains("Acme &amp; Co", email.GetProperty("html").GetString());
+        Assert.Contains("https://app.example.com/set-password?token=test", email.GetProperty("html").GetString());
+        Assert.Contains("cid:system-logo", email.GetProperty("html").GetString());
+        Assert.Contains("Esau", email.GetProperty("text").GetString());
+        Assert.Equal("support@example.com", email.GetProperty("reply_to")[0].GetString());
+        var attachment = email.GetProperty("attachments")[0];
+        Assert.Equal("system-logo", attachment.GetProperty("content_id").GetString());
+        Assert.NotEmpty(Convert.FromBase64String(attachment.GetProperty("content").GetString()!));
     }
 
     [Fact]
-    public async Task PasswordResetEmailIsDeliveredThroughConfiguredSmtp()
+    public async Task PasswordResetUsesResend()
     {
-        await using var smtp = new LocalSmtpServer();
-        var service = CreateEmailService(smtp);
-
-        await service.SendEmailAsync(
-            "user@example.com",
-            "Reset your password",
-            "<p>Use the recovery link to reset your password.</p>");
-
-        var message = await smtp.GetReceivedMessageAsync();
-        Assert.Equal("user@example.com", message.Recipient);
-        Assert.Equal("Reset your password", message.Subject);
-        Assert.Contains("Use the recovery link to reset your password.", DecodeMimePart(message.Body, "html"));
+        using var handler = new ResendTestHandler();
+        using var provider = CreateProvider(handler);
+        var service = new EmailService(Options.Create(CreateSettings()), provider.GetRequiredService<IEmailDelivery>());
+        await service.SendEmailAsync("recipient@example.com", "Reset your password", "<p>Reset link</p>");
+        using var document = JsonDocument.Parse(handler.Body!);
+        Assert.Equal("Reset your password", document.RootElement.GetProperty("subject").GetString());
     }
 
     [Fact]
-    public async Task BillingNotificationUsesTheSelectedTemplateAndRecipient()
+    public async Task BillingUsesResendAndSelectedTemplate()
     {
-        await using var smtp = new LocalSmtpServer();
-        var sender = new BillingNotificationEmailSender(Options.Create(CreateSettings(smtp)));
-
-        await sender.SendAsync("billing@example.com", "trial-ending", CancellationToken.None);
-
-        var message = await smtp.GetReceivedMessageAsync();
-        Assert.Equal("billing@example.com", message.Recipient);
-        Assert.Equal("Your free trial ends soon", message.Subject);
-        Assert.Contains("free trial ends within three days", DecodeMimePart(message.Body, "html"));
+        using var handler = new ResendTestHandler();
+        using var provider = CreateProvider(handler);
+        var service = new BillingNotificationEmailSender(Options.Create(CreateSettings()), provider.GetRequiredService<IEmailDelivery>());
+        await service.SendAsync("billing@example.com", "trial-ending", CancellationToken.None);
+        using var document = JsonDocument.Parse(handler.Body!);
+        Assert.Equal("Your free trial ends soon", document.RootElement.GetProperty("subject").GetString());
+        Assert.Contains("free trial ends within three days", document.RootElement.GetProperty("html").GetString());
     }
 
-    private static EmailService CreateEmailService(LocalSmtpServer smtp) =>
-        new(Options.Create(CreateSettings(smtp)), NullLogger<EmailService>.Instance);
-
-    private static EmailSettings CreateSettings(LocalSmtpServer smtp) => new()
+    [Fact]
+    public async Task PaymentApprovalEmailConfirmsActiveAccount()
     {
-        Host = "127.0.0.1",
-        Port = smtp.Port,
-        EnableSsl = false,
-        Username = "test-user",
-        Password = "test-password",
-        FromAddress = "sender@example.com",
-        FromName = "Test Sender",
-        SupportEmail = "support@example.com"
-    };
-
-    private sealed class LocalSmtpServer : IAsyncDisposable
-    {
-        private readonly TcpListener listener;
-        private readonly Task serverTask;
-        private readonly TaskCompletionSource<ReceivedMessage> receivedMessage =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public LocalSmtpServer()
-        {
-            listener = new TcpListener(IPAddress.Loopback, 0);
-            listener.Start();
-            Port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            serverTask = Task.Run(RunAsync);
-        }
-
-        public int Port { get; }
-
-        public async Task<ReceivedMessage> GetReceivedMessageAsync() =>
-            await receivedMessage.Task.WaitAsync(TimeSpan.FromSeconds(10));
-
-        public async ValueTask DisposeAsync()
-        {
-            listener.Stop();
-            try
-            {
-                await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
-            }
-            catch (Exception exception) when (exception is TimeoutException or InvalidOperationException)
-            {
-            }
-        }
-
-        private async Task RunAsync()
-        {
-            try
-            {
-                using var client = await listener.AcceptTcpClientAsync();
-                using var stream = client.GetStream();
-                using var reader = new StreamReader(stream, Encoding.ASCII, false, 1024, true);
-                using var writer = new StreamWriter(stream, Encoding.ASCII, 1024, true)
-                {
-                    NewLine = "\r\n"
-                };
-                var recipient = string.Empty;
-                var data = new StringBuilder();
-                var readingData = false;
-
-                await WriteResponseAsync(writer, "220 localhost ESMTP local test");
-                while (true)
-                {
-                    var line = await reader.ReadLineAsync();
-                    if (line == null) break;
-
-                    if (readingData)
-                    {
-                        if (line == ".")
-                        {
-                            readingData = false;
-                            await WriteResponseAsync(writer, "250 2.0.0 Message accepted");
-                            receivedMessage.TrySetResult(ParseMessage(recipient, data.ToString()));
-                            continue;
-                        }
-                        data.AppendLine(line);
-                        continue;
-                    }
-
-                    if (line.StartsWith("EHLO ", StringComparison.OrdinalIgnoreCase) ||
-                        line.StartsWith("HELO ", StringComparison.OrdinalIgnoreCase))
-                    {
-                        await WriteResponseAsync(writer, "250-localhost");
-                        await WriteResponseAsync(writer, "250 AUTH LOGIN");
-                    }
-                    else if (line.StartsWith("AUTH LOGIN", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (!line.Contains(' '))
-                        {
-                            await WriteResponseAsync(writer, "334 VXNlcm5hbWU6");
-                            _ = await reader.ReadLineAsync();
-                            await WriteResponseAsync(writer, "334 UGFzc3dvcmQ6");
-                            _ = await reader.ReadLineAsync();
-                        }
-                        await WriteResponseAsync(writer, "235 2.7.0 Authentication successful");
-                    }
-                    else if (line.StartsWith("MAIL FROM:", StringComparison.OrdinalIgnoreCase))
-                    {
-                        await WriteResponseAsync(writer, "250 2.1.0 Sender accepted");
-                    }
-                    else if (line.StartsWith("RCPT TO:", StringComparison.OrdinalIgnoreCase))
-                    {
-                        recipient = line["RCPT TO:".Length..].Trim().Trim('<', '>');
-                        await WriteResponseAsync(writer, "250 2.1.5 Recipient accepted");
-                    }
-                    else if (line == "DATA")
-                    {
-                        readingData = true;
-                        await WriteResponseAsync(writer, "354 End data with <CR><LF>.<CR><LF>");
-                    }
-                    else if (line == "QUIT")
-                    {
-                        await WriteResponseAsync(writer, "221 2.0.0 Closing connection");
-                        break;
-                    }
-                    else
-                    {
-                        await WriteResponseAsync(writer, "250 2.0.0 OK");
-                    }
-                }
-            }
-            catch (Exception exception)
-            {
-                receivedMessage.TrySetException(exception);
-            }
-        }
-
-        private static async Task WriteResponseAsync(StreamWriter writer, string response)
-        {
-            await writer.WriteLineAsync(response);
-            await writer.FlushAsync();
-        }
-
-        private static ReceivedMessage ParseMessage(string recipient, string message)
-        {
-            var subject = string.Empty;
-            using var reader = new StringReader(message);
-            while (reader.ReadLine() is { } line)
-            {
-                if (line.Length == 0) break;
-                if (line.StartsWith("Subject:", StringComparison.OrdinalIgnoreCase))
-                    subject = line["Subject:".Length..].Trim();
-            }
-            return new ReceivedMessage(recipient, subject, message);
-        }
+        using var handler = new ResendTestHandler();
+        using var provider = CreateProvider(handler);
+        var sender = new BillingNotificationEmailSender(Options.Create(CreateSettings()), provider.GetRequiredService<IEmailDelivery>());
+        await sender.SendAsync("recipient@example.com", "payment-approved", CancellationToken.None);
+        using var document = JsonDocument.Parse(handler.Body!);
+        Assert.Equal("Payment approved — your account is active", document.RootElement.GetProperty("subject").GetString());
+        Assert.Contains("payment has been approved", document.RootElement.GetProperty("html").GetString());
+        Assert.Contains("agency account is active", document.RootElement.GetProperty("html").GetString());
     }
 
-    private static string DecodeEncodedWords(string value)
+    [Fact]
+    public async Task ProviderRejectionDoesNotReportSuccess()
     {
-        const string pattern = @"=\?utf-8\?B\?([A-Za-z0-9+/=]+)\?=";
-        return Regex.Replace(value, pattern, match =>
-            Encoding.UTF8.GetString(Convert.FromBase64String(match.Groups[1].Value)));
+        using var handler = new ResendTestHandler(HttpStatusCode.Forbidden);
+        using var provider = CreateProvider(handler);
+        var service = new EmailService(Options.Create(CreateSettings()), provider.GetRequiredService<IEmailDelivery>());
+        await Assert.ThrowsAnyAsync<Exception>(() => service.SendEmailAsync("recipient@example.com", "Test", "<p>Test</p>"));
+        Assert.NotNull(handler.Body);
     }
 
-    private static string DecodeMimePart(string message, string mediaType)
+    [Fact]
+    public async Task CrmReminderUsesAgencyBrandAndPropagatesProviderFailure()
     {
-        var lines = message.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
-        for (var index = 0; index < lines.Length; index++)
+        using var handler = new ResendTestHandler();
+        using var provider = CreateProvider(handler);
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            if (!lines[index].TrimStart().StartsWith($"Content-Type: text/{mediaType}", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var headerEnd = index + 1;
-            while (headerEnd < lines.Length && !string.IsNullOrWhiteSpace(lines[headerEnd]))
-                headerEnd++;
-
-            var transferEncoding = "base64";
-            for (var headerIndex = index; headerIndex < headerEnd; headerIndex++)
-            {
-                if (lines[headerIndex].StartsWith("Content-Transfer-Encoding:", StringComparison.OrdinalIgnoreCase))
-                    transferEncoding = lines[headerIndex].Split(':', 2)[1].Trim();
-            }
-
-            var content = new StringBuilder();
-            for (var contentIndex = headerEnd + 1; contentIndex < lines.Length; contentIndex++)
-            {
-                if (lines[contentIndex].TrimStart().StartsWith("--", StringComparison.Ordinal))
-                    break;
-                content.Append(lines[contentIndex]);
-            }
-
-            var encodedContent = content.ToString().Trim();
-            return transferEncoding.ToLowerInvariant() switch
-            {
-                "base64" => Encoding.UTF8.GetString(Convert.FromBase64String(encodedContent)),
-                "quoted-printable" => DecodeQuotedPrintable(encodedContent),
-                _ => encodedContent
-            };
-        }
-        return string.Empty;
+            ["Email:FromAddress"] = "sender@example.com", ["Email:SupportEmail"] = "support@example.com",
+            ["Frontend:BaseUrl"] = "https://app.example.com"
+        }).Build();
+        var service = new CRM.Microservice.Services.Implementation.EmailNotificationService(configuration,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<CRM.Microservice.Services.Implementation.EmailNotificationService>.Instance,
+            provider.GetRequiredService<IEmailDelivery>());
+        await service.SendReminderEmailAsync("recipient@example.com", "Esau", "Reminder", "<untrusted>", "Agency & Co", "https://example.com/logo.png");
+        using var document = JsonDocument.Parse(handler.Body!);
+        Assert.Contains("Agency &amp; Co", document.RootElement.GetProperty("html").GetString());
+        Assert.Contains("&lt;untrusted&gt;", document.RootElement.GetProperty("html").GetString());
+        handler.StatusCode = HttpStatusCode.Forbidden;
+        await Assert.ThrowsAnyAsync<Exception>(() => service.SendReminderEmailAsync("recipient@example.com", "Esau", "Reminder", "Body", "Agency", null));
     }
 
-    private static string DecodeQuotedPrintable(string value)
+    private static ServiceProvider CreateProvider(ResendTestHandler handler)
     {
-        var decoded = new StringBuilder();
-        for (var index = 0; index < value.Length; index++)
-        {
-            if (value[index] == '=' && index + 2 < value.Length &&
-                byte.TryParse(value.Substring(index + 1, 2), System.Globalization.NumberStyles.HexNumber, null, out var encodedByte))
-            {
-                decoded.Append((char)encodedByte);
-                index += 2;
-            }
-            else if (value[index] == '=' && index + 1 < value.Length && value[index + 1] == '\n')
-            {
-                index++;
-            }
-            else
-            {
-                decoded.Append(value[index]);
-            }
-        }
-        return decoded.ToString();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Resend:ApiToken"] = "test-api-key" }).Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTransactionalEmail(configuration);
+        services.AddResend("test-api-key").ConfigurePrimaryHttpMessageHandler(() => handler);
+        return services.BuildServiceProvider();
     }
 
-    private sealed record ReceivedMessage(string Recipient, string Subject, string Body);
+    private static EmailSettings CreateSettings() => new() { FromAddress = "sender@example.com", SupportEmail = "support@example.com" };
 }

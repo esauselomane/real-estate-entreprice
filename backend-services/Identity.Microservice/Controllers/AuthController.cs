@@ -148,37 +148,58 @@ namespace Identity.Microservice.Controllers
                 return BadRequest(new { message = "Email signature already registered inside system clusters." });
             }
 
-            // 2. Initialize default safe tracking keys and parameters
-            if (string.IsNullOrEmpty(newUser.UserId))
+            return await RegisterInvitedUserAsync(newUser);
+        }
+
+        /// <summary>Persists a pending invitation and rolls it back if provider submission fails.</summary>
+        private async Task<IActionResult> RegisterInvitedUserAsync(UserAccount newUser)
+        {
+            var frontendUrl = Shared.Presentation.Email.EmailLayout.SafeUrl(_configuration["Urls:FrontendClient"]);
+            if (frontendUrl == null)
+                return StatusCode(503, new { message = "Account invitation links are not configured." });
+
+            var agency = await _tenantRepository.Query().FirstOrDefaultAsync(tenant => tenant.TenantId == newUser.TenantId);
+            if (agency == null)
+                return BadRequest(new { message = "The selected agency does not exist." });
+
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            try
             {
-                newUser.UserId = "USR-" + Guid.NewGuid().ToString().Substring(0, 5).ToUpper();
+                newUser.UserId = "USR-" + Guid.NewGuid().ToString("N");
+                newUser.CreatedAt = DateTime.UtcNow;
+                newUser.AccountStatus = "PendingActivation";
+                newUser.PasswordHash = string.Empty;
+                newUser.ActivationToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+                newUser.ActivationTokenExpiry = DateTime.UtcNow.AddHours(48);
+                newUser.IsTrial = false;
+                newUser.TrialStartDate = null;
+                newUser.TrialEndDate = null;
+                newUser.AgencyDetails = null;
+                _userRepository.Add(newUser);
+                _userAccessClaimRepository.Add(new UserAccessClaim
+                {
+                    UserId = newUser.UserId,
+                    CanDeleteProperties = newUser.SystemRole == "PlatformAdmin",
+                    CanExportFinancialReports = true,
+                    CanBypassValuationStages = newUser.SystemRole == "PlatformAdmin"
+                });
+                await _dbContext.SaveChangesAsync();
+                var activationLink = $"{frontendUrl.TrimEnd('/')}/set-password?token={newUser.ActivationToken}";
+                await _emailService.SendPasswordSetupEmailAsync(newUser.Email, newUser.FullName, activationLink, agency.AgencyName);
+                await transaction.CommitAsync();
+                return Ok(new
+                {
+                    message = "Account invitation sent. The user must set their password to activate the account.",
+                    userId = newUser.UserId,
+                    boundTenantId = newUser.TenantId
+                });
             }
-            newUser.CreatedAt = DateTime.UtcNow;
-            newUser.AccountStatus = "Active";
-
-            // 3. Commit profile record block directly to the transactional pool
-            _userRepository.Add(newUser);
-
-            // 4. Instantiate default granular access claims matching their target primary role
-            var defaultClaims = new UserAccessClaim
+            catch (Exception exception)
             {
-                UserId = newUser.UserId,
-                CanDeleteProperties = newUser.SystemRole == "PlatformAdmin",
-                CanExportFinancialReports = true,
-                CanBypassValuationStages = newUser.SystemRole == "PlatformAdmin"
-            };
-            _userAccessClaimRepository.Add(defaultClaims);
-
-            await _dbContext.SaveChangesAsync();
-
-            _logger.LogInformation("User registered: UserId={UserId} Email={Email} Role={Role} Tenant={TenantId}",
-                newUser.UserId, newUser.Email, newUser.SystemRole, newUser.TenantId);
-
-            return Ok(new { 
-                message = "New multi-tenant identity profile successfully provisioned.",
-                userId = newUser.UserId,
-                boundTenantId = newUser.TenantId
-            });
+                await transaction.RollbackAsync();
+                _logger.LogError(exception, "User invitation failed for {UserId}", newUser.UserId);
+                return StatusCode(502, new { message = "The account invitation could not be sent. Please try again." });
+            }
         }
 
         [Authorize]
@@ -650,7 +671,7 @@ namespace Identity.Microservice.Controllers
 
             // Activate the tenant agency
             var tenant = await _tenantRepository.Query().FirstOrDefaultAsync(t => t.TenantId == user.TenantId);
-            if (tenant != null)
+            if (tenant != null && user.IsTrial && user.SystemRole == "AgencyAdmin" && tenant.OperationalStatus == "TrialPending")
             {
                 tenant.OperationalStatus = "Active";
                 await _dbContext.SaveChangesAsync();

@@ -660,14 +660,15 @@ export const crmService = {
     });
   },
 
-  searchContacts: async (query = '') => {
-    try {
-      const response = await apiClient.get('/crm/contacts/search', { params: { q: query, page: 1, ...crmService._tenantQueryParams() } });
-      return response.data;
-    } catch (error) {
-      throw normalizeError(error.response?.data?.message, 'Contact search failed.');
-    }
-  },
+   searchContacts: async (query = '') => {
+     try {
+       const response = await apiClient.post('/crm/contacts/search', { search: query, page: 1, ...crmService._tenantQueryParams() });
+       const data = response.data;
+       return Array.isArray(data) ? data : (data?.items || []);
+     } catch (error) {
+       throw normalizeError(error.response?.data?.message, 'Contact search failed.');
+     }
+   },
 
   // 🔎 Fetch a single contact by id — used to hydrate an already-linked contact
   // into the ContactPicker when opening an edit form. Returns null on 404.

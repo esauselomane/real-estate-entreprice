@@ -32,6 +32,9 @@ public static class EmailLayout
             """;
     }
 
+    public static string RenderPlainText(EmailContent content) =>
+        WebUtility.HtmlDecode(Regex.Replace(Render(content), "<[^>]+>", " "));
+
     public static MailMessage CreateMessage(string from, string recipient, EmailContent content)
     {
         var html = Render(content);

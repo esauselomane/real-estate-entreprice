@@ -75,12 +75,8 @@ services:
       - Jwt__Issuer=${JWT_ISSUER}
       - Jwt__Audience=${JWT_AUDIENCE}
       - Cors__AllowedOrigins=${CORS_ORIGINS}
+      - Resend__ApiToken=${Resend__ApiToken:?Set Resend__ApiToken from your secret store}
       - Email__SupportEmail=${SUPPORT_EMAIL:-admin@biscovetech.com}
-      - Email__Host=${EMAIL_HOST:-smtp.gmail.com}
-      - Email__Port=${EMAIL_PORT:-587}
-      - Email__EnableSsl=${EMAIL_ENABLE_SSL:-true}
-      - Email__Username=${EMAIL_USERNAME:-admin@biscovetech.com}
-      - Email__Password=${EMAIL_PASSWORD:-}
       - Email__FromAddress=${EMAIL_FROM_ADDRESS:-admin@biscovetech.com}
       - Email__FromName=${EMAIL_FROM_NAME:-Biscove Real Estate Tech}
       - Email__AdminEmail=${ADMIN_EMAIL}
@@ -138,6 +134,9 @@ services:
       - "${CRM_PORT:-5003}:5003"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      - Resend__ApiToken=${Resend__ApiToken:?Set Resend__ApiToken from your secret store}
+      - Email__FromAddress=${EMAIL_FROM_ADDRESS:-admin@biscovetech.com}
+      - Email__SupportEmail=${SUPPORT_EMAIL:-admin@biscovetech.com}
       - GoogleMaps__ApiKey=${GoogleMaps__ApiKey:-}
       - Identity__BaseUrl=http://identity-service:5001
       - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=${CRM_DB};User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;

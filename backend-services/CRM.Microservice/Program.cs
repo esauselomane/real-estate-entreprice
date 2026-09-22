@@ -1,3 +1,4 @@
+using Shared.Presentation.Email;
 using CRM.Microservice.Data;
 using CRM.Microservice.Models;
 using CRM.Microservice.Services;
@@ -11,6 +12,7 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddTransactionalEmail(builder.Configuration);
 
 builder.Services.AddControllers();
 

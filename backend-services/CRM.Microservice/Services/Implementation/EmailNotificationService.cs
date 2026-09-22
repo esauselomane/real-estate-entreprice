@@ -1,8 +1,7 @@
 using CRM.Microservice.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Net;
-using System.Net.Mail;
+using Shared.Presentation.Email;
 
 namespace CRM.Microservice.Services.Implementation
 {
@@ -17,11 +16,13 @@ namespace CRM.Microservice.Services.Implementation
         private readonly IConfiguration _configuration;
         private readonly ILogger<EmailNotificationService> _logger;
         private readonly EmailSettings _emailSettings;
+        private readonly IEmailDelivery _delivery;
 
-        public EmailNotificationService(IConfiguration configuration, ILogger<EmailNotificationService> logger)
+        public EmailNotificationService(IConfiguration configuration, ILogger<EmailNotificationService> logger, IEmailDelivery delivery)
         {
             _configuration = configuration;
             _logger = logger;
+            _delivery = delivery;
             _emailSettings = configuration.GetSection("Email").Get<EmailSettings>() ?? new EmailSettings();
         }
 
@@ -34,9 +35,10 @@ namespace CRM.Microservice.Services.Implementation
                 var content = new Shared.Presentation.Email.EmailContent(agencyName, "Your property brochure is ready", $"Hello {toName},", body, "Open agency workspace", applicationUrl, agencyLogoUrl);
                 await SendEmailAsync(toEmail, toName, content, ct);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _logger.LogError(ex, "Failed to send brochure generated email to {Email}", toEmail);
+                _logger.LogError("Failed to send brochure generated email to {Email}", toEmail);
+                throw;
             }
         }
 
@@ -50,36 +52,14 @@ namespace CRM.Microservice.Services.Implementation
             {
                 await SendEmailAsync(toEmail, toName, content, cancellationToken);
             }
-            catch (Exception exception)
+            catch (Exception)
             {
-                _logger.LogError(exception, "Reminder email delivery failed for {Recipient}", toEmail);
+                _logger.LogError("Reminder email delivery failed for {Recipient}", toEmail);
+                throw;
             }
         }
 
-        private async Task SendEmailAsync(string toEmail, string toName, Shared.Presentation.Email.EmailContent content, CancellationToken ct)
-        {
-            if (string.IsNullOrEmpty(_emailSettings.Host))
-            {
-                _logger.LogInformation("[EMAIL SIMULATION]: {Subject} -> {RecipientName} ({Email})", content.Subject, toName, toEmail);
-                return;
-            }
-
-            using var message = Shared.Presentation.Email.EmailLayout.CreateMessage(_emailSettings.FromAddress, toEmail, content);
-            if (MailAddress.TryCreate(_emailSettings.SupportEmail, out var supportAddress))
-                message.ReplyToList.Add(supportAddress);
-
-            using var client = new SmtpClient();
-            client.Host = _emailSettings.Host;
-            client.Port = _emailSettings.Port;
-            client.EnableSsl = _emailSettings.EnableSsl;
-            client.DeliveryMethod = SmtpDeliveryMethod.Network;
-            client.UseDefaultCredentials = false;
-            if (!string.IsNullOrEmpty(_emailSettings.Username))
-                client.Credentials = new NetworkCredential(_emailSettings.Username, _emailSettings.Password);
-
-            await client.SendMailAsync(message, ct);
-            _logger.LogInformation("Email sent via SMTP to {Email} ({Name})", toEmail, toName);
-        }
+        private Task SendEmailAsync(string toEmail, string toName, EmailContent content, CancellationToken cancellationToken) =>
+            _delivery.SendAsync(_emailSettings.FromAddress, toEmail, content, _emailSettings.SupportEmail, cancellationToken);
     }
-
 }

@@ -37,6 +37,11 @@ spec:
               value: http://*:8080
             - name: ConnectionStrings__DefaultConnection
               value: "Server=10.x.x.x;Database=IdentityDB;User Id=sqlserver;Password=PASSWORD;TrustServerCertificate=True;Encrypt=False;"
+            - name: Resend__ApiToken
+              valueFrom:
+                secretKeyRef:
+                  name: resend-api-token
+                  key: "3"
             - name: Jwt__Secret
               valueFrom:
                 secretKeyRef:
@@ -162,6 +167,11 @@ spec:
               value: http://*:8080
             - name: ConnectionStrings__DefaultConnection
               value: "Server=10.x.x.x;Database=CRMDB;User Id=sqlserver;Password=PASSWORD;TrustServerCertificate=True;Encrypt=False;"
+            - name: Resend__ApiToken
+              valueFrom:
+                secretKeyRef:
+                  name: resend-api-token
+                  key: "3"
             - name: Jwt__Secret
               valueFrom:
                 secretKeyRef:

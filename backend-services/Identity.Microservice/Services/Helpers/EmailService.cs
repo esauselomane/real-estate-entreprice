@@ -1,5 +1,3 @@
-using System.Net;
-using System.Net.Mail;
 using Microsoft.Extensions.Options;
 using Identity.Microservice.Models;
 using Shared.Presentation.Email;
@@ -13,7 +11,7 @@ public interface IEmailService
 }
 
 /// <summary>System-branded account email delivery. The logo is embedded from the application's public asset.</summary>
-public sealed class EmailService(IOptions<EmailSettings> options, ILogger<EmailService> logger) : IEmailService
+public sealed class EmailService(IOptions<EmailSettings> options, IEmailDelivery delivery) : IEmailService
 {
     private readonly EmailSettings settings = options.Value;
 
@@ -26,27 +24,6 @@ public sealed class EmailService(IOptions<EmailSettings> options, ILogger<EmailS
     public Task SendEmailAsync(string toEmail, string subject, string htmlBody) =>
         DeliverAsync(toEmail, new EmailContent("Biscove Real Estate Tech", subject, "Hello,", htmlBody, UseSystemLogo: true));
 
-    private async Task DeliverAsync(string recipient, EmailContent content)
-    {
-        if (string.IsNullOrWhiteSpace(settings.Host))
-        {
-            logger.LogWarning("System email delivery failed for {Subject}: SMTP is not configured.", content.Subject);
-            throw new InvalidOperationException("SMTP is not configured.");
-        }
-        using var message = EmailLayout.CreateMessage(settings.FromAddress, recipient, content);
-        if (!string.IsNullOrWhiteSpace(settings.SupportEmail)) message.ReplyToList.Add(new MailAddress(settings.SupportEmail));
-        using var client = new SmtpClient(settings.Host, settings.Port)
-        {
-            EnableSsl = settings.EnableSsl,
-            DeliveryMethod = SmtpDeliveryMethod.Network,
-            UseDefaultCredentials = false,
-            Credentials = new NetworkCredential(settings.Username, settings.Password)
-        };
-        try { await client.SendMailAsync(message); }
-        catch (Exception exception)
-        {
-            logger.LogError(exception, "System email delivery failed for {Subject}", content.Subject);
-            throw;
-        }
-    }
+    private Task DeliverAsync(string recipient, EmailContent content) =>
+        delivery.SendAsync(settings.FromAddress, recipient, content, settings.SupportEmail);
 }

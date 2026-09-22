@@ -82,3 +82,11 @@ export PROJECT_ID="project-ff46407b-1a09-4376-95a"
 - `common.sh` — shared helpers
 - `destroy.sh` — regional teardown (does not delete shared `jwt-secret` / `mssql-password`)
 - `../../cloudbuild.yaml` — image builds for africa-south1; use `deploy.sh` for a full release (the Knative replace manifest still has placeholders)
+
+## Transactional email
+
+Create `resend-api-token` in Secret Manager before deploying Identity or CRM. The
+deployment scripts grant their runtime accounts access and inject the pinned
+version as `Resend__ApiToken`. `RESEND_SECRET_VERSION` defaults to `3`; update it
+and redeploy both services after rotating the key. See
+[email configuration](../../docs/resend-email.md) for local setup and verification.

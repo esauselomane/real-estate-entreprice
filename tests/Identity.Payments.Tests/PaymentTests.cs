@@ -65,7 +65,9 @@ public sealed class PaymentTests
         Assert.Equal(PaymentGateway.PayFast, first.Gateway);
         Assert.Equal(first.CurrentPeriodEnd, second.CurrentPeriodEnd);
         Assert.Single(await fixture.Database.WebhookEvents.ToListAsync());
-        Assert.Single(await fixture.Database.BillingNotifications.ToListAsync());
+        var notification = Assert.Single(await fixture.Database.BillingNotifications.ToListAsync());
+        Assert.Equal("payment-approved", notification.Template);
+        Assert.Equal("test@example.com", notification.Recipient);
         Assert.False((await fixture.Database.TenantAgencies.SingleAsync()).IsTrial);
     }
 
@@ -77,6 +79,7 @@ public sealed class PaymentTests
         var payload = $"m_payment_id={checkout.SessionId}&pf_payment_id=payment-1&payment_status=COMPLETE&token=subscription-1&amount_gross=1.00";
         await Assert.ThrowsAsync<ArgumentException>(() => fixture.Service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(payload), payload));
         Assert.Empty(await fixture.Database.Subscriptions.ToListAsync());
+        Assert.Empty(await fixture.Database.BillingNotifications.ToListAsync());
         var item = await fixture.Database.WebhookEvents.SingleAsync();
         Assert.False(item.Processed);
         Assert.Contains("amount", item.ErrorMessage);
@@ -186,6 +189,23 @@ public sealed class PaymentTests
             Calls++;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Valid ? "VALID" : "INVALID") });
         }
+    }
+
+    [Fact]
+    public async Task ApprovedRenewalQueuesAnotherConfirmationButDuplicateDoesNot()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var checkout = await fixture.Service.CreateCheckoutSessionAsync(fixture.Checkout, Guid.NewGuid().ToString());
+        var firstPayload = $"m_payment_id={checkout.SessionId}&pf_payment_id=first&payment_status=COMPLETE&token=subscription-1&amount_gross=2990.00";
+        await fixture.Service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(firstPayload), firstPayload);
+        var renewalPayload = $"m_payment_id={checkout.SessionId}&pf_payment_id=renewal&payment_status=COMPLETE&token=subscription-1&amount_gross=2990.00";
+        var renewalEvent = fixture.Gateway.ParseWebhookEvent(renewalPayload);
+        await fixture.Service.ProcessWebhookEventAsync(renewalEvent, renewalPayload);
+        await fixture.Service.ProcessWebhookEventAsync(renewalEvent, renewalPayload);
+        var notifications = await fixture.Database.BillingNotifications.ToListAsync();
+        Assert.Equal(2, notifications.Count);
+        Assert.All(notifications, notification => Assert.Equal("payment-approved", notification.Template));
+        Assert.Equal(SubscriptionStatus.Active, (await fixture.Database.TenantAgencies.SingleAsync()).SubscriptionStatus);
     }
 
     private sealed class Fixture : IAsyncDisposable
