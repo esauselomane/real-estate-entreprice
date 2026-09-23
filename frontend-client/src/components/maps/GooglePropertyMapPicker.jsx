@@ -213,7 +213,7 @@ export default function GooglePropertyMapPicker({
         const initialLocation = initialLocationRef.current;
         const initialLatitude = Number(initialLocation.latitude);
         const initialLongitude = Number(initialLocation.longitude);
-        const hasInitialLocation = hasValidCoordinates(initialLatitude, initialLongitude);
+        const hasInitialLocation = hasValidCoordinates(initialLocation.latitude, initialLocation.longitude);
         const map = new mapsLibrary.Map(mapElementRef.current, {
           center: hasInitialLocation ? { lat: initialLatitude, lng: initialLongitude } : DEFAULT_CENTER,
           zoom: hasInitialLocation ? 15 : 10,
@@ -271,7 +271,7 @@ export default function GooglePropertyMapPicker({
     const nextAddress = address || '';
     const nextLatitude = Number(latitude);
     const nextLongitude = Number(longitude);
-    const nextHasValidLocation = hasValidCoordinates(nextLatitude, nextLongitude);
+    const nextHasValidLocation = hasValidCoordinates(latitude, longitude);
 
     addressRef.current = nextAddress;
 

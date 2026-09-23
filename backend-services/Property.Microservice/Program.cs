@@ -1,3 +1,4 @@
+using Property.Microservice.Services.SampleData;
 using Property.Microservice.Services.Syndication;
 using Property.Microservice.Data;
 using Property.Microservice.DTOs;
@@ -102,6 +103,7 @@ builder.Services.AddHostedService<DataImportBackgroundService>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpContextAccessor();
 
+builder.Services.AddScoped<SampleDataSeeder>();
 var app = builder.Build();
 // 5. AUTOMATED DATABASE LIFECYCLE RECOVERY & DATA SEEDING LOOPS
 using (var serviceScope = app.Services.CreateScope())
@@ -110,6 +112,7 @@ using (var serviceScope = app.Services.CreateScope())
     var databaseContext = serviceScope.ServiceProvider.GetRequiredService<PropertyDbContext>();
     databaseContext.Database.EnsureCreated();
     SyndicationSchema.EnsureCreated(databaseContext);
+    SampleDataStorage.EnsureCreated(databaseContext);
 
     // 🛠️ Idempotent migration: add the unit-level document vault column to existing
     // PropertyUnits tables created before this field existed.

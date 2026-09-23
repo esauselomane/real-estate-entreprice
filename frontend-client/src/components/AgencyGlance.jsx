@@ -1,3 +1,4 @@
+import AgencySampleDataProvisioning from './AgencySampleDataProvisioning.jsx';
 import AgencySyndicationSettings from './AgencySyndicationSettings.jsx';
 import { useEffect, useState, useCallback } from 'react';
 import {
@@ -171,6 +172,7 @@ export default function AgencyGlance() {
 
   return (
     <div className="space-y-6">
+      {userRole === 'PlatformAdmin' && <AgencySampleDataProvisioning activeTenantId={activeTenantId} />}
       {['AgencyAdmin', 'PlatformAdmin'].includes(userRole) && <AgencySyndicationSettings
         key={isAllTenants ? '__all__' : activeTenantId || activeProfile?.tenantId || 'none'}
         tenantId={isAllTenants ? '__all__' : activeTenantId || activeProfile?.tenantId} />}

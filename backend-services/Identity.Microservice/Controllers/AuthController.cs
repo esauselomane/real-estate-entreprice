@@ -514,6 +514,9 @@ namespace Identity.Microservice.Controllers
                 return BadRequest(new { message = "Company name, admin full name, and admin email are required." });
             }
 
+            if (request.IncludeSampleData && (string.IsNullOrWhiteSpace(request.HeadquartersAddress) || request.HeadquartersAddress.Length > 1000))
+                return BadRequest(new { message = "Enter a headquarters address (up to 1,000 characters) to locate your sample properties." });
+
             // Check for duplicate email
             var existingUser = await _userRepository.Query().AnyAsync(u => u.Email == request.AdminEmail);
             if (existingUser)
@@ -598,6 +601,9 @@ namespace Identity.Microservice.Controllers
                     CanBypassValuationStages = false
                 });
 
+                if (request.IncludeSampleData)
+                    _dbContext.SampleDataJobs.Add(new SampleDataJob { TenantId = tenantId });
+
                 await _dbContext.SaveChangesAsync();
 
                 // Send activation email with secure link
@@ -615,7 +621,8 @@ namespace Identity.Microservice.Controllers
                     message = "Trial agency created. Check your email to set your password and activate your account.",
                     tenantId = tenantId,
                     trialEndDate = trialEndDate,
-                    adminEmail = request.AdminEmail
+                    adminEmail = request.AdminEmail,
+                    sampleDataStatus = request.IncludeSampleData ? "Requested" : "NotRequested"
                 });
             }
             catch (Exception exception)

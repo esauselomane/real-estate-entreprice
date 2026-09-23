@@ -19,6 +19,8 @@ namespace CRM.Microservice.Models
         [Required]
         public DealWorkflowStage DealStage { get; set; } = DealWorkflowStage.DiscoveryNeedsAnalysis;
 
+        public int? SourceLeadId { get; set; }
+
         public int? LinkedPropertyId { get; set; }
 
         [Required]

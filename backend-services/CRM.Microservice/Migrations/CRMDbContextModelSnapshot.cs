@@ -328,15 +328,15 @@ namespace CRM.Microservice.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("SyndicationAgentCodesJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("TenantId")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("BrokerId");
-
-                    b.Property<string>("SyndicationAgentCodesJson")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
 
                     b.ToTable("BrokerRecords");
                 });
@@ -689,6 +689,9 @@ namespace CRM.Microservice.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int?>("SourceLeadId")
+                        .HasColumnType("int");
+
                     b.Property<string>("TenantId")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -697,6 +700,8 @@ namespace CRM.Microservice.Migrations
                         .HasColumnType("decimal(18,2)");
 
                     b.HasKey("DealId");
+
+                    b.HasIndex("SourceLeadId");
 
                     b.ToTable("DealRecords");
                 });
@@ -976,6 +981,21 @@ namespace CRM.Microservice.Migrations
                     b.ToTable("OwnerTenantRecords");
                 });
 
+            modelBuilder.Entity("Shared.Access.SampleData.SampleDataReceipt", b =>
+                {
+                    b.Property<string>("TenantId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ResultJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("TenantId");
+
+                    b.ToTable("SampleDataReceipts");
+                });
+
             modelBuilder.Entity("CRM.Microservice.Models.AgencyRecord", b =>
                 {
                     b.HasOne("CRM.Microservice.Models.AgencyRecord", "ParentAgency")
@@ -1077,6 +1097,14 @@ namespace CRM.Microservice.Migrations
                         .IsRequired();
 
                     b.Navigation("Deal");
+                });
+
+            modelBuilder.Entity("CRM.Microservice.Models.DealRecord", b =>
+                {
+                    b.HasOne("CRM.Microservice.Models.LeadRecord", null)
+                        .WithMany()
+                        .HasForeignKey("SourceLeadId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("CRM.Microservice.Models.AgencyRecord", b =>
