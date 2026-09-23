@@ -1,3 +1,4 @@
+import BrokerSyndicationFields from './BrokerSyndicationFields.jsx';
 import { useEffect, useState, useRef } from 'react';
 import { Building2, UserPlus, Users, Pencil, Trash2, ShieldCheck, Tag, Package, ChevronRight, X, Settings, CircleX, Mail, RefreshCw, AlertCircle, BarChart3, TrendingUp, Banknote, Trophy, Upload } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
@@ -300,10 +301,10 @@ export default function SystemAdminWorkspace({ defaultTab }) {
   useEffect(() => {
     if (!importJobId || !importPolling) return;
     const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/properties/import/jobs/${importJobId}`);
-        const data = await res.json();
-        setImportStatus(data);
+       try {
+         const res = await apiClient.get(`/properties/import/jobs/${importJobId}`);
+         const data = res.data;
+         setImportStatus(data);
         const pct = data.totalRows > 0 ? Math.round((data.processedRows / data.totalRows) * 100) : 0;
         const bar = document.getElementById('import-progress');
         const txt = document.getElementById('import-status-text');
@@ -611,6 +612,8 @@ export default function SystemAdminWorkspace({ defaultTab }) {
           {(isSuperAdmin || currentUserRole === 'AgencyAdmin') && (
           <form onSubmit={async (e) => {
              e.preventDefault();
+             const portalCodes = Object.fromEntries([...new FormData(e.currentTarget).entries()]
+               .filter(([name]) => name.startsWith('portalCode:')).map(([name, value]) => [name.slice(11), value]));
              try {
                let managedUserId = editingUser?.userId;
                const targetTenantId = editingUser?.tenantId || newUserTenantId || activeAgency?.tenantId || activeProfile?.tenantId;
@@ -631,6 +634,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                    licenseNumber: userForm.licenseNumber || ''
                  });
                   managedUserId = createdUser.userId;
+                  setEditingUser({ ...createdUser, userId: managedUserId, tenantId: targetTenantId });
                   if (userForm.systemRole === 'Broker') {
                     try {
                       await crmService.createBroker({ brokerId: managedUserId, tenantId: targetTenantId, agencyId: targetAgency.agencyId, fullName: userForm.fullName, email: userForm.email, role: 'Broker', status: 'Active' });
@@ -639,6 +643,9 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                       throw new Error('The user account was created, but the broker profile could not be created. Do not submit a duplicate account.');
                     }
                   }
+                }
+                if (userForm.systemRole === 'Broker' && Object.keys(portalCodes).length) {
+                  await apiClient.put(`/crm/brokers/${encodeURIComponent(managedUserId)}/syndication-codes`, { codes: portalCodes });
                 }
                 // 🎯 If this is a Broker, upsert the current month's target.
                 if (userForm.systemRole === 'Broker' && userForm.monthlyTargetCommission) {
@@ -673,6 +680,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                 {(userForm.systemRole === 'Broker' || userForm.systemRole === 'AgencyAdmin') && (
                   <input value={userForm.licenseNumber} onChange={(e) => setUserForm({ ...userForm, licenseNumber: e.target.value })} placeholder={userForm.systemRole === 'Broker' ? 'Broker License #' : 'Brokerage License #'} className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" required />
                 )}
+                {userForm.systemRole === 'Broker' && <BrokerSyndicationFields key={editingUser?.userId || newUserTenantId || activeAgency?.tenantId || 'new'} brokerId={editingUser?.userId} />}
                 {/* 🎯 Monthly target commission — only for Brokers */}
                 {userForm.systemRole === 'Broker' && (
                   <input value={userForm.monthlyTargetCommission} onChange={(e) => setUserForm({ ...userForm, monthlyTargetCommission: e.target.value })} type="number" placeholder="Monthly Target Commission (R)" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white" />

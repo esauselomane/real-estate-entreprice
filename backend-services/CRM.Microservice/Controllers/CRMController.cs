@@ -689,6 +689,42 @@ namespace CRM.Microservice.Controllers
             return Ok(broker);
         }
 
+        [HttpGet("brokers/{brokerId}/syndication-codes")]
+        public async Task<IActionResult> GetBrokerSyndicationCodes(string brokerId)
+        {
+            if (GetCurrentCanonicalRole() is not ("PlatformAdmin" or "AgencyAdmin")) return Forbid();
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var broker = await BrokerRepository.Query().AsNoTracking().FirstOrDefaultAsync(item => item.BrokerId == brokerId && permittedTenantIds.Contains(item.TenantId));
+            if (broker == null) return NotFound(new { message = "Broker record not found." });
+            return Ok(JsonSerializer.Deserialize<Dictionary<string, string>>(broker.SyndicationAgentCodesJson));
+        }
+
+        [HttpPut("brokers/{brokerId}/syndication-codes")]
+        public async Task<IActionResult> SaveBrokerSyndicationCodes(string brokerId, BrokerSyndicationCodesRequest request)
+        {
+            if (GetCurrentCanonicalRole() is not ("PlatformAdmin" or "AgencyAdmin") ||
+                !await PermissionCheck.HasPermissionAsync("users:edit")) return Forbid();
+            if (request.Codes == null || request.Codes.Count > 100) return BadRequest(new { message = "Too many agent codes." });
+            foreach (var entry in request.Codes)
+            {
+                if (!System.Text.RegularExpressions.Regex.IsMatch(entry.Key, "^[a-z0-9-]{1,100}:(Sandbox|Production)$") ||
+                    entry.Value == null || entry.Value.Length > 200)
+                    return BadRequest(new { message = "Use a valid platform and environment, with an AgentCode of up to 200 characters." });
+            }
+            var permittedTenantIds = await GetVisibleTenantIdsAsync(null);
+            var broker = await BrokerRepository.Query().FirstOrDefaultAsync(item => item.BrokerId == brokerId && permittedTenantIds.Contains(item.TenantId));
+            if (broker == null) return NotFound(new { message = "Broker record not found." });
+            var codes = JsonSerializer.Deserialize<Dictionary<string, string>>(broker.SyndicationAgentCodesJson) ?? [];
+            foreach (var entry in request.Codes)
+            {
+                if (string.IsNullOrWhiteSpace(entry.Value)) codes.Remove(entry.Key);
+                else codes[entry.Key] = entry.Value.Trim();
+            }
+            broker.SyndicationAgentCodesJson = JsonSerializer.Serialize(codes);
+            await DbContext.SaveChangesAsync();
+            return Ok(codes);
+        }
+
         [HttpPut("brokers/{brokerId}")]
         public async Task<IActionResult> UpdateBroker(string brokerId, [FromBody] BrokerRecord updatedBroker)
         {

@@ -76,6 +76,9 @@ const requestSignature = (url, config) => {
 
 const originalGet = apiClient.get.bind(apiClient);
 apiClient.get = (url, config) => {
+  // A caller-owned signal must not cancel a request shared with another caller.
+  // In particular, StrictMode aborts the first effect before mounting it again.
+  if (config?.signal) return originalGet(url, config);
   const key = requestSignature(url, config || {});
   const cached = pendingGetRequests.get(key);
   if (cached) return cached;

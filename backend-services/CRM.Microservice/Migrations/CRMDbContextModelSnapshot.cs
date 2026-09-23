@@ -334,6 +334,10 @@ namespace CRM.Microservice.Migrations
 
                     b.HasKey("BrokerId");
 
+                    b.Property<string>("SyndicationAgentCodesJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.ToTable("BrokerRecords");
                 });
 

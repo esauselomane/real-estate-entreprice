@@ -219,6 +219,9 @@ app.Use(async (context, next) =>
 });
 
 app.UseCors("CorsPolicy");
+app.Map("/health", health => health.Run(WriteHealthResponse));
 await app.UseOcelot();
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "gateway" }));
 app.Run();
+
+static Task WriteHealthResponse(HttpContext context) =>
+    context.Response.WriteAsJsonAsync(new { status = "healthy", service = "gateway" });

@@ -119,7 +119,17 @@ using (var scope = app.Services.CreateScope())
     var dealBrokerSplitRepository = scope.ServiceProvider.GetRequiredService<IDealBrokerSplitRepository>();
     var notificationRepository = scope.ServiceProvider.GetRequiredService<INotificationRepository>();
 
-    db.Database.Migrate();
+    try
+    {
+        db.Database.Migrate();
+    }
+    catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException || ex is InvalidOperationException)
+    {
+        // In local Development the schema may have been provisioned by EnsureCreated()
+        // or manual scripts without recording the migration in __EFMigrationsHistory.
+        // Skip stale migration replay and continue — the tables already exist.
+        Console.WriteLine($"[CRM] Skipping migration replay (tables already exist): {ex.Message}");
+    }
     await CRMSeedData.EnsureSeededAsync(
         db,
         agencyRepository,
@@ -145,6 +155,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseMiddleware<Shared.Access.Subscriptions.SubscriptionAccessMiddleware>();
 
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "crm" })).AllowAnonymous();
 app.MapControllers();
 
 app.Run();

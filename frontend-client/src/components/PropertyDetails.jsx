@@ -1,3 +1,4 @@
+import ListingPortalsPanel from './ListingPortalsPanel.jsx';
 import GooglePropertyMapPicker from './maps/GooglePropertyMapPicker.jsx';
 import PropertyStaticMap from './maps/PropertyStaticMap.jsx';
 import { useState, useEffect } from 'react';
@@ -37,7 +38,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const [subUnits, setSubUnits] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
-  const [platforms, setPlatforms] = useState([]);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState('');
   const [isEditingProperty, setIsEditingProperty] = useState(false);
@@ -397,15 +397,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
          setPropertyOps([]);
        } finally {
          setPropertyOpsLoading(false);
-       }
-
-       // Load platforms lookup
-       try {
-         const platList = await propertyService.getPlatforms();
-         setPlatforms(platList || []);
-       } catch (platformError) {
-         setPlatforms([]);
-         setErrorMessage((platformError && platformError.message) || 'Failed to load syndication platforms.');
        }
 
        // Load amenities (both scopes) + whether unit-level add is permitted.
@@ -871,18 +862,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     }
   };
 
-  // Handle Syndication Toggle
-  const handleToggleSyndication = async (platformId, currentStatus) => {
-    const newStatus = !currentStatus;
-    try {
-      await propertyService.togglePortalSyndication(propertyId, platformId, newStatus);
-      const updated = await propertyService.getPropertyById(propertyId);
-      setProperty(updated);
-    } catch (err) {
-      alert(`Syndication update failed: ${err}`);
-    }
-  };
-
   const handleEditLocationChange = (location) => {
     setPropertyForm((previous) => (previous ? { ...previous, ...location } : previous));
     setHasSelectedGoogleLocation(hasValidCoordinates(location.latitude, location.longitude));
@@ -961,13 +940,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     );
   }
 
-  const isSyndicatedTo = (platformId) => {
-    return property.syndicationLinks?.some(s => s.platformId === platformId && s.isSyndicatedActive);
-  };
 
-  const getSyndicationDetails = (platformId) => {
-    return property.syndicationLinks?.find(s => s.platformId === platformId);
-  };
 
   const totalNRA = subUnits.reduce((acc, u) => acc + (parseFloat(u.netRentableAreaSqM) || 0), 0);
   const vacantUnitsCount = subUnits.filter(u => u.isCurrentlyVacant).length;
@@ -2170,55 +2143,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
             </div>
           </div>
 
-          {/* Portal Syndication Tracker */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-            <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Home size={16} className="text-blue-500" /> Portal Syndication Tracker
-            </h4>
-            <div className="space-y-3">
-              {platforms.map((plat) => {
-                const active = isSyndicatedTo(plat.platformId);
-                const syncDetails = getSyndicationDetails(plat.platformId);
-
-                return (
-                  <div key={plat.platformId} className="flex items-center justify-between p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <Can permission="properties:edit">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleSyndication(plat.platformId, active)}
-                          className={`w-5 h-5 rounded flex items-center justify-center border transition-colors cursor-pointer ${
-                            active ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-700 bg-slate-950 hover:border-slate-600'
-                          }`}
-                        >
-                          {active && <Check size={12} />}
-                        </button>
-                      </Can>
-                      <div>
-                        <span className="text-xs font-semibold text-slate-300 block">{plat.platformName}</span>
-                        {syncDetails?.externalReferenceIndex && (
-                          <span className="text-[10px] text-slate-500 font-mono">Ref: {syncDetails.externalReferenceIndex}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {active && syncDetails?.livePortalListingUrl ? (
-                      <a 
-                        href={syncDetails.livePortalListingUrl} 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 font-medium transition-colors"
-                      >
-                        Portal View <ExternalLink size={10} />
-                      </a>
-                    ) : (
-                      <span className="text-[10px] text-slate-600 italic">{active ? 'Syncing...' : 'Unlisted'}</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <ListingPortalsPanel key={propertyId} propertyId={propertyId} />
 
         </div>
       </div>
