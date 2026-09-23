@@ -1,3 +1,4 @@
+import AgencySyndicationSettings from './AgencySyndicationSettings.jsx';
 import { useEffect, useState, useCallback } from 'react';
 import {
   Users, Briefcase, Home, TrendingUp, Building2, Mail, Phone,
@@ -87,8 +88,8 @@ function GrowthChart({ title, data, dataKey, color }) {
 }
 
 export default function AgencyGlance() {
-  const { userRole } = useAuth();
-  const { activeTenantId } = useTenant();
+  const { userRole, activeProfile } = useAuth();
+  const { activeTenantId, isAllTenants } = useTenant();
   const [summary, setSummary] = useState(null);
   const [tabData, setTabData] = useState(null);
   const [pricingPackages, setPricingPackages] = useState([]);
@@ -170,6 +171,9 @@ export default function AgencyGlance() {
 
   return (
     <div className="space-y-6">
+      {['AgencyAdmin', 'PlatformAdmin'].includes(userRole) && <AgencySyndicationSettings
+        key={isAllTenants ? '__all__' : activeTenantId || activeProfile?.tenantId || 'none'}
+        tenantId={isAllTenants ? '__all__' : activeTenantId || activeProfile?.tenantId} />}
       {/* Tab Navigation */}
       <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-2xl p-1.5">
         <button

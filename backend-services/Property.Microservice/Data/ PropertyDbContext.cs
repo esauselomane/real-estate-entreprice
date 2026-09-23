@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Property.Microservice.Models.Syndication;
 using Property.Microservice.DTOs;
 using Property.Microservice.Models;
 
@@ -9,6 +10,10 @@ namespace Property.Microservice.Data
         public PropertyDbContext(DbContextOptions<PropertyDbContext> options) : base(options)
         {
         }
+
+        public DbSet<SyndicationConnection> SyndicationConnections { get; set; } = null!;
+        public DbSet<SyndicationPublication> SyndicationPublications { get; set; } = null!;
+        public DbSet<SyndicationCommand> SyndicationCommands { get; set; } = null!;
 
         // Register tracking entity lookups and data tables
         public DbSet<PropertyType> PropertyTypes { get; set; }
@@ -27,6 +32,16 @@ namespace Property.Microservice.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<SyndicationConnection>().Property(item => item.TenantId).HasMaxLength(100);
+            modelBuilder.Entity<SyndicationConnection>().Property(item => item.ProviderKey).HasMaxLength(100);
+            modelBuilder.Entity<SyndicationConnection>().HasIndex(item => new { item.TenantId, item.ProviderKey, item.Environment }).IsUnique();
+            modelBuilder.Entity<SyndicationConnection>().Property(item => item.Environment).HasMaxLength(20);
+            modelBuilder.Entity<SyndicationPublication>().HasIndex(item => new { item.PropertyId, item.ConnectionId }).IsUnique();
+            modelBuilder.Entity<SyndicationPublication>().HasOne<PropertyAsset>().WithMany().HasForeignKey(item => item.PropertyId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<SyndicationPublication>().HasOne<SyndicationConnection>().WithMany().HasForeignKey(item => item.ConnectionId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<SyndicationCommand>().HasOne<SyndicationPublication>().WithMany().HasForeignKey(item => item.PublicationId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<SyndicationCommand>().Property(item => item.State).HasMaxLength(40);
+            modelBuilder.Entity<SyndicationCommand>().HasIndex(item => new { item.State, item.AvailableAt });
 
             // Configure Master-Detail relational cascading updates matching your multi-tenant units
             modelBuilder.Entity<PropertyUnit>()

@@ -1,3 +1,5 @@
+import { leaseTerminationAmount } from '../utils/leaseInterest.js';
+import ListingPortalsPanel from './ListingPortalsPanel.jsx';
 import GooglePropertyMapPicker from './maps/GooglePropertyMapPicker.jsx';
 import PropertyStaticMap from './maps/PropertyStaticMap.jsx';
 import { useState, useEffect } from 'react';
@@ -37,7 +39,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
   const [subUnits, setSubUnits] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
-  const [platforms, setPlatforms] = useState([]);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState('');
   const [isEditingProperty, setIsEditingProperty] = useState(false);
@@ -399,15 +400,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
          setPropertyOpsLoading(false);
        }
 
-       // Load platforms lookup
-       try {
-         const platList = await propertyService.getPlatforms();
-         setPlatforms(platList || []);
-       } catch (platformError) {
-         setPlatforms([]);
-         setErrorMessage((platformError && platformError.message) || 'Failed to load syndication platforms.');
-       }
-
        // Load amenities (both scopes) + whether unit-level add is permitted.
        try {
          setAmenitiesLoading(true);
@@ -623,24 +615,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return '—';
     const months = Math.round(((e - s) / (1000 * 60 * 60 * 24 * 30.4375)) * 10) / 10;
     return `${months} month${months === 1 ? '' : 's'}`;
-  };
-
-  // 💰 Amount due to tenant on lease termination.
-  //   total = deposit × (1 + rate × (months / 12))
-  // `rate` is a percentage per year (e.g. 5 means 5% p.a.).
-  // Returns null if any input is missing/invalid.
-  const leaseTerminationAmount = (deposit, ratePct, start, end) => {
-    const d = Number(deposit);
-    const r = Number(ratePct);
-    if (!Number.isFinite(d) || d <= 0) return null;
-    if (!Number.isFinite(r) || r < 0) return null;
-    if (!start || !end) return null;
-    const s = new Date(start);
-    const e = new Date(end);
-    if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return null;
-    const months = (e - s) / (1000 * 60 * 60 * 24 * 30.4375);
-    const years = months / 12;
-    return d * (1 + (r / 100) * years);
   };
 
   const resetUnitOpForm = () => {
@@ -871,18 +845,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     }
   };
 
-  // Handle Syndication Toggle
-  const handleToggleSyndication = async (platformId, currentStatus) => {
-    const newStatus = !currentStatus;
-    try {
-      await propertyService.togglePortalSyndication(propertyId, platformId, newStatus);
-      const updated = await propertyService.getPropertyById(propertyId);
-      setProperty(updated);
-    } catch (err) {
-      alert(`Syndication update failed: ${err}`);
-    }
-  };
-
   const handleEditLocationChange = (location) => {
     setPropertyForm((previous) => (previous ? { ...previous, ...location } : previous));
     setHasSelectedGoogleLocation(hasValidCoordinates(location.latitude, location.longitude));
@@ -961,13 +923,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     );
   }
 
-  const isSyndicatedTo = (platformId) => {
-    return property.syndicationLinks?.some(s => s.platformId === platformId && s.isSyndicatedActive);
-  };
 
-  const getSyndicationDetails = (platformId) => {
-    return property.syndicationLinks?.find(s => s.platformId === platformId);
-  };
 
   const totalNRA = subUnits.reduce((acc, u) => acc + (parseFloat(u.netRentableAreaSqM) || 0), 0);
   const vacantUnitsCount = subUnits.filter(u => u.isCurrentlyVacant).length;
@@ -1533,7 +1489,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                             <label className="label">Deposit (R)<input type="number" min="0" value={leaseForm.depositAmount ?? ''} onChange={(e) => setLeaseForm({ ...leaseForm, depositAmount: e.target.value })} className="field" /></label>
                           </div>
 
-                          <label className="label">Accrued interest on deposit (% per year)<input type="number" min="0" step="0.01" value={leaseForm.accruedInterestPercent ?? ''} onChange={(e) => setLeaseForm({ ...leaseForm, accruedInterestPercent: e.target.value })} className="field" placeholder="e.g. 5.00" /></label>
+                          <label className="label">Deposit interest (% per year, compounded monthly)<input type="number" min="0" step="0.01" value={leaseForm.accruedInterestPercent ?? ''} onChange={(e) => setLeaseForm({ ...leaseForm, accruedInterestPercent: e.target.value })} className="field" placeholder="e.g. 5.00" /></label>
 
                           {/* 💰 Live read-only label — recomputed on every keystroke so the
                               user can see the termination value update as they edit deposit /
@@ -1550,20 +1506,17 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                             if (total == null) {
                               return (
                                 <div className="p-2.5 rounded-xl bg-slate-950/40 border border-dashed border-slate-800 text-[10px] text-slate-500">
-                                  Amount due to tenant on lease termination: enter deposit, rate, and both dates to preview.
+                                  Estimated amount due at lease end: enter deposit, rate, and both dates to preview.
                                 </div>
                               );
                             }
-                            const previewExpired = leaseForm.leaseEnd && new Date(leaseForm.leaseEnd) < new Date();
-                            const label = previewExpired
-                              ? 'Amount paid to tenant on lease termination'
-                              : 'Amount due to tenant on lease termination';
+                            const label = 'Estimated amount due at lease end';
                             return (
                               <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-900">
                                 <span className="block text-[10px] text-emerald-400 uppercase font-bold tracking-wider">{label}</span>
-                                <span className="text-lg font-black text-emerald-200">R {Math.round(total).toLocaleString()}</span>
+                                <span className="text-lg font-black text-emerald-200">R {total.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 <span className="block text-[10px] text-emerald-400/70 mt-0.5">
-                                  Deposit {Number(leaseForm.depositAmount).toLocaleString()} + interest at {Number(leaseForm.accruedInterestPercent)}% p.a. over {leaseTermLabel(leaseForm.leaseStart, leaseForm.leaseEnd)}
+                                  Deposit {Number(leaseForm.depositAmount).toLocaleString()} + interest at {Number(leaseForm.accruedInterestPercent)}% p.a., compounded monthly over {leaseTermLabel(leaseForm.leaseStart, leaseForm.leaseEnd)}
                                 </span>
                               </div>
                             );
@@ -1668,13 +1621,11 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                                 historyDetail.leaseEnd
                               );
                               if (total == null) return null;
-                              const label = historyDetail.isExpired
-                                ? 'Amount paid to tenant on lease termination'
-                                : 'Amount due to tenant on lease termination';
+                              const label = 'Estimated amount due at lease end';
                               return (
                                 <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-900">
                                   <span className="block text-[10px] text-emerald-400 uppercase font-bold tracking-wider">{label}</span>
-                                  <span className="text-lg font-black text-emerald-200">R {Math.round(total).toLocaleString()}</span>
+                                  <span className="text-lg font-black text-emerald-200">R {total.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 </div>
                               );
                             })()}
@@ -2170,55 +2121,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
             </div>
           </div>
 
-          {/* Portal Syndication Tracker */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-            <h4 className="text-sm font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-              <Home size={16} className="text-blue-500" /> Portal Syndication Tracker
-            </h4>
-            <div className="space-y-3">
-              {platforms.map((plat) => {
-                const active = isSyndicatedTo(plat.platformId);
-                const syncDetails = getSyndicationDetails(plat.platformId);
-
-                return (
-                  <div key={plat.platformId} className="flex items-center justify-between p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <Can permission="properties:edit">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleSyndication(plat.platformId, active)}
-                          className={`w-5 h-5 rounded flex items-center justify-center border transition-colors cursor-pointer ${
-                            active ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-700 bg-slate-950 hover:border-slate-600'
-                          }`}
-                        >
-                          {active && <Check size={12} />}
-                        </button>
-                      </Can>
-                      <div>
-                        <span className="text-xs font-semibold text-slate-300 block">{plat.platformName}</span>
-                        {syncDetails?.externalReferenceIndex && (
-                          <span className="text-[10px] text-slate-500 font-mono">Ref: {syncDetails.externalReferenceIndex}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {active && syncDetails?.livePortalListingUrl ? (
-                      <a 
-                        href={syncDetails.livePortalListingUrl} 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 font-medium transition-colors"
-                      >
-                        Portal View <ExternalLink size={10} />
-                      </a>
-                    ) : (
-                      <span className="text-[10px] text-slate-600 italic">{active ? 'Syncing...' : 'Unlisted'}</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <ListingPortalsPanel key={propertyId} propertyId={propertyId} />
 
         </div>
       </div>

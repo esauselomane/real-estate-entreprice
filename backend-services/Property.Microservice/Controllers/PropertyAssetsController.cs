@@ -509,81 +509,8 @@ public class PropertyAssetsController : PropertyControllerBase
         }
         // --- 🔗 ENDPOINT C: PORTAL SYNDICATION CHECKBOX TRACKER TOGGLE ---
         [HttpPost("syndicate")]
-        public async Task<IActionResult> ToggleSyndication([FromBody] SyndicationTogglePayload payload)
-        {
-            if (!await PermissionCheck.HasPermissionAsync("properties:edit"))
-            {
-                Logger.LogWarning("ToggleSyndication: forbidden — caller lacks properties:edit permission");
-                return Forbid();
-            }
-
-            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
-            Logger.LogInformation("ToggleSyndication: PropertyId={PropertyId} PlatformId={PlatformId} Syndicate={Syndicate} Caller={Caller}",
-                payload?.PropertyId, payload?.PlatformId, payload?.SyndicateStatus, caller);
-
-            if (payload == null)
-            {
-                Logger.LogWarning("ToggleSyndication: rejected — null payload, caller={Caller}", caller);
-                return BadRequest(new { message = "Invalid syndication data envelope." });
-            }
-
-            var property = await PropertyRepository.Query()
-                .Include(p => p.PropertyTypeDetails)
-                .FirstOrDefaultAsync(p => p.PropertyId == payload.PropertyId);
-
-            if (property == null) return NotFound(new { message = "Target property record not found." });
-
-            var platform = await _externalPlatformRepository.GetByIdAsync(payload.PlatformId);
-            if (platform == null) return NotFound(new { message = "Target external marketing channel portal not found." });
-
-            // Fetch or create the portal links ledger row matching current identifiers
-            var syndicationRecord = await _propertyPlatformSyndicationRepository.Query()
-                .FirstOrDefaultAsync(s => s.PropertyId == payload.PropertyId && s.PlatformId == payload.PlatformId);
-
-            if (syndicationRecord == null)
-            {
-                syndicationRecord = new PropertyPlatformSyndication
-                {
-                    PropertyId = payload.PropertyId,
-                    PlatformId = payload.PlatformId,
-                    IsSyndicatedActive = payload.SyndicateStatus,
-                    ExternalReferenceIndex = "EXT-" + Guid.NewGuid().ToString().Substring(0, 6).ToUpper(),
-                    LivePortalListingUrl = $"{platform.BaseUrlAddress}/listing/prop-{payload.PropertyId}",
-                    LastSynchronizedAt = DateTime.UtcNow
-                };
-                _propertyPlatformSyndicationRepository.Add(syndicationRecord);
-            }
-            else
-            {
-                syndicationRecord.IsSyndicatedActive = payload.SyndicateStatus;
-                syndicationRecord.LastSynchronizedAt = DateTime.UtcNow;
-            }
-
-            await DbContext.SaveChangesAsync();
-
-            var syndicationJob = new SyndicationJob(
-                PropertyId: payload.PropertyId,
-                PlatformId: payload.PlatformId,
-                IsActive: payload.SyndicateStatus,
-                TenantId: property.TenantId,
-                RequestedBy: caller
-            );
-
-            await SyndicationQueue.EnqueueAsync(syndicationJob);
-
-            Logger.LogInformation("ToggleSyndication: queued — PropertyId={PropertyId} PlatformId={PlatformId} Active={Active} ExternalRef={ExternalRef}",
-                payload.PropertyId, payload.PlatformId, payload.SyndicateStatus, syndicationRecord.ExternalReferenceIndex);
-
-            return Ok(new
-            {
-                message = payload.SyndicateStatus 
-                    ? $"Asset successfully pushed out to {platform.PlatformName} tracking registers." 
-                    : $"Asset successfully de-listed from {platform.PlatformName} tracking networks.",
-                externalRef = syndicationRecord.ExternalReferenceIndex,
-                // Maps directly back to the property used in legacy integrations to satisfy compilation requirements
-                directPropertyUrl = syndicationRecord.LivePortalListingUrl 
-            });
-        }
+        public IActionResult ToggleSyndication([FromBody] SyndicationTogglePayload payload) =>
+            Conflict(new { message = "Use the Listing portals panel to configure an agency connection and request publication. Legacy simulated syndication is no longer supported." });
         [HttpPost("brochure/generate")]
         public async Task<IActionResult> GenerateBrochure([FromBody] GeneratedBrochurePayload payload)
         {

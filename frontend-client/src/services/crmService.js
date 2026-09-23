@@ -278,7 +278,7 @@ export const crmService = {
   },
 
   updateAgency: async (agencyId, payload) => {
-    const response = await apiClient.put(`/crm/agencies/${agencyId}`, payload);
+    const response = await apiClient.put(`/crm/agencies/${encodeURIComponent(agencyId)}`, { ...payload, trialStartDate: payload.trialStartDate || null, trialEndDate: payload.trialEndDate || null });
     return response.data;
   },
 

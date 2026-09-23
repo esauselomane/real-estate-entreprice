@@ -154,9 +154,9 @@ public class DocumentEncryptionService : IDocumentEncryptionService
 
     private static string GetProtectedFileName(string originalFileName)
     {
-        var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(originalFileName);
-        return string.IsNullOrWhiteSpace(fileNameWithoutExtension)
+        var fileName = Path.GetFileName(originalFileName);
+        return string.IsNullOrWhiteSpace(fileName)
             ? $"document{ZipExtension}"
-            : $"{fileNameWithoutExtension}{ZipExtension}";
+            : $"{fileName}{ZipExtension}";
     }
 }

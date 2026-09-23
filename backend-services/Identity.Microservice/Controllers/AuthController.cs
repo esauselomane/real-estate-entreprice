@@ -481,6 +481,11 @@ namespace Identity.Microservice.Controllers
             {
                 // Hash with the same helper used at login so the new password is immediately valid.
                 target.PasswordHash = AccountPasswordHelper.Hash(target, request.NewPassword);
+                // An administrator setting the initial credential completes pending activation.
+                // Disabled accounts remain disabled; a password reset must not restore their access.
+                if (target.AccountStatus == "PendingActivation") target.AccountStatus = "Active";
+                target.ActivationToken = string.Empty;
+                target.ActivationTokenExpiry = null;
                 await _dbContext.SaveChangesAsync();
 
                 _logger.LogInformation("Password reset by {CallerUserId} ({CallerRole}) for target {TargetUserId} ({TargetEmail})",

@@ -16,6 +16,9 @@ namespace CRM.Microservice.Models
         [Required]
         public string FullName { get; set; } = string.Empty;
 
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string SyndicationAgentCodesJson { get; set; } = "{}";
+
         public string Email { get; set; } = string.Empty;
         public string Phone { get; set; } = string.Empty;
         public string Role { get; set; } = "Broker";

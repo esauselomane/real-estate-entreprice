@@ -1,3 +1,4 @@
+using Property.Microservice.Services.Syndication;
 using Property.Microservice.Data;
 using Property.Microservice.DTOs;
 using Property.Microservice.Models;
@@ -13,6 +14,7 @@ using System.Security.Claims;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddListingProviders(builder.Configuration);
 
 // 1. REGISTER CORE SYSTEM ROUTINGS
 builder.Services.AddControllers()
@@ -104,8 +106,10 @@ var app = builder.Build();
 // 5. AUTOMATED DATABASE LIFECYCLE RECOVERY & DATA SEEDING LOOPS
 using (var serviceScope = app.Services.CreateScope())
 {
+    _ = serviceScope.ServiceProvider.GetRequiredService<ListingProviderRegistry>();
     var databaseContext = serviceScope.ServiceProvider.GetRequiredService<PropertyDbContext>();
     databaseContext.Database.EnsureCreated();
+    SyndicationSchema.EnsureCreated(databaseContext);
 
     // 🛠️ Idempotent migration: add the unit-level document vault column to existing
     // PropertyUnits tables created before this field existed.

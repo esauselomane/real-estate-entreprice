@@ -170,6 +170,37 @@ public sealed class RegistrationEmailTests
         Assert.Equal("Suspended", (await database.TenantAgencies.SingleAsync()).OperationalStatus);
     }
 
+    [Theory]
+    [InlineData("Active", true)]
+    [InlineData("PendingActivation", true)]
+    [InlineData("Disabled", false)]
+    public async Task AdminPasswordResetPersistsAndLoginUsesNewPassword(string status, bool canLogin)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var database = new IdentityDbContext(new DbContextOptionsBuilder<IdentityDbContext>().UseSqlite(connection).Options);
+        await database.Database.EnsureCreatedAsync();
+        database.TenantAgencies.Add(new TenantAgency { TenantId = "agency", AgencyName = "Test agency", ContactEmail = "agency@example.test" });
+        database.UserAccounts.Add(new UserAccount
+        {
+            UserId = "reset-target", TenantId = "agency", FullName = "Reset Test", Email = "reset@example.test",
+            SystemRole = "Broker", AccountStatus = status, PasswordHash = "OldPassword123!",
+            ActivationToken = "old-invitation", ActivationTokenExpiry = DateTime.UtcNow.AddDays(1)
+        });
+        await database.SaveChangesAsync();
+        var controller = CreateRegistrationController(database, new CapturingEmail());
+        Assert.IsType<OkObjectResult>(await controller.ResetUserPassword("reset-target", new UserPasswordUpdateRequest { NewPassword = "NewPassword123!" }));
+        database.ChangeTracker.Clear();
+        var user = await database.UserAccounts.SingleAsync();
+        Assert.Empty(user.ActivationToken);
+        Assert.Null(user.ActivationTokenExpiry);
+        Assert.True(Identity.Microservice.Services.Accounts.AccountPasswordHelper.Verify(user, "NewPassword123!"));
+        Assert.IsType<UnauthorizedObjectResult>(await controller.Login(new LoginRequest { Email = user.Email, Password = "OldPassword123!" }));
+        var login = await controller.Login(new LoginRequest { Email = user.Email, Password = "NewPassword123!" });
+        if (canLogin) Assert.IsType<OkObjectResult>(login);
+        else Assert.IsType<UnauthorizedObjectResult>(login);
+    }
+
     private static AuthController CreateRegistrationController(IdentityDbContext database, IEmailService email)
     {
         var configuration = new ConfigurationBuilder()
