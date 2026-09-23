@@ -36,14 +36,13 @@ export function loadGoogleMaps() {
     };
 
     const rejectMapsLoad = () => {
-      mapsPromise = null;
+      document.querySelector('script[data-google-maps-library="property-map"]')?.remove();
       reject(new Error('Google Maps could not load. Check the API key and network connection.'));
     };
 
     window[callbackName] = resolveMaps;
 
     if (existingScript) {
-      existingScript.addEventListener('load', resolveMaps, { once: true });
       existingScript.addEventListener('error', rejectMapsLoad, { once: true });
       if (window.google?.maps?.importLibrary) {
         resolveMaps();
@@ -55,10 +54,14 @@ export function loadGoogleMaps() {
     script.src = scriptUrl;
     script.async = true;
     script.dataset.googleMapsLibrary = 'property-map';
-    script.onload = resolveMaps;
+    // With loading=async, only the API callback signals readiness.
     script.onerror = rejectMapsLoad;
     document.head.appendChild(script);
   });
 
+  mapsPromise = mapsPromise.catch(error => {
+    mapsPromise = null;
+    throw error;
+  });
   return mapsPromise;
 }

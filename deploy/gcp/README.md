@@ -90,3 +90,20 @@ deployment scripts grant their runtime accounts access and inject the pinned
 version as `Resend__ApiToken`. `RESEND_SECRET_VERSION` defaults to `3`; update it
 and redeploy both services after rotating the key. See
 [email configuration](../../docs/resend-email.md) for local setup and verification.
+
+
+### PayFast credentials
+
+Before deploying Identity (or the full ecosystem), create these secrets in the target Google Cloud project:
+
+| Secret Manager name | Identity environment variable | Deployment version override |
+| --- | --- | --- |
+| `payfast-merchant-id` | `PayFast__MerchantId` | `PAYFAST_MERCHANT_ID_SECRET_VERSION` |
+| `payfast-merchant-key` | `PayFast__MerchantKey` | `PAYFAST_MERCHANT_KEY_SECRET_VERSION` |
+| `payfast-passphrase` | `PayFast__PassPhrase` | `PAYFAST_PASSPHRASE_SECRET_VERSION` |
+
+Enter the respective PayFast value through Secret Manager; do not commit credential values to appsettings or scripts. Each version override defaults to `latest`; an explicit version can still be supplied when needed. Secret-backed environment variables are resolved when an instance starts, so redeploy Identity after rotating credentials to refresh running instances.
+
+Both `deploy.sh` and `deploy-service.sh identity-service` check that the secrets exist, grant Identity's service account Secret Manager Secret Accessor on each secret, and inject the selected versions (default `latest`) into Identity. Existing JWT, database and Resend mappings are retained. No PayFast secrets are granted to CRM or Property. Creating or rotating the secret alone does not update the deployed revision.
+
+These mappings override the corresponding `PayFast` appsettings values. PayFast URLs remain ordinary configuration; secret injection does not change sandbox endpoints to production endpoints.

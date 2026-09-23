@@ -9,6 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 RESEND_SECRET_VERSION="${RESEND_SECRET_VERSION:-3}"
+# Use the latest PayFast secrets unless a version override is provided.
+PAYFAST_MERCHANT_ID_SECRET_VERSION="${PAYFAST_MERCHANT_ID_SECRET_VERSION:-latest}"
+PAYFAST_MERCHANT_KEY_SECRET_VERSION="${PAYFAST_MERCHANT_KEY_SECRET_VERSION:-latest}"
+PAYFAST_PASSPHRASE_SECRET_VERSION="${PAYFAST_PASSPHRASE_SECRET_VERSION:-latest}"
 
 PROJECT_ID="${PROJECT_ID:-}"
 REGION="${REGION:-africa-south1}"
@@ -41,6 +45,14 @@ if [[ "${SERVICE_NAME}" == "identity-service" || "${SERVICE_NAME}" == "crm-servi
     error "Create the resend-api-token secret in Secret Manager before deploying. See deploy/gcp/README.md."
   fi
   grant_secret_accessor "${SERVICE_NAME}-sa@${PROJECT_ID}.iam.gserviceaccount.com" resend-api-token
+fi
+if [ "${SERVICE_NAME}" = "identity-service" ]; then
+  for payfast_secret in payfast-merchant-id payfast-merchant-key payfast-passphrase; do
+    if ! secret_exists "${payfast_secret}"; then
+      error "Create the ${payfast_secret} secret in Secret Manager before deploying Identity. See deploy/gcp/README.md."
+    fi
+    grant_secret_accessor "identity-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${payfast_secret}"
+  done
 fi
 gcloud config set project "${PROJECT_ID}" --quiet
 
@@ -178,9 +190,11 @@ case "${SERVICE_NAME}" in
     append_env_var "${ENV_FILE}" Cors__AllowedOrigins "${CORS_LIST}"
     append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
     append_env_var "${ENV_FILE}" Urls__FrontendClient "${APP_PUBLIC_URL}"
+    append_env_var "${ENV_FILE}" SampleData__PropertyServiceUrl "${PROPERTY_URL}"
+    append_env_var "${ENV_FILE}" SampleData__CrmServiceUrl "${CRM_URL}"
     deploy_backend identity-service 5001 identity-service-sa 1 1Gi 1 --no-cpu-throttling \
       --env-vars-file="${ENV_FILE}" \
-      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest,Resend__ApiToken=resend-api-token:${RESEND_SECRET_VERSION}"
+      --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest,Resend__ApiToken=resend-api-token:${RESEND_SECRET_VERSION},PayFast__MerchantId=payfast-merchant-id:${PAYFAST_MERCHANT_ID_SECRET_VERSION},PayFast__MerchantKey=payfast-merchant-key:${PAYFAST_MERCHANT_KEY_SECRET_VERSION},PayFast__PassPhrase=payfast-passphrase:${PAYFAST_PASSPHRASE_SECRET_VERSION}"
     rm -f "${ENV_FILE}"
     ;;
   property-service)

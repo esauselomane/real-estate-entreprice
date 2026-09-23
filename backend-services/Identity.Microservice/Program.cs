@@ -1,3 +1,4 @@
+using Identity.Microservice.Services.SampleData;
 using Shared.Presentation.Email;
 using Identity.Microservice.Data;
 using Identity.Microservice.DTOs;
@@ -59,6 +60,9 @@ builder.Services.Configure<PaymentSettings>(builder.Configuration.GetSection("Pa
 builder.Services.AddScoped<IPaymentGatewayFactory, PaymentGatewayFactory>();
 builder.Services.AddScoped<PaymentOrchestrationService>();
 builder.Services.AddHostedService<BillingNotificationWorker>();
+builder.Services.AddHttpClient("SampleData", client => client.Timeout = TimeSpan.FromSeconds(60));
+builder.Services.AddScoped<SampleDataProcessor>();
+builder.Services.AddHostedService<SampleDataWorker>();
 builder.Services.AddScoped<IBillingNotificationEmailSender, BillingNotificationEmailSender>();
 
 builder.Services.AddScoped<TokenService>();
@@ -122,6 +126,7 @@ using (var scope = app.Services.CreateScope())
     ");
     // 🎯 Apply any future migrations added via `dotnet ef migrations add`
     db.Database.Migrate();
+    SampleDataSchema.EnsureCreated(db);
     // 🪪 Add LicenseNumber + LicenseExpiry columns for broker licensing
     // and BrokerageLicense column for agency-level brokerage license
     db.Database.ExecuteSqlRaw(@"

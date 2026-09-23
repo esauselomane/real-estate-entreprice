@@ -27,6 +27,7 @@ namespace CRM.Microservice.Data
         {
         }
 
+        public DbSet<Shared.Access.SampleData.SampleDataReceipt> SampleDataReceipts { get; set; }
         public DbSet<CRMCompany> CRMCompanies { get; set; }
         public DbSet<AgencyRecord> AgencyRecords { get; set; }
         public DbSet<BrokerRecord> BrokerRecords { get; set; }
@@ -49,6 +50,7 @@ namespace CRM.Microservice.Data
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<DealRecord>().HasOne<LeadRecord>().WithMany().HasForeignKey(item => item.SourceLeadId).OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<LeadRecord>()
                 .Property(l => l.LeadStage)

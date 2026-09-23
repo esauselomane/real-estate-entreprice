@@ -1,3 +1,4 @@
+using CRM.Microservice.Services.SampleData;
 using Shared.Presentation.Email;
 using CRM.Microservice.Data;
 using CRM.Microservice.Models;
@@ -101,6 +102,7 @@ builder.Services.AddScoped<PermissionCheckService>();
 builder.Services.AddScoped<IPropertyCountService, PropertyCountService>();
 builder.Services.AddScoped<IEmailNotificationService, EmailNotificationService>();
 
+builder.Services.AddScoped<SampleDataSeeder>();
 var app = builder.Build();
 
 // Ensure database is created
@@ -130,6 +132,7 @@ using (var scope = app.Services.CreateScope())
         // Skip stale migration replay and continue — the tables already exist.
         Console.WriteLine($"[CRM] Skipping migration replay (tables already exist): {ex.Message}");
     }
+    SampleDataStorage.EnsureCreated(db);
     await CRMSeedData.EnsureSeededAsync(
         db,
         agencyRepository,

@@ -7,12 +7,12 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace Identity.Microservice.Services
 {
-    public class TokenService
+    public class TokenService(IConfiguration? configuration = null)
     {
-        public string GenerateAccessToken(UserAccount account, UserAccessClaim permissions)
+        public string GenerateAccessToken(UserAccount account, UserAccessClaim permissions, TimeSpan? lifetime = null)
         {
             // Establish security signature parameters
-            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("SuperSecretRealEstateEnterpriseCryptographicSigningKey123!"));
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration?["Jwt:Secret"] ?? "SuperSecretRealEstateEnterpriseCryptographicSigningKey123!"));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
             // 🔒 INJECT ENCRYPTED MULTI-TENANT ROLES AND CLAIMS ARRAYS
@@ -37,10 +37,10 @@ namespace Identity.Microservice.Services
             };
 
             var tokenSignature = new JwtSecurityToken(
-                issuer: "Identity.Microservice",
-                audience: "RealEstateApp.Client",
+                issuer: configuration?["Jwt:Issuer"] ?? "Identity.Microservice",
+                audience: configuration?["Jwt:Audience"] ?? "RealEstateApp.Client",
                 claims: tokenClaims,
-                expires: DateTime.UtcNow.AddHours(8), // Valid for standard shift duration
+                expires: DateTime.UtcNow.Add(lifetime ?? TimeSpan.FromHours(8)), // Valid for standard shift duration
                 signingCredentials: credentials);
 
             return new JwtSecurityTokenHandler().WriteToken(tokenSignature);

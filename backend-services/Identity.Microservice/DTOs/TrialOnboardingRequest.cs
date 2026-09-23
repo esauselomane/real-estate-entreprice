@@ -4,6 +4,7 @@ namespace Identity.Microservice.DTOs
 {
     public record class TrialOnboardingRequest
     {
+        public bool IncludeSampleData { get; set; }
         public string AgencyName { get; set; } = string.Empty;
         public string TradingName { get; set; } = string.Empty;
         public string RegistrationNumber { get; set; } = string.Empty;

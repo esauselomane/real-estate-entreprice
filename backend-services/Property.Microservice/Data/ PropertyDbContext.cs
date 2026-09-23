@@ -11,6 +11,7 @@ namespace Property.Microservice.Data
         {
         }
 
+        public DbSet<Shared.Access.SampleData.SampleDataReceipt> SampleDataReceipts { get; set; }
         public DbSet<SyndicationConnection> SyndicationConnections { get; set; } = null!;
         public DbSet<SyndicationPublication> SyndicationPublications { get; set; } = null!;
         public DbSet<SyndicationCommand> SyndicationCommands { get; set; } = null!;

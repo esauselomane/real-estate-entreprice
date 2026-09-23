@@ -23,6 +23,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 RESEND_SECRET_VERSION="${RESEND_SECRET_VERSION:-3}"
+# Use the latest PayFast secrets unless a version override is provided.
+PAYFAST_MERCHANT_ID_SECRET_VERSION="${PAYFAST_MERCHANT_ID_SECRET_VERSION:-latest}"
+PAYFAST_MERCHANT_KEY_SECRET_VERSION="${PAYFAST_MERCHANT_KEY_SECRET_VERSION:-latest}"
+PAYFAST_PASSPHRASE_SECRET_VERSION="${PAYFAST_PASSPHRASE_SECRET_VERSION:-latest}"
 
 PROJECT_ID="${PROJECT_ID:-}"
 REGION="${REGION:-africa-south1}"
@@ -160,6 +164,12 @@ if ! secret_exists resend-api-token; then
   error "Create the resend-api-token secret in Secret Manager before deploying. See deploy/gcp/README.md."
 fi
 
+for payfast_secret in payfast-merchant-id payfast-merchant-key payfast-passphrase; do
+  if ! secret_exists "${payfast_secret}"; then
+    error "Create the ${payfast_secret} secret in Secret Manager before deploying. See deploy/gcp/README.md."
+  fi
+done
+
 log "Configuring Private Services Access for Cloud SQL..."
 gcloud compute addresses describe google-managed-services-default \
   --global \
@@ -257,6 +267,9 @@ grant_secret_accessor "property-service-sa@${PROJECT_ID}.iam.gserviceaccount.com
 grant_secret_accessor "crm-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${CRM_CONN_SECRET}"
 grant_secret_accessor "identity-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" resend-api-token
 grant_secret_accessor "crm-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" resend-api-token
+for payfast_secret in payfast-merchant-id payfast-merchant-key payfast-passphrase; do
+  grant_secret_accessor "identity-service-sa@${PROJECT_ID}.iam.gserviceaccount.com" "${payfast_secret}"
+done
 
 deploy_backend() {
   local name=$1
@@ -311,7 +324,7 @@ append_env_var "${IDENTITY_ENV}" AllowedOrigins "${INITIAL_CORS}"
 append_env_var "${IDENTITY_ENV}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
 deploy_backend identity-service 5001 identity-service-sa 1 1Gi 1 --no-cpu-throttling \
   --env-vars-file="${IDENTITY_ENV}" \
-  --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest,Resend__ApiToken=resend-api-token:${RESEND_SECRET_VERSION}"
+  --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest,Resend__ApiToken=resend-api-token:${RESEND_SECRET_VERSION},PayFast__MerchantId=payfast-merchant-id:${PAYFAST_MERCHANT_ID_SECRET_VERSION},PayFast__MerchantKey=payfast-merchant-key:${PAYFAST_MERCHANT_KEY_SECRET_VERSION},PayFast__PassPhrase=payfast-passphrase:${PAYFAST_PASSPHRASE_SECRET_VERSION}"
 rm -f "${IDENTITY_ENV}"
 IDENTITY_URL="$(run_url identity-service)"
 IDENTITY_HOST="$(host_from_url "${IDENTITY_URL}")"
@@ -471,7 +484,7 @@ fi
 gcloud run services update identity-service \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
-  --update-env-vars="Urls__FrontendClient=${EMAIL_APP_URL}" \
+  --update-env-vars="Urls__FrontendClient=${EMAIL_APP_URL},SampleData__PropertyServiceUrl=${PROPERTY_URL},SampleData__CrmServiceUrl=${CRM_URL}" \
   --quiet
 gcloud run services update crm-service \
   --region="${REGION}" \

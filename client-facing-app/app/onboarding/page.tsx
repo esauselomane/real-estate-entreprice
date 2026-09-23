@@ -10,6 +10,7 @@ type FormState = "idle" | "submitting" | "success" | "error";
 export default function OnboardingPage() {
   const [state, setState] = useState<FormState>("idle");
   const [error, setError] = useState("");
+  const [includeSampleData, setIncludeSampleData] = useState(false);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -20,6 +21,7 @@ export default function OnboardingPage() {
     const formData = new FormData(form);
 
     const payload = {
+      includeSampleData,
       agencyName: formData.get("companyName")?.toString().trim() || "",
       tradingName: formData.get("tradingName")?.toString().trim() || "",
       registrationNumber: formData.get("registrationNumber")?.toString().trim() || "",
@@ -74,6 +76,15 @@ export default function OnboardingPage() {
                 {error}
               </div>
             )}
+
+            <label className="flex items-start gap-3 rounded-xl border border-blue-500/30 bg-blue-500/5 p-4">
+              <input type="checkbox" name="includeSampleData" checked={includeSampleData}
+                onChange={event => setIncludeSampleData(event.target.checked)} disabled={state === "submitting" || state === "success"}
+                className="mt-1 accent-blue-500" />
+              <span><span className="block text-sm font-semibold text-white">Request sample data</span>
+                <span className="mt-1 block text-xs leading-5 text-slate-400">Explore a connected example with 5 contacts, 5 brokers, 5 nearby sample properties, 1 company, 1 legal entity, 5 leads and 5 deals. All records are fictional and belong only to your agency. Your address is used to locate the sample properties.</span>
+              </span>
+            </label>
 
             <div className="grid gap-6 sm:grid-cols-2">
               <div className="sm:col-span-2">
@@ -136,6 +147,7 @@ export default function OnboardingPage() {
                 </label>
                 <textarea
                   name="headquartersAddress"
+                  required={includeSampleData}
                   rows={3}
                   placeholder="123 Main Street, City, Country"
                   disabled={state === "submitting" || state === "success"}
@@ -202,7 +214,7 @@ export default function OnboardingPage() {
                 </div>
               </div>
               <p className="mt-4 text-center text-sm font-medium text-slate-300">
-                Your onboarding has been submitted successfully.
+                Your onboarding has been submitted successfully. {includeSampleData && "Your sample data request has been recorded. Our platform administrator will prepare your linked sample workspace, and we’ll email you when it is ready."}
               </p>
               <p className="mt-1 text-center text-xs text-slate-400">
                 Check your email to set your password and activate your account.

@@ -1,21 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 
-let mapsLoading;
-function loadPlaces() {
-  if (window.google?.maps?.importLibrary) return window.google.maps.importLibrary('places');
-  if (!mapsLoading) {
-    mapsLoading = new Promise((resolve, reject) => {
-      const key = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-      if (!key) { reject(new Error('Google address search is not configured. Enter the address and coordinates manually.')); return; }
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=places&v=weekly&loading=async&callback=propertyMapsReady`;
-      script.async = true;
-      window.propertyMapsReady = () => resolve(window.google.maps.importLibrary('places'));
-      script.onerror = () => reject(new Error('Google address search could not load. Enter the address and coordinates manually.'));
-      document.head.appendChild(script);
-    });
-  }
-  return mapsLoading;
+import { loadGoogleMaps } from './GoogleMapsLoader.js';
+
+async function loadPlaces() {
+  const importLibrary = await loadGoogleMaps();
+  return importLibrary('places');
 }
 
 export default function GoogleAddressPicker({ onSelect }) {

@@ -13,6 +13,7 @@ namespace Identity.Microservice.Data
         }
 
         // Map data models directly to real database structural tables
+        public DbSet<SampleDataJob> SampleDataJobs { get; set; }
         public DbSet<TenantAgency> TenantAgencies { get; set; }
         public DbSet<PasswordRecoveryToken> PasswordRecoveryTokens { get; set; }
         public DbSet<UserAccount> UserAccounts { get; set; }

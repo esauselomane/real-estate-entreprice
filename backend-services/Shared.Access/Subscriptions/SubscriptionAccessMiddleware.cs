@@ -13,7 +13,8 @@ public sealed class SubscriptionAccessMiddleware(RequestDelegate next)
     public async Task InvokeAsync(HttpContext context, IHttpClientFactory clients, IConfiguration configuration, ILogger<SubscriptionAccessMiddleware> logger)
     {
         if (context.User.Identity?.IsAuthenticated != true || context.GetEndpoint()?.Metadata.GetMetadata<IAllowAnonymous>() != null
-            || context.GetEndpoint() == null || context.User.IsInRole("SuperAdmin") || context.User.IsInRole("PlatformAdmin"))
+            || context.GetEndpoint() == null ||
+            (context.GetEndpoint()?.Metadata.GetMetadata<Shared.Access.SampleData.SampleDataEndpointAttribute>() != null && context.User.IsInRole(Shared.Access.SampleData.SampleDataBlueprint.ServiceRole)) || context.User.IsInRole("SuperAdmin") || context.User.IsInRole("PlatformAdmin"))
         {
             await next(context);
             return;

@@ -17,8 +17,10 @@ namespace Identity.Payments.Tests;
 
 public sealed class RegistrationEmailTests
 {
-    [Fact]
-    public async Task TrialOnboardingPersistsTheAccountAndSendsPasswordSetupEmail()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TrialOnboardingPersistsTheAccountAndSendsPasswordSetupEmail(bool requestSampleData)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -54,7 +56,9 @@ public sealed class RegistrationEmailTests
             AgencyName = "Acme Property Group",
             AdminFullName = "Amina Khan",
             AdminEmail = "admin@example.com",
-            BrokerageLicense = "BROKER-123"
+            BrokerageLicense = "BROKER-123",
+            HeadquartersAddress = "Sandton, Johannesburg",
+            IncludeSampleData = requestSampleData
         });
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -68,6 +72,14 @@ public sealed class RegistrationEmailTests
         Assert.Equal("admin@example.com", savedLead.Email);
         Assert.Equal("onboarding", savedLead.Source);
         Assert.NotNull(ok.Value);
+        if (requestSampleData)
+        {
+            var job = Assert.Single(database.SampleDataJobs);
+            Assert.Equal("Requested", job.State);
+            Assert.Null(job.ApprovedBy);
+            Assert.Equal(Assert.Single(database.TenantAgencies).TenantId, job.TenantId);
+        }
+        else Assert.Empty(database.SampleDataJobs);
     }
 
     [Fact]
@@ -107,7 +119,9 @@ public sealed class RegistrationEmailTests
             AgencyName = "Acme Property Group",
             AdminFullName = "Amina Khan",
             AdminEmail = "admin@example.com",
-            BrokerageLicense = "BROKER-123"
+            BrokerageLicense = "BROKER-123",
+            HeadquartersAddress = "Sandton, Johannesburg",
+            IncludeSampleData = true
         });
 
         var badGateway = Assert.IsType<ObjectResult>(result);
@@ -117,6 +131,7 @@ public sealed class RegistrationEmailTests
         Assert.Empty(database.UserAccounts);
         Assert.Empty(database.TenantAgencies);
         Assert.Empty(database.UserAccessClaims);
+        Assert.Empty(database.SampleDataJobs);
     }
 
     [Theory]
