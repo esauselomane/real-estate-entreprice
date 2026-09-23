@@ -190,7 +190,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
     e.preventDefault();
     const targetAgency = editingContact ? editingContact.agencyId : expandedAgency;
     try {
-       if (editingContact) await crmService.updateContact(editingContact.contactId, contactForm);
+       if (editingContact) await crmService.updateContact({ ...editingContact, ...contactForm, contactId: editingContact.contactId, agencyId: targetAgency });
       else await crmService.createContactPerson(targetAgency, contactForm);
       setContactForm({ fullName: '', emailAddress: '', phoneNumber: '', positionJobTitle: '', contactType: 'Staff', isAgencyAdmin: false });
       setEditingContact(null);
@@ -620,7 +620,7 @@ export default function SystemAdminWorkspace({ defaultTab }) {
                const targetAgency = agencies.find(agency => agency.tenantId === targetTenantId);
                if (!editingUser && userForm.systemRole === 'Broker' && !targetAgency) throw new Error('Select the agency for this broker.');
                 if (editingUser && editingUser.userId) {
-                  await authService.updateUserRole(editingUser.userId, userForm.systemRole);
+                  if (userForm.systemRole !== editingUser.systemRole) await authService.updateUserRole(editingUser.userId, userForm.systemRole);
                   if (userForm.password) {
                     await authService.adminResetPassword(editingUser.userId, userForm.password);
                   }

@@ -1,3 +1,4 @@
+import { leaseTerminationAmount } from '../utils/leaseInterest.js';
 import ListingPortalsPanel from './ListingPortalsPanel.jsx';
 import GooglePropertyMapPicker from './maps/GooglePropertyMapPicker.jsx';
 import PropertyStaticMap from './maps/PropertyStaticMap.jsx';
@@ -614,24 +615,6 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
     if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return '—';
     const months = Math.round(((e - s) / (1000 * 60 * 60 * 24 * 30.4375)) * 10) / 10;
     return `${months} month${months === 1 ? '' : 's'}`;
-  };
-
-  // 💰 Amount due to tenant on lease termination.
-  //   total = deposit × (1 + rate × (months / 12))
-  // `rate` is a percentage per year (e.g. 5 means 5% p.a.).
-  // Returns null if any input is missing/invalid.
-  const leaseTerminationAmount = (deposit, ratePct, start, end) => {
-    const d = Number(deposit);
-    const r = Number(ratePct);
-    if (!Number.isFinite(d) || d <= 0) return null;
-    if (!Number.isFinite(r) || r < 0) return null;
-    if (!start || !end) return null;
-    const s = new Date(start);
-    const e = new Date(end);
-    if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return null;
-    const months = (e - s) / (1000 * 60 * 60 * 24 * 30.4375);
-    const years = months / 12;
-    return d * (1 + (r / 100) * years);
   };
 
   const resetUnitOpForm = () => {
@@ -1506,7 +1489,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                             <label className="label">Deposit (R)<input type="number" min="0" value={leaseForm.depositAmount ?? ''} onChange={(e) => setLeaseForm({ ...leaseForm, depositAmount: e.target.value })} className="field" /></label>
                           </div>
 
-                          <label className="label">Accrued interest on deposit (% per year)<input type="number" min="0" step="0.01" value={leaseForm.accruedInterestPercent ?? ''} onChange={(e) => setLeaseForm({ ...leaseForm, accruedInterestPercent: e.target.value })} className="field" placeholder="e.g. 5.00" /></label>
+                          <label className="label">Deposit interest (% per year, compounded monthly)<input type="number" min="0" step="0.01" value={leaseForm.accruedInterestPercent ?? ''} onChange={(e) => setLeaseForm({ ...leaseForm, accruedInterestPercent: e.target.value })} className="field" placeholder="e.g. 5.00" /></label>
 
                           {/* 💰 Live read-only label — recomputed on every keystroke so the
                               user can see the termination value update as they edit deposit /
@@ -1523,20 +1506,17 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                             if (total == null) {
                               return (
                                 <div className="p-2.5 rounded-xl bg-slate-950/40 border border-dashed border-slate-800 text-[10px] text-slate-500">
-                                  Amount due to tenant on lease termination: enter deposit, rate, and both dates to preview.
+                                  Estimated amount due at lease end: enter deposit, rate, and both dates to preview.
                                 </div>
                               );
                             }
-                            const previewExpired = leaseForm.leaseEnd && new Date(leaseForm.leaseEnd) < new Date();
-                            const label = previewExpired
-                              ? 'Amount paid to tenant on lease termination'
-                              : 'Amount due to tenant on lease termination';
+                            const label = 'Estimated amount due at lease end';
                             return (
                               <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-900">
                                 <span className="block text-[10px] text-emerald-400 uppercase font-bold tracking-wider">{label}</span>
-                                <span className="text-lg font-black text-emerald-200">R {Math.round(total).toLocaleString()}</span>
+                                <span className="text-lg font-black text-emerald-200">R {total.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 <span className="block text-[10px] text-emerald-400/70 mt-0.5">
-                                  Deposit {Number(leaseForm.depositAmount).toLocaleString()} + interest at {Number(leaseForm.accruedInterestPercent)}% p.a. over {leaseTermLabel(leaseForm.leaseStart, leaseForm.leaseEnd)}
+                                  Deposit {Number(leaseForm.depositAmount).toLocaleString()} + interest at {Number(leaseForm.accruedInterestPercent)}% p.a., compounded monthly over {leaseTermLabel(leaseForm.leaseStart, leaseForm.leaseEnd)}
                                 </span>
                               </div>
                             );
@@ -1641,13 +1621,11 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                                 historyDetail.leaseEnd
                               );
                               if (total == null) return null;
-                              const label = historyDetail.isExpired
-                                ? 'Amount paid to tenant on lease termination'
-                                : 'Amount due to tenant on lease termination';
+                              const label = 'Estimated amount due at lease end';
                               return (
                                 <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-900">
                                   <span className="block text-[10px] text-emerald-400 uppercase font-bold tracking-wider">{label}</span>
-                                  <span className="text-lg font-black text-emerald-200">R {Math.round(total).toLocaleString()}</span>
+                                  <span className="text-lg font-black text-emerald-200">R {total.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                                 </div>
                               );
                             })()}
