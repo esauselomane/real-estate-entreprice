@@ -2,9 +2,10 @@
 
 ## Current implementation and boundary
 
-Agency at a Glance now contains **Listing platforms**. Agency/platform administrators
+Agency at a Glance now contains **Listing platforms**. Only PlatformAdmin users with agency-edit permission
 use Add/Edit connection to save an agency API key, branch reference and any provider-defined
-non-secret settings separately for Sandbox and Production. Only the saved-key status is
+non-secret settings separately for Sandbox and Production. Agency administrators can view their connection status but cannot add, replace or remove
+credentials, including through direct API calls. Only the saved-key status is
 returned to browsers. Blank keys keep the existing value; removal is explicit.
 
 Broker add/edit in the user workspace contains per-provider, per-environment AgentCodes.

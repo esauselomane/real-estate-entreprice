@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import apiClient from '../services/apiClient.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 import { usePermission } from '../contexts/PermissionContext.jsx';
 
 export default function AgencySyndicationSettings({ tenantId }) {
@@ -8,6 +9,8 @@ export default function AgencySyndicationSettings({ tenantId }) {
   const [retryCount, setRetryCount] = useState(0);
   const [environment, setEnvironment] = useState('Sandbox');
   const { hasPermission } = usePermission();
+  const { userRole } = useAuth();
+  const canManageCredentials = userRole === 'PlatformAdmin' && hasPermission('agencies:edit');
   useEffect(() => {
     if (!tenantId || tenantId === '__all__') return;
     const controller = new AbortController();
@@ -25,7 +28,7 @@ export default function AgencySyndicationSettings({ tenantId }) {
       {error && <p role="alert" className="text-red-300 text-sm">{error} <button type="button" onClick={() => { setError(''); setRetryCount(count => count + 1); }} className="ml-2 underline text-blue-300">Retry</button></p>}
       {!data && !error && <p className="text-slate-400 text-sm">Loading platforms…</p>}
       {data?.providers.map(provider => <AgencyPortalEditor key={`${tenantId}:${provider.key}:${environment}`} tenantId={tenantId} provider={provider} environment={environment}
-        connection={data.connections.find(item => item.providerKey === provider.key && item.environment === environment)} canEdit={hasPermission('agencies:edit')}
+        connection={data.connections.find(item => item.providerKey === provider.key && item.environment === environment)} canEdit={canManageCredentials}
         onSaved={connection => setData(previous => ({ ...previous, connections: [...previous.connections.filter(item => item.id !== connection.id), connection] }))} />)}
     </>}
   </section>;
@@ -52,8 +55,9 @@ function AgencyPortalEditor({ tenantId, provider, environment, connection, canEd
     <div className="flex justify-between gap-3"><strong className="text-white">{provider.name}</strong><span className={`text-xs ${connection?.hasApiKey ? 'text-emerald-300' : 'text-amber-300'}`}>{connection?.hasApiKey ? 'API key saved' : 'Preview · No API key'}</span></div>
     <p className="text-xs text-slate-400">{environment} connection. Broker AgentCodes are managed when adding or editing a broker.</p>
     {!provider.ready && <p className="text-xs text-amber-200">{provider.setupMessage}</p>}
+    {!canEdit && <p className="text-xs text-slate-400">Only a platform administrator can add or change this agency’s platform credentials.</p>}
     {!editing && canEdit && <button type="button" onClick={() => setEditing(true)} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">{connection?.hasApiKey ? 'Edit connection' : 'Add connection'}</button>}
-    {editing && <form onSubmit={save} className="space-y-3">
+    {editing && canEdit && <form onSubmit={save} className="space-y-3">
       <label className="block text-xs text-slate-300">API key<input type="password" autoComplete="new-password" maxLength={4096} disabled={busy || removeApiKey} value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={connection?.hasApiKey ? 'Leave blank to keep the saved key' : 'Enter agency API key'} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white" /></label>
       <label className="block text-xs text-slate-300">Portal branch ID<input maxLength={200} disabled={busy} value={branchId} onChange={event => setBranchId(event.target.value)} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white" /></label>
       {(provider.settings || []).map(field => <label key={field.key} className="block text-xs text-slate-300">{field.label}<input maxLength={500} disabled={busy} value={settings[field.key] || ''} onChange={event => setSettings(previous => ({ ...previous, [field.key]: event.target.value }))} className="mt-1 w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white" /></label>)}

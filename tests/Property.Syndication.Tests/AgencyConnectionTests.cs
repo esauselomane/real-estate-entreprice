@@ -25,7 +25,7 @@ public sealed class AgencyConnectionTests
         await using var fixture = await SyndicationFixture.CreateAsync();
         var configuration = Configuration();
         var protector = new AgencyApiKeyProtector(new EphemeralDataProtectionProvider(), configuration, new TestHostEnvironment());
-        var controller = CreateController(fixture, configuration, "agency");
+        var controller = CreateController(fixture, configuration, "agency", "PlatformAdmin");
         var request = new AgencyConnectionRequest("Sandbox", "branch", "first-secret");
         var response = Assert.IsType<OkObjectResult>(await controller.SaveAgencyConnection("agency", "test-provider", request, protector, default));
         Assert.DoesNotContain("first-secret", JsonSerializer.Serialize(response.Value));
@@ -49,6 +49,23 @@ public sealed class AgencyConnectionTests
         Assert.IsType<ForbidResult>(await controller.GetAgencyConnections("agency", default));
         Assert.IsType<ForbidResult>(await controller.SaveAgencyConnection("agency", "test-provider", new("Sandbox", "", "secret"), null!, default));
         Assert.Equal("test-only", fixture.Connection.ProtectedApiKey);
+    }
+
+    [Theory]
+    [InlineData("AgencyAdmin", false)]
+    [InlineData("AgencyAdmin", true)]
+    [InlineData("Broker", false)]
+    [InlineData("Owner", false)]
+    [InlineData("Tenant", false)]
+    public async Task NonPlatformRolesCannotSaveOrRemoveAgencyKeysEvenWithEditPermission(string role, bool remove)
+    {
+        await using var fixture = await SyndicationFixture.CreateAsync();
+        var controller = CreateController(fixture, Configuration(), "agency", role);
+        var request = new AgencyConnectionRequest("Sandbox", "changed-branch", remove ? null : "replacement", remove);
+        Assert.IsType<ForbidResult>(await controller.SaveAgencyConnection("agency", "test-provider", request, null!, default));
+        Assert.Equal("test-only", fixture.Connection.ProtectedApiKey);
+        Assert.Equal(string.Empty, fixture.Connection.BranchId);
+        if (role == "AgencyAdmin") Assert.IsType<OkObjectResult>(await controller.GetAgencyConnections("agency", default));
     }
 
     [Fact]
@@ -84,10 +101,10 @@ public sealed class AgencyConnectionTests
     private static IConfiguration Configuration() => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?> { ["Identity:BaseUrl"] = "https://identity.test" }).Build();
 
-    private static SyndicationController CreateController(SyndicationFixture fixture, IConfiguration configuration, string tenantId)
+    private static SyndicationController CreateController(SyndicationFixture fixture, IConfiguration configuration, string tenantId, string role = "AgencyAdmin")
     {
         var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity([
-            new Claim(ClaimTypes.Role, "AgencyAdmin"), new Claim("TenantId", tenantId)], "test")) };
+            new Claim(ClaimTypes.Role, role), new Claim("TenantId", tenantId)], "test")) };
         var permissions = new PermissionCheckService(new GrantedPermissionClientFactory(), configuration, new HttpContextAccessor { HttpContext = context });
         return new SyndicationController(fixture.Database, permissions, null!, null!, NullLogger<SyndicationController>.Instance,
             fixture.Registry, new SyndicationCoordinator(fixture.Database, fixture.Registry))

@@ -44,7 +44,7 @@ public sealed class SyndicationController(PropertyDbContext database, Permission
     public async Task<IActionResult> SaveAgencyConnection(string tenantId, string providerKey, AgencyConnectionRequest request,
         [FromServices] AgencyApiKeyProtector protector, CancellationToken cancellationToken)
     {
-        if (!CanManageAgency(tenantId) || !await PermissionCheck.HasPermissionAsync("agencies:edit")) return Forbid();
+        if (GetCurrentCanonicalRole() != "PlatformAdmin" || !CanManageAgency(tenantId) || !await PermissionCheck.HasPermissionAsync("agencies:edit")) return Forbid();
         if (request.Environment is not ("Sandbox" or "Production")) return BadRequest(new { message = "Choose Sandbox or Production." });
         if (!registry.All.Any(item => item.Descriptor.Key == providerKey)) return NotFound();
         if ((request.ApiKey?.Length ?? 0) > 4096 || (request.BranchId?.Length ?? 0) > 200)
