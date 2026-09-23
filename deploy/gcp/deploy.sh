@@ -41,7 +41,7 @@ SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo manual)"
 ARTIFACT_REG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}"
 SKIP_DOMAIN_MAPPING="${SKIP_DOMAIN_MAPPING:-0}"
 VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY:-AIzaSyA_ISwPvfaEwCvFl0Q3yCneBa6s_sLuYBk}"
-FORCE_REBUILD="${FORCE_REBUILD:-0}"
+FORCE_REBUILD="${FORCE_REBUILD:-1}"
 
 IDENTITY_CONN_SECRET="identity-service-db-conn-${REGION}"
 PROPERTY_CONN_SECRET="property-service-db-conn-${REGION}"
