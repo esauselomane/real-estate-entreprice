@@ -1,5 +1,6 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
+COPY ["backend-services/Shared.Access/", "backend-services/Shared.Access/"]
 COPY ["backend-services/Shared.Presentation/", "backend-services/Shared.Presentation/"]
 COPY ["frontend-client/public/logo.jpg", "frontend-client/public/logo.jpg"]
 
