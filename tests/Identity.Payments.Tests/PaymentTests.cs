@@ -31,6 +31,61 @@ public sealed class PaymentTests
         Assert.False(PaymentStateHelper.Describe(tenant, subscription, null, now).RequiresUpgrade);
     }
 
+    [Theory]
+    [InlineData(BillingCycle.Monthly, "299.00")]
+    [InlineData(BillingCycle.Annual, "2990.00")]
+    public async Task MothodiInitialPaymentIsTwoRandAndRenewalsUseNormalPrice(BillingCycle cycle, string normalAmount)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var tenant = await fixture.Database.TenantAgencies.SingleAsync();
+        tenant.AgencyName = "Mothodi";
+        await fixture.Database.SaveChangesAsync();
+        var service = new PaymentOrchestrationService(fixture.Database, fixture.Factory,
+            Options.Create(new PaymentSettings { MothodiTestTenantId = tenant.TenantId }), NullLogger<PaymentOrchestrationService>.Instance);
+        var key = Guid.NewGuid().ToString();
+        var request = fixture.Checkout with { BillingCycle = cycle, Amount = 0.01m, RecurringAmount = 0.01m };
+        var checkout = await service.CreateCheckoutSessionAsync(request, key);
+        Assert.Equal("2.00", checkout.FormFields!["amount"]);
+        Assert.Equal(normalAmount, checkout.FormFields["recurring_amount"]);
+        var nextBillingDate = DateTime.ParseExact(checkout.FormFields["billing_date"], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var expectedDate = cycle == BillingCycle.Annual ? DateTime.UtcNow.Date.AddYears(1) : DateTime.UtcNow.Date.AddMonths(1);
+        Assert.Equal(expectedDate, nextBillingDate);
+        Assert.Equal(checkout.SessionId, (await service.CreateCheckoutSessionAsync(request, key)).SessionId);
+        Assert.Equal(2m, (await fixture.Database.PaymentIntents.SingleAsync()).Amount);
+        var first = $"m_payment_id={checkout.SessionId}&pf_payment_id=first-test&payment_status=COMPLETE&token=mothodi-token&amount_gross=2.00";
+        await service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(first), first);
+        await service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(first), first);
+        Assert.Equal(SubscriptionStatus.Active, (await fixture.Database.TenantAgencies.SingleAsync()).SubscriptionStatus);
+        var invalidRenewal = $"m_payment_id={checkout.SessionId}&pf_payment_id=renewal-test&payment_status=COMPLETE&token=mothodi-token&amount_gross=2.00";
+        await Assert.ThrowsAsync<ArgumentException>(() => service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(invalidRenewal), invalidRenewal));
+        var renewal = invalidRenewal.Replace("amount_gross=2.00", $"amount_gross={normalAmount}");
+        await service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(renewal), renewal);
+        Assert.Equal(2, await fixture.Database.WebhookEvents.CountAsync(item => item.Processed));
+        var subscription = await fixture.Database.Subscriptions.SingleAsync();
+        subscription.Status = SubscriptionStatus.Cancelled;
+        subscription.CurrentPeriodEnd = DateTime.UtcNow.AddDays(-1);
+        await fixture.Database.SaveChangesAsync();
+        var replacement = await service.CreateCheckoutSessionAsync(request, Guid.NewGuid().ToString());
+        Assert.Equal(normalAmount, replacement.FormFields!["amount"]);
+        Assert.Equal(normalAmount, replacement.FormFields["recurring_amount"]);
+    }
+
+    [Theory]
+    [InlineData(null, "Mothodi")]
+    [InlineData("other-tenant", "Mothodi")]
+    [InlineData("tenant-a", "Mothodi Other")]
+    public async Task TestChargeRequiresBothConfiguredTenantAndExactAgencyName(string? eligibleTenantId, string name)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        (await fixture.Database.TenantAgencies.SingleAsync()).AgencyName = name;
+        await fixture.Database.SaveChangesAsync();
+        var service = new PaymentOrchestrationService(fixture.Database, fixture.Factory,
+            Options.Create(new PaymentSettings { MothodiTestTenantId = eligibleTenantId }), NullLogger<PaymentOrchestrationService>.Instance);
+        var checkout = await service.CreateCheckoutSessionAsync(fixture.Checkout, Guid.NewGuid().ToString());
+        Assert.Equal("2990.00", checkout.FormFields!["amount"]);
+        Assert.Equal("2990.00", checkout.FormFields["recurring_amount"]);
+    }
+
     [Fact]
     public async Task AnnualCheckoutUsesDatabaseAmountAndReusesIdempotencyKey()
     {

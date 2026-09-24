@@ -70,9 +70,19 @@ public sealed class PaymentOrchestrationService(
         var amount = request.BillingCycle == BillingCycle.Annual ? package.AnnualPrice : package.MonthlyPrice;
         if (amount is null or <= 0)
             throw new ArgumentException("This package requires a sales quote.");
+        var initialAmount = amount.Value;
+        if (provider.GatewayType == PaymentGateway.PayFast &&
+            !string.IsNullOrWhiteSpace(settings.Value.MothodiTestTenantId) &&
+            tenant.TenantId == settings.Value.MothodiTestTenantId &&
+            string.Equals(tenant.AgencyName.Trim(), "Mothodi", StringComparison.OrdinalIgnoreCase) &&
+            !await database.PaymentIntents.AnyAsync(intent => intent.TenantId == tenant.TenantId && intent.CompletedAt != null))
+        {
+            initialAmount = 2m;
+        }
         var gatewayRequest = request with
         {
-            Amount = amount.Value,
+            Amount = initialAmount,
+            RecurringAmount = amount.Value,
             MerchantReference = Guid.NewGuid().ToString("N"),
             CustomerEmail = tenant.ContactEmail,
             CustomerName = tenant.AgencyName,
@@ -83,7 +93,7 @@ public sealed class PaymentOrchestrationService(
         {
             TenantId = tenant.TenantId,
             PeachCheckoutId = gatewayRequest.MerchantReference,
-            Amount = amount.Value,
+            Amount = initialAmount,
             Gateway = provider.GatewayType,
             Status = PaymentIntentStatus.Processing,
             IdempotencyKey = key,
@@ -193,7 +203,8 @@ public sealed class PaymentOrchestrationService(
         }
         if (paymentEvent.SubscriptionStatus == SubscriptionStatus.Active)
         {
-            if (paymentEvent.Amount != intent.Amount)
+            var expectedAmount = intent.CompletedAt.HasValue ? request.RecurringAmount ?? intent.Amount : intent.Amount;
+            if (paymentEvent.Amount != expectedAmount)
                 throw new ArgumentException("Payment amount does not match the subscription agreement.");
             if (subscription?.Status == SubscriptionStatus.Cancelled)
                 throw new ArgumentException("Payment received for cancelled subscription; review required.");
@@ -220,7 +231,7 @@ public sealed class PaymentOrchestrationService(
             subscription.CurrentPeriodEnd = request.BillingCycle == BillingCycle.Annual ? periodStart.AddYears(1) : periodStart.AddMonths(1);
             intent.PeachPaymentId = paymentEvent.GatewaySubscriptionId;
             intent.Status = PaymentIntentStatus.Succeeded;
-            intent.CompletedAt = now;
+            intent.CompletedAt ??= now;
         }
         if (subscription == null && paymentEvent.SubscriptionStatus == SubscriptionStatus.PastDue)
         {

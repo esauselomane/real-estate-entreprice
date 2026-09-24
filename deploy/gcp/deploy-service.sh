@@ -190,6 +190,7 @@ case "${SERVICE_NAME}" in
     append_env_var "${ENV_FILE}" Cors__AllowedOrigins "${CORS_LIST}"
     append_env_var "${ENV_FILE}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
     append_env_var "${ENV_FILE}" Urls__FrontendClient "${APP_PUBLIC_URL}"
+    append_env_var "${ENV_FILE}" Payments__MothodiTestTenantId "${MOTHODI_TEST_TENANT_ID-TEN-c9fc68f69be548d094ac321a3c199041}"
     append_env_var "${ENV_FILE}" SampleData__PropertyServiceUrl "${PROPERTY_URL}"
     append_env_var "${ENV_FILE}" SampleData__CrmServiceUrl "${CRM_URL}"
     deploy_backend identity-service 5001 identity-service-sa 1 1Gi 1 --no-cpu-throttling \

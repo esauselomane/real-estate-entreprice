@@ -31,6 +31,7 @@ namespace Identity.Microservice.Services.Abstractions.Payments
         public string SuccessUrl { get; init; } = string.Empty;
         public string CancelUrl { get; init; } = string.Empty;
         public decimal Amount { get; init; }
+        public decimal? RecurringAmount { get; init; }
         public string MerchantReference { get; init; } = string.Empty;
         public string? CustomerEmail { get; init; }
         public string? CustomerName { get; init; }

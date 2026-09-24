@@ -107,3 +107,12 @@ Enter the respective PayFast value through Secret Manager; do not commit credent
 Both `deploy.sh` and `deploy-service.sh identity-service` check that the secrets exist, grant Identity's service account Secret Manager Secret Accessor on each secret, and inject the selected versions (default `latest`) into Identity. Existing JWT, database and Resend mappings are retained. No PayFast secrets are granted to CRM or Property. Creating or rotating the secret alone does not update the deployed revision.
 
 These mappings override the corresponding `PayFast` appsettings values. PayFast URLs remain ordinary configuration; secret injection does not change sandbox endpoints to production endpoints.
+
+
+### Temporary Mothodi card-payment test
+
+Identity configuration `Payments:MothodiTestTenantId` is scoped to `TEN-c9fc68f69be548d094ac321a3c199041` and requires the stored agency name to equal `Mothodi` (case-insensitive). The GCP scripts set `Payments__MothodiTestTenantId`; override it with `MOTHODI_TEST_TENANT_ID`, or explicitly set that deployment variable to an empty string to disable the test price.
+
+Only the first successful PayFast payment is R2. The signed recurring amount remains the selected plan's normal price, with its first recurring billing date one monthly/annual period after checkout. Normal pricing applies to all other agencies and subsequent checkouts after a successful payment. Webhooks validate the initial amount before completion and the stored recurring amount afterward; duplicate notifications remain idempotent. Existing checkouts retain their originally signed prices: allow any pending 30-minute checkout to expire before starting the R2 test. Existing active subscriptions are not modified.
+
+Deploy Identity before testing. Confirm `2.00` on the new PayFast checkout before submitting your card. No card charge is made by deployment or by the automated tests. This is still a recurring subscription; future payments use the normal plan price.

@@ -322,6 +322,7 @@ append_env_var "${IDENTITY_ENV}" CORS_ORIGINS "${INITIAL_CORS}"
 append_env_var "${IDENTITY_ENV}" Cors__AllowedOrigins "${INITIAL_CORS}"
 append_env_var "${IDENTITY_ENV}" AllowedOrigins "${INITIAL_CORS}"
 append_env_var "${IDENTITY_ENV}" Gateway__BaseUrl "${GATEWAY_PUBLIC_URL}"
+append_env_var "${IDENTITY_ENV}" Payments__MothodiTestTenantId "${MOTHODI_TEST_TENANT_ID-TEN-c9fc68f69be548d094ac321a3c199041}"
 deploy_backend identity-service 5001 identity-service-sa 1 1Gi 1 --no-cpu-throttling \
   --env-vars-file="${IDENTITY_ENV}" \
   --set-secrets="Jwt__Secret=jwt-secret:latest,ConnectionStrings__DefaultConnection=${IDENTITY_CONN_SECRET}:latest,Resend__ApiToken=resend-api-token:${RESEND_SECRET_VERSION},PayFast__MerchantId=payfast-merchant-id:${PAYFAST_MERCHANT_ID_SECRET_VERSION},PayFast__MerchantKey=payfast-merchant-key:${PAYFAST_MERCHANT_KEY_SECRET_VERSION},PayFast__PassPhrase=payfast-passphrase:${PAYFAST_PASSPHRASE_SECRET_VERSION}"
