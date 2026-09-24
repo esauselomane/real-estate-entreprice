@@ -23,7 +23,7 @@ public sealed class PayFastGateway(HttpClient httpClient, IOptions<PayFastSettin
             throw new InvalidOperationException("PayFast recurring billing credentials and passphrase must be configured.");
         if (!Uri.TryCreate(settings.WebhookUrl, UriKind.Absolute, out var webhook) || webhook.Scheme != "https" || webhook.Host.EndsWith("payfast.co.za"))
             throw new InvalidOperationException("Configure the public HTTPS application PayFast webhook URL.");
-        if (request.Amount <= 0)
+        if (request.Amount <= 0 || request.RecurringAmount is <= 0)
             throw new ArgumentException("A positive checkout amount is required.");
         var fields = new Dictionary<string, string>
         {
@@ -39,20 +39,29 @@ public sealed class PayFastGateway(HttpClient httpClient, IOptions<PayFastSettin
             ["item_name"] = $"{request.PricingPackageCode} subscription",
             ["payment_method"] = "cc",
             ["subscription_type"] = "1",
-            ["billing_date"] = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            ["recurring_amount"] = request.Amount.ToString("F2", CultureInfo.InvariantCulture),
+            ["billing_date"] = FirstRecurringBillingDate(request).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            ["recurring_amount"] = (request.RecurringAmount ?? request.Amount).ToString("F2", CultureInfo.InvariantCulture),
             ["frequency"] = request.BillingCycle == BillingCycle.Monthly ? "3" : "6",
             ["cycles"] = "0",
             ["subscription_notify_email"] = "true",
             ["subscription_notify_webhook"] = "true",
             ["subscription_notify_buyer"] = "true"
         };
+        if (request.RecurringAmount.HasValue && request.RecurringAmount != request.Amount)
+            fields["item_description"] = $"Initial payment R{request.Amount.ToString("F2", CultureInfo.InvariantCulture)}; renews at R{request.RecurringAmount.Value.ToString("F2", CultureInfo.InvariantCulture)} {request.BillingCycle.ToString().ToLowerInvariant()}.";
         fields["signature"] = PayFastSignatureHelper.Sign(fields, settings.PassPhrase);
         return Task.FromResult(new CreateCheckoutResult
         {
             CheckoutUrl = settings.ProcessUrl, Method = "POST", FormFields = fields,
             SessionId = request.MerchantReference, ExpiresAt = DateTime.UtcNow.AddMinutes(30), Gateway = GatewayType
         });
+    }
+
+    private static DateTime FirstRecurringBillingDate(CreateCheckoutRequest request)
+    {
+        var today = DateTime.UtcNow.Date;
+        if (!request.RecurringAmount.HasValue || request.RecurringAmount == request.Amount) return today;
+        return request.BillingCycle == BillingCycle.Annual ? today.AddYears(1) : today.AddMonths(1);
     }
 
     public override Task<CreatePortalResult> CreatePortalSessionAsync(CreatePortalRequest request, CancellationToken cancellationToken = default)
