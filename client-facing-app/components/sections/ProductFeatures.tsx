@@ -18,7 +18,7 @@ export default function ProductFeatures() {
           {features.map((feature) => (
             <div
               key={feature.title}
-              className="group rounded-2xl border border-slate-700 bg-slate-800/60 p-6 shadow-lg shadow-black/20 transition-transform hover:-translate-y-0.5"
+              className="feature-card group rounded-2xl border border-slate-700 bg-slate-800/60 p-6 shadow-lg shadow-black/20 transition-transform hover:-translate-y-0.5"
             >
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-900/40 text-blue-400 transition-colors group-hover:bg-blue-900/60">
                 <IconByName name={feature.icon} className="h-5 w-5" />

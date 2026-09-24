@@ -5,7 +5,7 @@ export default function CtaStripe() {
   return (
     <section className="py-10 sm:py-12">
       <div className="container">
-        <div className="rounded-3xl bg-gradient-to-br from-blue-600 to-emerald-500 px-6 py-8 text-center shadow-card sm:px-10 sm:py-10">
+        <div className="peach-cta px-6 py-8 text-center shadow-card sm:px-10 sm:py-10">
           <h2 className="text-3xl font-display font-extrabold text-white sm:text-4xl">
             See the workspace with your own stock
           </h2>
@@ -37,7 +37,7 @@ export default function CtaStripe() {
             <Link href="/contact">
               <button
                 type="button"
-                className="rounded-xl border border-white/40 bg-white/10 px-7 py-3 text-base font-semibold text-white transition-all duration-200 ease-in-out hover:bg-white/20"
+                className="rounded-xl border border-[#805137] bg-[#492e22] px-7 py-3 text-base font-semibold text-white transition-all duration-200 ease-in-out hover:bg-[#65402f]"
               >
                 Contact us
               </button>

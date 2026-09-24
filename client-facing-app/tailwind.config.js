@@ -8,16 +8,18 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        primary: "#2563eb",
-        primaryHover: "#1d4ed8",
-        accent: "#10b981",
+        slate: { 50: '#fffaf5', 100: '#fff2e7', 200: '#f6e1d0', 300: '#e6cbb8', 400: '#c4a99a', 500: '#a5897c', 600: '#795f56', 700: '#574239', 800: '#352925', 900: '#221b19', 950: '#171210' },
+        blue: { 50: '#fff5ee', 100: '#ffe6d5', 200: '#ffcdb0', 300: '#ffb48b', 400: '#ffac82', 500: '#c65838', 600: '#b8482c', 700: '#96391f', 800: '#793420', 900: '#512c22', 950: '#321d16' },
+        primary: "#b8482c",
+        primaryHover: "#96391f",
+        accent: "#f4bc91",
         accentHover: "#059669",
         surface: "#f8fafc",
         surfaceDark: "#0f172a",
       },
       fontFamily: {
-        sans: ["Inter", "ui-sans", "system-ui", "sans-serif"],
-        display: ["Inter", "ui-sans", "system-ui", "sans-serif"],
+        sans: ["Trebuchet MS", "Avenir Next", "ui-sans", "system-ui", "sans-serif"],
+        display: ["Georgia", "Cambria", "serif"],
       },
       boxShadow: {
         card: "0 10px 32px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.04)",

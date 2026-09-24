@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --font-sans: Inter, ui-sans, system-ui, sans-serif;
+    --font-sans: "Trebuchet MS", "Avenir Next", ui-sans, system-ui, sans-serif;
   }
 
   html {
@@ -25,10 +25,39 @@
   }
 
   section {
-    border-bottom: 1px solid #1e293b;
+    border-bottom: 1px solid #574239;
   }
 
   footer {
     border-top: 0;
   }
+}
+
+/* Warm paper, expressive type and restrained hand-drawn details. */
+@layer components {
+  .peach-hero {
+    background: radial-gradient(ellipse at 88% 12%, #ffc39c 0, transparent 48%),
+      radial-gradient(ellipse at 6% 92%, #f5c9b0 0, transparent 42%), #fff1e5;
+    color: #442c23;
+    padding-block: clamp(3rem, 7vw, 6rem);
+  }
+  .peach-hero .hero-copy h1 { color: #392820; font-weight: 500; font-size: clamp(2.8rem, 5.2vw, 4.8rem); line-height: 1.08; letter-spacing: -.045em; }
+  .peach-hero .hero-copy > p { color: #644b3f; line-height: 1.75; }
+  .peach-hero .hero-copy > p.font-medium { color: #96391f; }
+  .peach-hero .hero-badge { background: #ffffff80; color: #795035; box-shadow: 0 0 0 1px #dcb396; letter-spacing: .12em; text-transform: uppercase; }
+  .peach-hero .hero-art { border-radius: 5rem 1.5rem 1.5rem 1.5rem; padding: 1rem; transform: rotate(2deg); box-shadow: 18px 22px 0 #e8b49655, 0 20px 60px #6b392822; background: #392820; }
+  .peach-hero .hero-art > div:first-child { border-radius: 4rem 1rem 1rem 1rem; }
+  .peach-hero::before { content: ''; position: absolute; width: 18rem; height: 18rem; border: 1px solid #b56b4740; border-radius: 50%; right: -5rem; top: -7rem; box-shadow: 0 0 0 22px #b56b4710, 0 0 0 44px #b56b4709; pointer-events: none; }
+  .feature-card { border-radius: 1.6rem; background: linear-gradient(140deg, #453029, #302521); border-color: #7e574640; box-shadow: 0 10px 30px #160e091a; }
+  .feature-card:nth-child(3n + 2) { background: linear-gradient(140deg, #3d3730, #292622); }
+  .peach-cta { background: #f5c3a4; color: #442c23; border-radius: 4rem 1.5rem 4rem 1.5rem; }
+  .peach-cta h2, .peach-cta p, .peach-cta span { color: #442c23; }
+  .social-link { display: flex; align-items: center; gap: .65rem; border: 1px solid #765545; border-radius: 999px; padding: .65rem 1rem; color: #ffdfc8; transition: background .2s, transform .2s; }
+  .social-link:hover { background: #5d3d2e; transform: translateY(-2px); }
+}
+:focus-visible { outline: 2px solid #f7ae7c; outline-offset: 4px; }
+@media (max-width: 640px) { .peach-hero .hero-art { transform: none; margin-right: .5rem; } }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto !important; }
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
