@@ -21,7 +21,7 @@ export default function Hero() {
   const next = () => setCurrent((prev) => (prev + 1) % heroSlides.length);
 
   return (
-    <section className="relative isolate overflow-hidden pt-6 pb-10 sm:pt-8 sm:pb-12">
+    <section className="peach-hero relative isolate overflow-hidden">
       <div
         aria-hidden="true"
         className="absolute -top-24 -left-24 h-80 w-80 rounded-full bg-blue-600/5 blur-3xl"
@@ -32,9 +32,9 @@ export default function Hero() {
       />
 
       <div className="container relative z-10 grid items-center gap-8 lg:grid-cols-2">
-        <div>
+        <div className="hero-copy">
           {hero.badge && (
-            <span className="inline-flex rounded-full bg-emerald-900/40 px-3 py-1 text-xs font-extrabold text-emerald-300 ring-1 ring-emerald-700">
+            <span className="hero-badge inline-flex rounded-full bg-emerald-900/40 px-3 py-1 text-xs font-extrabold text-emerald-300 ring-1 ring-emerald-700">
               {hero.badge}
             </span>
           )}
@@ -71,8 +71,7 @@ export default function Hero() {
         </div>
 
         <div
-          aria-hidden="true"
-          className="esau-div relative isolate self-start rounded-2xl bg-slate-800/60 p-4 shadow-lg shadow-black/20 ring-1 ring-slate-700 lg:sticky lg:top-8"
+          className="hero-art relative isolate self-start rounded-2xl bg-slate-800/60 p-4 shadow-lg shadow-black/20 ring-1 ring-slate-700 lg:sticky lg:top-8"
         >
           <div className="relative overflow-hidden rounded-xl">
             {heroSlides.map((slide, index) => (

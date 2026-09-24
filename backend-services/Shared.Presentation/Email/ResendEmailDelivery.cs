@@ -37,10 +37,20 @@ public sealed class ResendEmailDelivery(IResend client, ILogger<ResendEmailDeliv
             });
         }
 
-        var response = await client.EmailSendAsync(message, cancellationToken);
+        ResendResponse<Guid> response;
+        try
+        {
+            response = await client.EmailSendAsync(message, cancellationToken);
+        }
+        catch (ResendException exception)
+        {
+            logger.LogError("Resend submission failed: HTTP {StatusCode}, category {ErrorType}.", exception.StatusCode, exception.ErrorType);
+            throw;
+        }
         if (!response.Success)
         {
-            logger.LogError("Resend rejected transactional email submission.");
+            logger.LogError("Resend rejected transactional email submission: HTTP {StatusCode}, category {ErrorType}.",
+                response.Exception?.StatusCode, response.Exception?.ErrorType);
             throw new InvalidOperationException("The email provider rejected the message.");
         }
         logger.LogInformation("Resend accepted email {EmailId} for delivery", response.Content);
