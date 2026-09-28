@@ -5,6 +5,7 @@ public static class BillingEmailTemplates
 {
     public static string Subject(string template) => template switch
     {
+        "once-off-approved" => "Payment approved — one month of access is active",
         "payment-approved" => "Payment approved — your account is active",
         "welcome" => "Your subscription is active",
         "trial-ending" => "Your free trial ends soon",
@@ -17,6 +18,7 @@ public static class BillingEmailTemplates
 
     public static string Body(string template) => template switch
     {
+        "once-off-approved" => "<p>Your once-off payment has been approved and your agency account is active for one month.</p><p>This payment does not renew automatically. Open Billing to view your access end date and purchase another month when access expires.</p>",
         "payment-approved" => "<p>Your subscription payment has been approved and your agency account is active.</p><p>You can sign in to your agency workspace and continue using your subscription. Open Manage Billing to review your subscription details.</p>",
         "welcome" => "<p>Your paid subscription is active. Sign in to continue using your agency workspace.</p>",
         "trial-ending" => "<p>Your free trial ends within three days. Sign in and open billing to choose a paid plan. You will not be charged automatically.</p>",

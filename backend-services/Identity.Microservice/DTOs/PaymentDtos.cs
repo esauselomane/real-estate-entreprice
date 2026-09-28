@@ -35,6 +35,7 @@ namespace Identity.Microservice.DTOs
 
     public record SubscriptionStatusResponse
     {
+        public bool IsOnceOff { get; init; }
         public string Status { get; init; } = string.Empty;
         public string PricingPackageCode { get; init; } = string.Empty;
         public string PricingPackageName { get; init; } = string.Empty;

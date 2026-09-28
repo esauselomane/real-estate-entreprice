@@ -16,6 +16,8 @@ public static class PaymentSchemaUpgrade
                     Attempts int NOT NULL, Error nvarchar(max) NULL);
             IF COL_LENGTH('TenantAgencies', 'TrialExtensionAppliedAt') IS NULL
                 ALTER TABLE TenantAgencies ADD TrialExtensionAppliedAt datetime2 NULL;
+            IF COL_LENGTH('Subscriptions', 'IsOnceOff') IS NULL
+                ALTER TABLE Subscriptions ADD IsOnceOff bit NOT NULL CONSTRAINT DF_Subscriptions_IsOnceOff DEFAULT 0;
             IF COL_LENGTH('Subscriptions', 'Gateway') IS NULL
                 ALTER TABLE Subscriptions ADD Gateway int NULL;
             IF COL_LENGTH('PaymentIntents', 'Gateway') IS NULL

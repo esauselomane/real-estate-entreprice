@@ -27,6 +27,8 @@ namespace Identity.Microservice.Models
 
         public Identity.Microservice.Services.Abstractions.Payments.PaymentGateway? Gateway { get; set; }
 
+        public bool IsOnceOff { get; set; }
+
         public SubscriptionStatus Status { get; set; } = SubscriptionStatus.Trialing;
 
         public DateTime CurrentPeriodStart { get; set; }

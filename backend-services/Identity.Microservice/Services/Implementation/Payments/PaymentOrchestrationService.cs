@@ -28,7 +28,7 @@ public sealed class PaymentOrchestrationService(
         if (!Guid.TryParse(idempotencyKey, out _))
             throw new ArgumentException("A UUID idempotency key is required.");
         if (!Enum.IsDefined(request.BillingCycle))
-            throw new ArgumentException("Choose monthly or annual billing.");
+            throw new ArgumentException("Choose monthly, annual or once-off billing.");
         if (request.PricingPackageCode.Equals("ENTERPRISE", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("Enterprise subscriptions are arranged through sales.");
 
@@ -82,7 +82,7 @@ public sealed class PaymentOrchestrationService(
         var gatewayRequest = request with
         {
             Amount = initialAmount,
-            RecurringAmount = amount.Value,
+            RecurringAmount = request.BillingCycle == BillingCycle.OnceOff ? null : amount.Value,
             MerchantReference = Guid.NewGuid().ToString("N"),
             CustomerEmail = tenant.ContactEmail,
             CustomerName = tenant.AgencyName,
@@ -113,6 +113,8 @@ public sealed class PaymentOrchestrationService(
             ?? throw new ArgumentException("No subscription is available to manage.");
         if (subscription.Gateway == null)
             throw new ArgumentException("Billing support must reconcile the provider for this subscription.");
+        if (subscription.IsOnceOff)
+            throw new ArgumentException("Once-off payments have no recurring card agreement to manage.");
         return await factory.GetGateway(subscription.Gateway.Value).CreatePortalSessionAsync(request with
         {
             GatewaySubscriptionId = subscription.PeachSubscriptionId
@@ -184,12 +186,21 @@ public sealed class PaymentOrchestrationService(
 
     private async Task ApplyEventAsync(PaymentWebhookEvent paymentEvent, PaymentIntent intent)
     {
-        if (string.IsNullOrWhiteSpace(paymentEvent.GatewaySubscriptionId) && paymentEvent.SubscriptionStatus != SubscriptionStatus.PastDue)
+        var request = JsonSerializer.Deserialize<CreateCheckoutRequest>(intent.MetadataJson!)!;
+        var isOnceOff = request.BillingCycle == BillingCycle.OnceOff;
+        if (isOnceOff && paymentEvent.SubscriptionStatus is not (SubscriptionStatus.Active or SubscriptionStatus.PastDue))
+            throw new ArgumentException("Unexpected recurring event for a once-off payment.");
+        if (isOnceOff && intent.CompletedAt.HasValue)
+        {
+            if (paymentEvent.SubscriptionStatus == SubscriptionStatus.PastDue) return;
+            throw new ArgumentException("This once-off checkout is already paid; an additional payment requires review.");
+        }
+        if (!isOnceOff && string.IsNullOrWhiteSpace(paymentEvent.GatewaySubscriptionId) && paymentEvent.SubscriptionStatus != SubscriptionStatus.PastDue)
             throw new ArgumentException("Recurring payment notification is missing its subscription token.");
         if (paymentEvent.SubscriptionStatus == null)
             throw new ArgumentException("Unsupported subscription event; manual review required.");
-        var request = JsonSerializer.Deserialize<CreateCheckoutRequest>(intent.MetadataJson!)!;
-        var subscription = await database.Subscriptions.SingleOrDefaultAsync(item => item.PeachSubscriptionId == paymentEvent.GatewaySubscriptionId && item.Gateway == paymentEvent.Gateway);
+        var subscriptionReference = isOnceOff ? $"once-off:{intent.PeachCheckoutId}" : paymentEvent.GatewaySubscriptionId;
+        var subscription = await database.Subscriptions.SingleOrDefaultAsync(item => item.PeachSubscriptionId == subscriptionReference && item.Gateway == paymentEvent.Gateway);
         if (subscription != null && subscription.TenantId != intent.TenantId)
             throw new ArgumentException("Subscription ownership mismatch.");
         var now = DateTime.UtcNow;
@@ -215,7 +226,7 @@ public sealed class PaymentOrchestrationService(
                 subscription = new Subscription
                 {
                     TenantId = intent.TenantId, Gateway = paymentEvent.Gateway,
-                    PeachSubscriptionId = paymentEvent.GatewaySubscriptionId,
+                    PeachSubscriptionId = subscriptionReference, IsOnceOff = isOnceOff,
                     PeachPriceId = request.PricingPackageCode,
                     PricingPackageCode = request.PricingPackageCode, CurrentPeriodStart = now
                 };
@@ -229,7 +240,7 @@ public sealed class PaymentOrchestrationService(
             }
             var periodStart = subscription.CurrentPeriodEnd > now ? subscription.CurrentPeriodEnd : now;
             subscription.CurrentPeriodEnd = request.BillingCycle == BillingCycle.Annual ? periodStart.AddYears(1) : periodStart.AddMonths(1);
-            intent.PeachPaymentId = paymentEvent.GatewaySubscriptionId;
+            intent.PeachPaymentId = isOnceOff ? string.Empty : paymentEvent.GatewaySubscriptionId;
             intent.Status = PaymentIntentStatus.Succeeded;
             intent.CompletedAt ??= now;
         }
@@ -260,15 +271,15 @@ public sealed class PaymentOrchestrationService(
         }
         await database.SaveChangesAsync();
         tenant.ActiveSubscriptionId = subscription.Id;
-        QueueNotification(tenant, previousStatus, subscription.Status, paymentEvent.GatewayEventId);
+        QueueNotification(tenant, previousStatus, subscription.Status, paymentEvent.GatewayEventId, isOnceOff);
     }
 
-    private void QueueNotification(TenantAgency tenant, SubscriptionStatus previous, SubscriptionStatus current, string eventId)
+    private void QueueNotification(TenantAgency tenant, SubscriptionStatus previous, SubscriptionStatus current, string eventId, bool isOnceOff = false)
     {
         if (previous == current && current != SubscriptionStatus.Active) return;
         var template = current switch
         {
-            SubscriptionStatus.Active => "payment-approved",
+            SubscriptionStatus.Active => isOnceOff ? "once-off-approved" : "payment-approved",
             SubscriptionStatus.PastDue => "payment-failed",
             SubscriptionStatus.Paused => "past-due",
             SubscriptionStatus.Cancelled => "cancelled",
