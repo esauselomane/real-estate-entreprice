@@ -21,3 +21,15 @@ Use `deploy/gcp/cloudbuild-sites.yaml` to build just the two public interfaces w
 Deploy each image with `gcloud run services update SERVICE --image=IMAGE --region=africa-south1 --project=project-ff46407b-1a09-4376-95a`. This retains the existing environment, secret references, service identity, networking, domain mappings and resource settings. Check the new ready revision and public sites after updating; restore the previous revision using `gcloud run services update-traffic` if validation fails.
 
 The Developer API work remains local and is not part of this website release.
+
+
+## Verified production release — 3 October 2026
+
+- Source commit: `2d75cc4d4f51` on the existing `remove-kafka` branch, pushed to GitHub.
+- Regional Cloud Build: `8e19dc98-82df-4d54-b6b7-dfd32f29c888`, `africa-south1`, successful. Image tag: `sites-2d75cc4d4f51`.
+- Company site: `https://www.biscovetech.com`, Cloud Run revision `client-facing-00016-pzq`, serving 100% of traffic. Previous revision: `client-facing-00015-hbs`.
+- Real estate app: `https://app.biscovetech.com`, Cloud Run revision `frontend-client-00015-blc`, serving 100% of traffic. Previous revision: `frontend-client-00014-vcl`.
+- Land Administration link: `https://landadmin.biscovetech.com`.
+- Passed: both production builds, new landing/mobile component lint checks, public company/solutions content, live pricing catalogue, sign-in redirect, recovery/activation routing, mobile landing widths, and JavaScript runtime checks.
+- Browser-only mock data verified the deployed workspace navigation, keyboard focus/Escape behavior, role-filtered menus, administration screens and 320–600px layouts without changing production records. This is UI verification; authenticated backend behavior was not changed or retested with these fixtures.
+- Gateway, Identity, Property and CRM revisions were preserved. Developer API edits and local runtime/build artifacts remain outside the release.
