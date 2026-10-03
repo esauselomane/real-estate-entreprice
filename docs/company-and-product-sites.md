@@ -40,3 +40,10 @@ The Developer API work remains local and is not part of this website release.
 The company homepage contains a short introduction with navigation to the existing About, Mission and Contact pages. `/solutions` is a concise product chooser; `/solutions/real-estate` and `/solutions/land-administration` contain their respective capabilities and product access links. Allocation and verification details are on the Land Administration detail page. The site assistant links to that page too.
 
 The real estate entry page uses the workspace’s slate background and blue controls. The decorative gradients, oversized hero, repeated login heading and long stack of marketing sections were removed. Email/password autocomplete, login error display and activation/recovery handling are preserved. Keyboard and mobile layout checks verify that the sign-in button is visible without scrolling at 320, 390 and 600 pixels and on desktop.
+
+
+## Compact layout deployment — 3 October 2026
+
+Source `7e6bba2a89fb` on `remove-kafka`; regional Cloud Build `e55b5983-280b-471e-8c3c-04fa800678cc` succeeded. Both images use tag `sites-7e6bba2a89fb`. Marketing revision `client-facing-00018-njj` and real estate revision `frontend-client-00016-c84` serve all traffic. Previous revisions were `client-facing-00017-fmd` and `frontend-client-00015-blc`.
+
+Both builds and entry-page lint checks passed. Public browser checks verified immediate sign-in visibility at desktop and 320–600px mobile widths, login errors with mock responses, feature/pricing pages, account recovery/activation routing, and both marketing solution detail pages. Signed-in workspace navigation was checked with browser-only fixtures. No production account, payment or record was changed by these checks.
