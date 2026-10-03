@@ -22,7 +22,7 @@ export default function SolutionsPage() {
       <Solutions />
       <section className="container py-12">
         <h2 className="text-2xl font-semibold">A verified path from application to allocation</h2>
-        <p className="mt-4 text-slate-300">Biscove Land Administration applicants register with their name and email, receive a verification link that expires in 30 minutes, and create their password after opening it. Passwords require at least eight characters, an uppercase letter, a lowercase letter and a special character. Applicants then choose an existing organisation and an open jurisdiction; submitting an application does not guarantee approval.</p>
+        <p className="mt-4 text-slate-300">To apply for land, create an account and verify your email. Then select a participating land authority and a jurisdiction that is accepting applications. The responsible authority reviews each request and decides whether to approve an allocation.</p>
         <p className="mt-4 text-slate-300">Approved allocations can receive a digital Proof of Allocation or Land Use Right Certificate, signed by the Traditional Council and stamped by the Municipality using separately configured institutional signing credentials. The certificate includes allocation details, conditions, a boundary sketch and an online verification link. Authorised recipients receive the PDF with its cryptographic signatures. Public verification shows issuance or revocation without revealing the holder’s personal details. These certificates are allocation records, not title deeds.</p>
       </section>
     </>
