@@ -6,7 +6,7 @@ export const metadata = {
 };
 export default function AboutPage() {
   return (
-    <section className="container py-12 sm:py-16">
+    <section className="container py-6 sm:py-5">
       <div className="max-w-3xl">
         <p className="text-sm uppercase tracking-widest text-blue-400">
           About Biscove Technologies
@@ -29,7 +29,7 @@ export default function AboutPage() {
           records, land applications and consulted allocation workflows. Each product serves
           its own users and operational needs.
         </p>
-        <h2 className="mt-10 text-2xl font-display font-bold">How we build</h2>
+        <h2 className="mt-6 text-2xl font-display font-bold">How we build</h2>
         <p className="mt-4 text-slate-300">
           We organise software around the people using it: administrators,
           operational teams and the customers or applicants they serve. Shared
@@ -38,7 +38,7 @@ export default function AboutPage() {
         </p>
         <Link
           href="/solutions"
-          className="mt-8 inline-flex rounded-xl bg-blue-600 px-6 py-3 font-semibold"
+          className="mt-5 inline-flex rounded-xl bg-blue-600 px-6 py-3 font-semibold"
         >
           Discover our solutions
         </Link>

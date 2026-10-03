@@ -9,7 +9,7 @@ export const metadata = {
 
 export default function MissionPage() {
   return (
-    <section className="py-10 sm:py-12">
+    <section className="py-6 sm:py-5">
       <div className="container">
         <div className="mx-auto max-w-3xl text-center">
           <h1 className="text-4xl font-display font-extrabold tracking-tight text-white sm:text-5xl">
@@ -17,7 +17,7 @@ export default function MissionPage() {
           </h1>
         </div>
 
-        <div className="mt-8 rounded-3xl bg-slate-800/60 p-6 text-center ring-1 ring-slate-700 sm:p-8">
+        <div className="mt-5 rounded-3xl bg-slate-800/60 p-6 text-center ring-1 ring-slate-700 sm:p-8">
           <h2 className="text-xl font-display font-bold text-white">Mission</h2>
           <blockquote className="mt-3 text-xl font-medium text-slate-200 sm:text-2xl">
             Give organisations clear, connected systems for managing their
@@ -34,7 +34,7 @@ export default function MissionPage() {
           </p>
         </div>
 
-        <div className="mt-10">
+        <div className="mt-6">
           <h2 className="text-2xl font-display font-bold text-white">Values</h2>
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
             {values.map((value) => (
@@ -56,7 +56,7 @@ export default function MissionPage() {
           </div>
         </div>
 
-        <div className="mt-10">
+        <div className="mt-6">
           <div className="grid grid-cols-2 gap-4 text-center sm:grid-cols-4">
             {impact.map((stat) => (
               <div

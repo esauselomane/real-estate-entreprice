@@ -2,7 +2,7 @@
 
 `client-facing-app` is the Biscove Technologies company website. Home, About, Mission and Contact describe the company; `/solutions` introduces Biscove Real Estate and Biscove Land Administration.
 
-`frontend-client` shows the real estate product landing page to signed-out visitors, including features, live pricing, trial links and the existing sign-in form. Signed-in visitors still enter the workspace. Activation and recovery query parameters retain priority over the landing page. Legacy company `/pricing` and `/login` URLs direct visitors to the relevant product section.
+`frontend-client` shows a compact sign-in page to signed-out visitors. Sign-in is alongside a short introduction on desktop and first on mobile. `/features` and `/pricing` show separate product pages; only the pricing page fetches the live catalogue. Trial links remain available. Signed-in visitors still enter the workspace. Activation and recovery query parameters retain priority over the landing page. Legacy company `/pricing` and `/login` URLs direct visitors to the relevant product section.
 
 ## Public URLs
 
@@ -33,3 +33,10 @@ The Developer API work remains local and is not part of this website release.
 - Passed: both production builds, new landing/mobile component lint checks, public company/solutions content, live pricing catalogue, sign-in redirect, recovery/activation routing, mobile landing widths, and JavaScript runtime checks.
 - Browser-only mock data verified the deployed workspace navigation, keyboard focus/Escape behavior, role-filtered menus, administration screens and 320–600px layouts without changing production records. This is UI verification; authenticated backend behavior was not changed or retested with these fixtures.
 - Gateway, Identity, Property and CRM revisions were preserved. Developer API edits and local runtime/build artifacts remain outside the release.
+
+
+## Compact entry pages
+
+The company homepage contains a short introduction with navigation to the existing About, Mission and Contact pages. `/solutions` is a concise product chooser; `/solutions/real-estate` and `/solutions/land-administration` contain their respective capabilities and product access links. Allocation and verification details are on the Land Administration detail page. The site assistant links to that page too.
+
+The real estate entry page uses the workspace’s slate background and blue controls. The decorative gradients, oversized hero, repeated login heading and long stack of marketing sections were removed. Email/password autocomplete, login error display and activation/recovery handling are preserved. Keyboard and mobile layout checks verify that the sign-in button is visible without scrolling at 320, 390 and 600 pixels and on desktop.

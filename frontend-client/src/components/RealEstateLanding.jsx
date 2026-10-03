@@ -155,136 +155,51 @@ function ProductPricing() {
     </section>
   );
 }
+function ProductFeatures() {
+  return <section className="re-section">
+    <h1>Workspace features</h1>
+    <p>Tools for your property inventory, clients and daily agency work.</p>
+    <div className="re-features">{capabilities.map(({ title, description, icon: Icon }) => (
+      <article key={title}><Icon size={20} /><h2>{title}</h2><p>{description}</p></article>
+    ))}</div>
+  </section>;
+}
+
 export default function RealEstateLanding({ children }) {
-  return (
-    <div className="real-estate-landing">
-      <header className="re-header">
-        <a className="re-brand" href="#">
-          <img src="/favicon.jpg" alt="" />
-          Biscove <span>Real Estate</span>
-        </a>
-        <nav aria-label="Product navigation">
-          <a href="#features">Features</a>
-          <a href="#pricing">Pricing</a>
-          <a href={`${companyUrl}/onboarding`}>Start a trial</a>
-          <a className="re-button re-button-secondary" href="#sign-in">
-            Sign in
-          </a>
-        </nav>
-      </header>
-      <main>
-        <section className="re-hero">
-          <div>
-            <p className="re-eyebrow">A solution by Biscove Technologies</p>
-            <h1>
-              Your properties.
-              <br />
-              Your people.
-              <br />
-              <em>One workspace.</em>
-            </h1>
-            <p className="re-intro">
-              Run your brokerage from a single, hosted workspace. Bring property
-              inventory, client relationships, deal pipelines and agency
-              administration together.
-            </p>
-            <div className="re-actions">
-              <a className="re-button" href={`${companyUrl}/onboarding`}>
-                Start a trial
-                <ArrowRight size={18} />
-              </a>
-              <a className="re-button re-button-secondary" href="#sign-in">
-                Sign in to your workspace
-              </a>
-            </div>
-            <p className="re-small">
-              Built for brokerages and property teams. Hosted and ready for your
-              organisation.
-            </p>
+  const page = window.location.pathname;
+  const pricing = page === "/pricing" || window.location.hash === "#pricing";
+  const features = page === "/features";
+  return <div className="real-estate-landing">
+    <header className="re-header">
+      <a className="re-brand" href="/"><img src="/favicon.jpg" alt="" />Biscove <span>Real Estate</span></a>
+      <nav aria-label="Product navigation">
+        <a href="/features" aria-current={features ? "page" : undefined}>Features</a>
+        <a href="/pricing" aria-current={pricing ? "page" : undefined}>Pricing</a>
+        <a href={`${companyUrl}/onboarding`}>Start a trial</a>
+        <a href="/#sign-in">Sign in</a>
+      </nav>
+    </header>
+    <main>
+      {pricing ? <ProductPricing /> : features ? <ProductFeatures /> : (
+        <section className="re-entry">
+          <div className="re-entry-copy">
+            <p className="re-eyebrow">Biscove Real Estate</p>
+            <h1>Your agency workspace</h1>
+            <p>Manage properties, clients and deals in one place.</p>
+            <ul className="re-summary">
+              <li><Building2 size={19} /><span>Property inventory, units and maps</span></li>
+              <li><Users size={19} /><span>Client records and broker collaboration</span></li>
+              <li><Briefcase size={19} /><span>Leads, deals and reporting</span></li>
+            </ul>
+            <a className="re-text-link" href="/features">Explore the workspace <ArrowRight size={16} /></a>
           </div>
-          <aside
-            className="re-workspace-preview"
-            aria-label="Workspace capabilities"
-          >
-            <p className="re-eyebrow">From enquiry to close</p>
-            <div className="re-preview-title">
-              <Building2 size={30} />
-              <h2>A clear view of your agency</h2>
-            </div>
-            <div className="re-preview-grid">
-              <div>
-                <strong>Inventory</strong>
-                <span>Listings · units · maps</span>
-              </div>
-              <div>
-                <strong>Pipeline</strong>
-                <span>Enquiries · leads · deals</span>
-              </div>
-              <div>
-                <strong>People</strong>
-                <span>Contacts · owners · tenants</span>
-              </div>
-              <div>
-                <strong>Control</strong>
-                <span>Roles · reports · billing</span>
-              </div>
-            </div>
-            <p className="re-preview-note">
-              <ShieldCheck size={20} />
-              Access shaped around your team’s responsibilities.
-            </p>
-          </aside>
+          <div id="sign-in" className="re-login">{children}</div>
         </section>
-        <section id="features" className="re-section">
-          <div className="re-section-heading">
-            <p className="re-eyebrow">The brokerage workspace</p>
-            <h2>Keep the work connected.</h2>
-            <p>
-              Maintain one inventory and use it across your team’s daily work.
-            </p>
-          </div>
-          <div className="re-features">
-            {capabilities.map(({ title, description, icon: Icon }) => (
-              <article key={title}>
-                <Icon size={28} />
-                <h3>{title}</h3>
-                <p>{description}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-        <section className="re-value">
-          <div>
-            <p className="re-eyebrow">Built around your organisation</p>
-            <h2>Clear records. Visible responsibilities.</h2>
-          </div>
-          <p>
-            Organisation workspaces and role-based permissions help
-            administrators manage access while brokers focus on their stock,
-            clients and opportunities. Reports and pitch packs draw on the
-            records your team maintains.
-          </p>
-        </section>
-        <ProductPricing />
-        <section id="sign-in" className="re-sign-in">
-          <div>
-            <p className="re-eyebrow">Your agency workspace</p>
-            <h2>Welcome back.</h2>
-            <p>Sign in to continue working with your team.</p>
-            <p>
-              New to Biscove Real Estate?{" "}
-              <a href={`${companyUrl}/onboarding`}>Start an agency trial.</a>
-            </p>
-          </div>
-          <div className="re-login">{children}</div>
-        </section>
-      </main>
-      <footer className="re-footer">
-        <a href={companyUrl}>Biscove Technologies</a>
-        <span>Real estate is one of our solutions.</span>
-        <a href={`${companyUrl}/solutions`}>Discover our solutions</a>
-        <a href={`${companyUrl}/contact?solution=real-estate`}>Contact us</a>
-      </footer>
-    </div>
-  );
+      )}
+    </main>
+    <footer className="re-footer">
+      <a href={companyUrl}>Biscove Technologies</a>
+      <a href={`${companyUrl}/contact?solution=real-estate`}>Contact support</a>
+    </footer>
+  </div>;
 }
