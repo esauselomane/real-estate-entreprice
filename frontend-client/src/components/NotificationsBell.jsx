@@ -132,7 +132,7 @@ export default function NotificationsBell() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50">
+        <div className="workspace-header-popover absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50">
           <div className="p-3 border-b border-slate-800 flex items-center justify-between">
             <h4 className="text-sm font-semibold text-white">Notifications</h4>
             {isLoading && <Loader2 size={12} className="animate-spin text-blue-400" />}

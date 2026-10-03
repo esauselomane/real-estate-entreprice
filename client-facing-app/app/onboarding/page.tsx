@@ -57,10 +57,10 @@ export default function OnboardingPage() {
       <div className="mx-auto max-w-2xl">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold text-white">
-            Complete Your Onboarding
+            Start your Biscove Real Estate trial
           </h1>
           <p className="mt-2 text-slate-400">
-            Set up your company profile to get started.
+            Set up your real estate agency and its administrator account.
           </p>
         </div>
 

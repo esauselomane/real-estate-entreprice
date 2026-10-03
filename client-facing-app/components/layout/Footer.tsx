@@ -11,11 +11,11 @@ const socialLinks = [
 
 const footerLinks = [
   { label: "Home", href: "/" },
-  { label: "Pricing", href: "/pricing" },
+  { label: "Our Solutions", href: "/solutions" },
   { label: "About", href: "/about" },
   { label: "Mission", href: "/mission" },
   { label: "Contact", href: "/contact" },
-  { label: "Login", href: "/login" },
+  { label: "Product access", href: "/solutions" },
 ];
 
 export default function Footer() {
@@ -41,8 +41,8 @@ export default function Footer() {
       <div className="container grid gap-8 py-8 md:grid-cols-3">
         <div>
           <div className="flex items-center gap-3 text-xl font-display font-extrabold text-blue-400">
-            <img src="/favicon.jpg" alt="Biscove Real Estate Tech logo" className="h-7 w-auto" />
-            Biscove Real Estate Tech
+            <img src="/favicon.jpg" alt="Biscove Technologies logo" className="h-7 w-auto" />
+            Biscove Technologies
           </div>
           <p className="mt-3 max-w-xs text-sm text-slate-400">{site.description}</p>
         </div>

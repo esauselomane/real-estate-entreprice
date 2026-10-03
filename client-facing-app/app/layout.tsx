@@ -7,12 +7,15 @@ import BibsyWidget from "@/components/chat/BibsyWidget";
 
 export const metadata: Metadata = {
   title: {
-    default: "Biscove Real Estate Technology",
-    template: "%s | Biscove Real Estate Technology",
+    default: "Biscove Technologies",
+    template: "%s | Biscove Technologies",
   },
   description:
-    "Hosted workspace for property inventory, leads and deals, CRM, reports, brochures, and listing distribution.",
+    "Hosted business software for real estate operations and land administration.",
   keywords: [
+    "Biscove Technologies",
+    "land administration",
+    "GIS software",
     "real estate CRM",
     "brokerage software",
     "property listings",
@@ -20,14 +23,13 @@ export const metadata: Metadata = {
     "listing syndication",
     "South Africa",
   ],
-  authors: [{ name: "Biscove Real Estate Technology" }],
+  authors: [{ name: "Biscove Technologies" }],
   openGraph: {
     type: "website",
     locale: "en_ZA",
     url: "https://www.biscovetech.com",
-    title: "Biscove Real Estate Technology",
-    description:
-      "Hosted workspace for inventory, pipeline, people, presentations, and agency administration.",
+    title: "Biscove Technologies",
+    description: "Explore Biscove Real Estate and Biscove Land Administration.",
   },
 };
 

@@ -7,7 +7,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://app.biscovetech.com"
 
 export default function LoginRedirect() {
   useEffect(() => {
-    window.location.href = APP_URL;
+    window.location.href = `${APP_URL}/#sign-in`;
   }, []);
 
   return (

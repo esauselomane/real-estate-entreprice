@@ -10,7 +10,7 @@ const contactDetails = {
 export const metadata = {
   title: "Contact",
   description:
-    "Contact Biscove Real Estate Technology about a trial, onboarding, or enterprise access.",
+    "Contact Biscove Technologies about our real estate and land administration solutions.",
 };
 
 export default function ContactPage() {
@@ -22,7 +22,7 @@ export default function ContactPage() {
             Contact us
           </h1>
           <p className="mt-3 text-lg text-slate-300">
-            For trials, onboarding, or enterprise discussions, use the form or the details below.
+            Tell us about your organisation and the solution you are interested in: real estate operations, land administration, or both.
           </p>
         </div>
 

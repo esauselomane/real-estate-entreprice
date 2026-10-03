@@ -1,3 +1,6 @@
+import { Menu } from 'lucide-react';
+import './WorkspaceMobile.css';
+import RealEstateLanding from './components/RealEstateLanding.jsx';
 import ReportsAnalytics from './components/ReportsAnalytics.jsx';
 import { useEffect, useState } from 'react';
 import LeftSidebar from './components/LeftSidebar.jsx';
@@ -44,6 +47,8 @@ export default function App() {
 
   const {
     currentView,
+    mobileNavigationOpen,
+    setMobileNavigationOpen,
     selectedPropertyId,
     selectedClientData,
     activeBrochureDealTarget,
@@ -111,7 +116,7 @@ export default function App() {
   // 1. GATEWAY SCREEN VIEW: Render security login card layout if unauthenticated
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen w-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-zinc-950 p-6 overflow-hidden">
+      <RealEstateLanding><div className="min-h-screen w-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-zinc-950 p-6 overflow-hidden">
         
         {/* Luxury Abstract Background Glow Patterns */}
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -221,20 +226,23 @@ export default function App() {
           </div>
 
         </div>
-      </div>
+      </div></RealEstateLanding>
      );
   }
 
   // 2. MAIN SYSTEM DASHBOARD VIEW: Render workspace layers after successful authentication
   return (
-    <SubscriptionGate><div className="flex bg-slate-950 min-h-screen text-slate-100">
+    <SubscriptionGate><div className="real-estate-workspace flex bg-slate-950 min-h-screen text-slate-100">
 
       {/* 🧭 Collapsible Side Navigation Drawer Shell */}
       <LeftSidebar />
+      {mobileNavigationOpen && <button className="mobile-navigation-backdrop" aria-label="Dismiss navigation" onClick={() => setMobileNavigationOpen(false)} />}
+
 
       {/* 📊 Main Dynamic Workspace Content Window Canvas */}
-      <div className="flex-1 p-8 overflow-y-auto max-h-screen">
-        <header className="flex justify-between items-center mb-6 pb-4 border-b border-slate-800">
+      <div className="workspace-content flex-1 p-4 md:p-8">
+        <header className="workspace-header mb-6 pb-4 border-b border-slate-800">
+          <button type="button" className="mobile-navigation-open" aria-label="Open navigation" aria-controls="workspace-navigation" aria-expanded={mobileNavigationOpen} onClick={() => setMobileNavigationOpen(true)}><Menu size={24} /></button>
           <div>
             <h2 className="text-2xl font-bold text-white tracking-tight">
               {currentView === 'search' && "Property Asset Registry"}
@@ -257,7 +265,7 @@ export default function App() {
                 : `Multi-tenant spatial intelligence portal for ${currentAgency.name}`}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="workspace-header-actions flex items-center gap-3">
             <NotificationsBell />
             <BrochureCartBell />
             <TenantSwitcher />

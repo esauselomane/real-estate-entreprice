@@ -1,87 +1,47 @@
-import { leadership, timeline } from "@/lib/content";
-import IconByName from "@/components/ui/IconByName";
-
-const capabilities = [
-  { name: "Properties", icon: "Building2" },
-  { name: "Leads & deals", icon: "Briefcase" },
-  { name: "CRM", icon: "Users" },
-  { name: "Reports", icon: "BarChart3" },
-  { name: "Brochures", icon: "FileText" },
-  { name: "Administration", icon: "Shield" },
-];
-
+import Link from "next/link";
 export const metadata = {
-  title: "About",
+  title: "About Biscove",
   description:
-    "Biscove Real Estate Technology builds a hosted workspace for South African brokerages.",
+    "Biscove Technologies builds hosted software for property operations and land administration.",
 };
-
 export default function AboutPage() {
   return (
-    <section className="py-10 sm:py-12">
-      <div className="container">
-        <div className="mx-auto max-w-3xl text-center">
-          <h1 className="text-4xl font-display font-extrabold tracking-tight text-white sm:text-5xl">
-            About Biscove
-          </h1>
-          <p className="mt-3 text-lg text-slate-300">
-            We build software for agencies that need inventory, pipeline, people, and administration in one place — without running their own infrastructure.
-          </p>
-        </div>
-
-        <div className="mt-10">
-          <h2 className="text-2xl font-display font-bold text-white">
-            History
-          </h2>
-          <div className="mt-6 space-y-5 border-l border-slate-700 pl-6">
-            {timeline.map((item) => (
-              <div key={item.year} className="relative -left-1.5 border-l border-transparent pl-6">
-                <span className="inline-block rounded-full bg-blue-600 px-2.5 py-0.5 text-xs font-extrabold text-white">
-                  {item.year}
-                </span>
-                <p className="mt-1 text-slate-300">{item.event}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-10">
-          <h2 className="text-2xl font-display font-bold text-white">
-            Workspace coverage
-          </h2>
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-            {capabilities.map((item) => (
-              <div
-                key={item.name}
-                className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2"
-              >
-                <IconByName name={item.icon} className="h-4 w-4 text-blue-400" />
-                <span className="text-sm font-medium text-slate-200">{item.name}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-10">
-          {/* <h2 className="text-2xl font-display font-bold text-white">
-            Leadership
-          </h2> */}
-          <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {leadership.map((person) => (
-              <a
-                key={person.name}
-                href={person.linkedin}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-2xl border border-slate-700 bg-slate-800/60 p-6 text-center shadow-lg shadow-black/20 transition-colors hover:border-slate-500"
-              >
-                <div className="mx-auto mb-3 h-20 w-20 shrink-0 rounded-full bg-slate-700" />
-                <h3 className="text-lg font-semibold text-white">{person.name}</h3>
-                <p className="text-sm text-slate-400">{person.role}</p>
-              </a>
-            ))}
-          </div>
-        </div>
+    <section className="container py-12 sm:py-16">
+      <div className="max-w-3xl">
+        <p className="text-sm uppercase tracking-widest text-blue-400">
+          About Biscove Technologies
+        </p>
+        <h1 className="mt-4 text-4xl font-display font-bold sm:text-5xl">
+          Better systems for everyday operations.
+        </h1>
+        <p className="mt-6 text-lg text-slate-300">
+          Biscove Technologies develops hosted business software for
+          organisations managing property and land. Our products bring records,
+          workflows and reporting into shared workspaces with clear access
+          controls.
+        </p>
+        <p className="mt-5 text-lg text-slate-300">
+          Biscove Real Estate supports brokerage and property teams. Biscove
+          Land Administration supports rural and communal land administered under
+          chiefs and kings, in collaboration with recognised land authorities and
+          communities. Jurisdiction boundaries are established in accordance with
+          applicable government requirements. The platform supports parcel
+          records, land applications and consulted allocation workflows. Each product serves
+          its own users and operational needs.
+        </p>
+        <h2 className="mt-10 text-2xl font-display font-bold">How we build</h2>
+        <p className="mt-4 text-slate-300">
+          We organise software around the people using it: administrators,
+          operational teams and the customers or applicants they serve. Shared
+          records, role-based access, maps and reporting help each person
+          understand their work and responsibilities.
+        </p>
+        <Link
+          href="/solutions"
+          className="mt-8 inline-flex rounded-xl bg-blue-600 px-6 py-3 font-semibold"
+        >
+          Discover our solutions
+        </Link>
       </div>
     </section>
   );

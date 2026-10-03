@@ -21,8 +21,8 @@ export default function Header() {
         aria-label="Main navigation"
       >
         <Link href="/" className="flex items-center gap-3 text-xl font-display font-extrabold text-blue-400">
-          <img src="/logo.jpg" alt="Biscove Real Estate Tech logo" className="h-8 w-auto" />
-          Biscove Real Estate Tech
+          <img src="/logo.jpg" alt="Biscove Technologies logo" className="h-8 w-auto" />
+          Biscove Technologies
         </Link>
 
         <div className="hidden items-center gap-8 md:flex">
@@ -36,10 +36,10 @@ export default function Header() {
             </Link>
           ))}
           <Link
-            href="/login"
+            href="/contact"
             className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white transition-all duration-200 ease-in-out hover:scale-105 hover:bg-blue-500 hover:shadow-lg active:scale-95"
           >
-            Login
+            Contact us
           </Link>
         </div>
 

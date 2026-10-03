@@ -23,16 +23,16 @@ export type TeamMember = {
 };
 
 export const site = {
-  name: process.env.NEXT_PUBLIC_SITE_NAME || "Biscove Real Estate Tech",
-  tagline: "The digital backbone for South African brokerages.",
+  name: process.env.NEXT_PUBLIC_SITE_NAME || "Biscove Technologies",
+  tagline: "Connected software for property and land.",
   description:
-    "An integrated operating system for real estate professionals. Uniting property inventory, lead pipelines, and agency administration into a singular, high-performance workspace.",
+    "Hosted business software for real estate operations and land administration.",
   url: process.env.NEXT_PUBLIC_SITE_URL || "https://www.biscovetech.com",
 } as const;
 
 export const navigation = [
   { label: "Home", href: "/" },
-  { label: "Pricing", href: "/pricing" },
+  { label: "Our Solutions", href: "/solutions" },
   { label: "About", href: "/about" },
   { label: "Mission", href: "/mission" },
   { label: "Contact", href: "/contact" },
@@ -123,31 +123,31 @@ export const features: Feature[] = [
 export const values: Value[] = [
   {
     title: "Clarity",
-    description: "Stock, people, and pipeline live in one system of record — not scattered spreadsheets and inboxes.",
+    description: "Shared records help teams understand their work and make informed decisions.",
     icon: "Eye",
   },
   {
     title: "Accountability",
-    description: "Roles, permissions, and deal stages make ownership visible across the brokerage.",
+    description: "Roles, permissions and workflow stages make responsibilities visible.",
     icon: "UserCheck",
   },
   {
-    title: "Presentation quality",
-    description: "Pitch packs and listing distribution are produced from the same inventory your team already maintains.",
+    title: "Usability",
+    description: "Clear navigation and practical tools help each person focus on their responsibilities.",
     icon: "Sparkles",
   },
   {
     title: "Operational discipline",
-    description: "Imports, notifications, and administration sit alongside daily brokerage work, not in a separate tool.",
+    description: "Imports, reporting and administration support the operational work in each product.",
     icon: "Shield",
   },
 ];
 
 export const impact: Stat[] = [
-  { value: "Inventory", label: "Listings, units, maps, documents" },
-  { value: "Pipeline", label: "Leads, matching, deals" },
-  { value: "People", label: "CRM, owners, tenants" },
-  { value: "Control", label: "Roles, reports, billing" },
+  { value: "Records", label: "Connected information" },
+  { value: "Workflows", label: "Visible progress" },
+  { value: "People", label: "Clear responsibilities" },
+  { value: "Control", label: "Access and reporting" },
 ];
 
 export const pricing: {

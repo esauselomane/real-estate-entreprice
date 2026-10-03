@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Check } from "lucide-react";
 
 type FormState = "idle" | "submitting" | "success" | "error";
@@ -9,6 +9,14 @@ type FormState = "idle" | "submitting" | "success" | "error";
 export default function ContactForm() {
   const [state, setState] = useState<FormState>("idle");
   const [error, setError] = useState("");
+  const [solution, setSolution] = useState("");
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get(
+      "solution",
+    );
+    if (requested === "real-estate" || requested === "land-administration")
+      setSolution(requested);
+  }, []);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -26,7 +34,13 @@ export default function ContactForm() {
       userType: formData.get("userType")?.toString() || "Individual",
       package: formData.get("package")?.toString() || undefined,
       demoRequested: formData.get("demoRequested") === "on",
-      message: formData.get("message")?.toString().trim() || undefined,
+      message:
+        [
+          solution ? `Solution: ${solution}` : "",
+          formData.get("message")?.toString().trim(),
+        ]
+          .filter(Boolean)
+          .join("\n") || undefined,
       source: "contact",
     };
 
@@ -115,7 +129,7 @@ export default function ContactForm() {
           <input
             name="company"
             type="text"
-            placeholder="Agency or company name"
+            placeholder="Organisation or company name"
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
           />
         </div>
@@ -131,23 +145,28 @@ export default function ContactForm() {
             defaultValue="Individual"
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
           >
-            <option value="Individual">Individual / Property owner</option>
+            <option value="Individual">
+              Individual / Organisation representative
+            </option>
             <option value="Agency">Agency / Brokerage</option>
           </select>
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-slate-600">
-            Interested package
+            Interested solution
           </label>
           <select
-            name="package"
-            defaultValue=""
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
+            name="solution"
+            value={solution}
+            onChange={(event) => setSolution(event.target.value)}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-600/30"
           >
-            <option value="">Select a package</option>
-            <option value="SMEAgency">SME Agency — R299/mo</option>
-            <option value="Private">Private — R799/mo</option>
-            <option value="Enterprise">Enterprise — R1,999/mo</option>
+            <option value="">Help me choose</option>
+            <option value="real-estate">Biscove Real Estate</option>
+            <option value="land-administration">
+              Biscove Land Administration
+            </option>
+            <option value="both">Both solutions</option>
           </select>
         </div>
       </div>

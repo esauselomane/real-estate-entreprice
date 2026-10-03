@@ -415,7 +415,7 @@ export default function BrokerDashboard() {
                <EmptyState label="No recent activity." />
              ) : (
                <div className="overflow-auto max-h-80 rounded-xl border border-slate-800">
-                 <table className="w-full text-xs">
+                 <div className="workspace-table-scroll" tabIndex={0} role="region" aria-label="Broker activity table"><table className="w-full text-xs">
                    <thead className="sticky top-0 bg-slate-900 z-10 border-b border-slate-800">
                      <tr className="text-left text-slate-500">
                        <th className="py-2 px-3 font-semibold">Broker</th>
@@ -441,14 +441,14 @@ export default function BrokerDashboard() {
                        );
                      })}
                    </tbody>
-                 </table>
+                 </table></div>
                </div>
              )
            ) : leaderboard.length === 0 ? (
              <EmptyState label="No agents on the roster yet." />
            ) : (
              <div className="overflow-auto max-h-80 rounded-xl border border-slate-800">
-               <table className="w-full text-xs">
+               <div className="workspace-table-scroll" tabIndex={0} role="region" aria-label="Broker activity table"><table className="w-full text-xs">
                  <thead className="sticky top-0 bg-slate-900 z-10">
                    <tr className="text-left text-slate-500 border-b border-slate-800">
                      <SortHeader label="Agent" field="name" active={sortKey === 'name'} dir={sortDir === 'asc'} onRequest={requestSort} right={false} />
@@ -467,7 +467,7 @@ export default function BrokerDashboard() {
                      </tr>
                    ))}
                  </tbody>
-               </table>
+               </table></div>
              </div>
            )}
         </div>

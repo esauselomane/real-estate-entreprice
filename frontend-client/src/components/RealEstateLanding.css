@@ -1,0 +1,361 @@
+.real-estate-landing {
+  --re-ink: #eef3fa;
+  --re-muted: #adbdd0;
+  --re-line: #2c4058;
+  color: var(--re-ink);
+  background: #0c1728;
+  min-height: 100vh;
+  font-family: inherit;
+}
+.real-estate-landing * {
+  box-sizing: border-box;
+}
+.real-estate-landing a {
+  color: inherit;
+  text-decoration: none;
+}
+.real-estate-landing a:focus-visible {
+  outline: 3px solid #7dcbb8;
+  outline-offset: 5px;
+}
+.real-estate-landing h1,
+.real-estate-landing h2,
+.real-estate-landing h3 {
+  color: var(--re-ink);
+  line-height: 1.12;
+}
+.real-estate-landing p {
+  color: var(--re-muted);
+  line-height: 1.7;
+}
+.re-header,
+.re-hero,
+.re-section,
+.re-value,
+.re-sign-in,
+.re-footer {
+  width: min(1180px, calc(100% - 48px));
+  margin: auto;
+}
+.re-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--re-line);
+}
+.re-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
+  font-weight: 700;
+}
+.re-brand img {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+}
+.re-brand span {
+  font-weight: 400;
+  color: var(--re-muted);
+}
+.re-header nav {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  font-size: 14px;
+}
+.re-hero {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 64px;
+  align-items: center;
+  padding: 90px 0;
+}
+.re-eyebrow {
+  color: #85c8b5 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-size: 11px;
+  font-weight: 700;
+}
+.re-hero h1 {
+  font-size: clamp(44px, 5vw, 70px);
+  letter-spacing: -0.045em;
+  margin: 20px 0;
+}
+.re-hero h1 em {
+  color: #8dd1bd;
+  font-style: normal;
+}
+.re-intro {
+  font-size: 18px;
+  max-width: 560px;
+}
+.re-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 28px 0 18px;
+}
+.re-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #8dd1bd;
+  color: #102c28 !important;
+  padding: 13px 19px;
+  border-radius: 9px;
+  font-weight: 700;
+  font-size: 14px;
+  min-height: 44px;
+}
+.re-button:hover {
+  filter: brightness(1.08);
+}
+.re-button-secondary {
+  background: transparent;
+  color: var(--re-ink) !important;
+  border: 1px solid #60748c;
+}
+.re-small {
+  font-size: 12px;
+}
+.re-workspace-preview {
+  border: 1px solid #476076;
+  border-radius: 24px;
+  background: linear-gradient(150deg, #1f3449, #122235);
+  padding: 32px;
+  box-shadow: 0 24px 70px #0003;
+}
+.re-preview-title {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  margin: 26px 0;
+}
+.re-preview-title h2 {
+  font-size: 23px;
+  margin: 0;
+}
+.re-preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.re-preview-grid div {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  background: #0c172888;
+  padding: 20px;
+  border-radius: 12px;
+}
+.re-preview-grid span {
+  font-size: 12px;
+  color: var(--re-muted);
+}
+.re-preview-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  margin: 24px 0 0;
+}
+.re-section {
+  padding: 64px 0;
+  scroll-margin-top: 24px;
+}
+.re-section-heading {
+  max-width: 660px;
+  margin-bottom: 32px;
+}
+.re-section h2,
+.re-value h2,
+.re-sign-in h2 {
+  font-size: clamp(30px, 3vw, 42px);
+  letter-spacing: -0.03em;
+  margin: 15px 0;
+}
+.re-features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+.re-features article {
+  padding: 28px;
+  border: 1px solid var(--re-line);
+  border-radius: 16px;
+  background: #142337;
+}
+.re-features svg {
+  color: #85c8b5;
+}
+.re-features h3 {
+  font-size: 20px;
+  margin: 23px 0 12px;
+}
+.re-features p {
+  font-size: 14px;
+  margin: 0;
+}
+.re-value {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 50px;
+  align-items: center;
+  padding: 48px 32px;
+  border: 1px solid var(--re-line);
+  border-radius: 20px;
+  background: #192f39;
+}
+.re-plans {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.re-plan {
+  display: flex;
+  flex-direction: column;
+  padding: 28px;
+  border: 1px solid var(--re-line);
+  border-radius: 16px;
+}
+.re-plan-featured {
+  border-color: #8dd1bd;
+  background: #172d37;
+}
+.re-plan h3 {
+  font-size: 24px;
+}
+.re-price {
+  font-size: 30px;
+  color: var(--re-ink) !important;
+  font-weight: 700;
+}
+.re-price small {
+  font-size: 13px;
+  font-weight: 400;
+}
+.re-plan ul {
+  list-style: none;
+  padding: 0;
+  flex: 1;
+  margin: 20px 0;
+}
+.re-plan li {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 13px;
+  font-size: 13px;
+  color: var(--re-muted);
+}
+.re-plan li svg {
+  flex-shrink: 0;
+  color: #8dd1bd;
+}
+.re-sign-in {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 50px;
+  align-items: center;
+  padding: 64px 0;
+  border-top: 1px solid var(--re-line);
+  scroll-margin-top: 24px;
+}
+.re-sign-in p a {
+  color: #8dd1bd;
+  text-decoration: underline;
+}
+.re-login > div {
+  min-height: 0 !important;
+  width: 100% !important;
+  background: transparent !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  position: relative;
+}
+.re-login .card {
+  max-width: 100% !important;
+}
+.re-footer {
+  padding: 30px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  border-top: 1px solid var(--re-line);
+  font-size: 13px;
+}
+.re-footer span {
+  color: var(--re-muted);
+  margin-right: auto;
+}
+@media (max-width: 850px) {
+  .re-header {
+    flex-wrap: wrap;
+  }
+  .re-header nav {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .re-hero,
+  .re-value,
+  .re-sign-in {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .re-hero {
+    padding: 50px 0;
+  }
+  .re-features,
+  .re-plans {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .re-plans article:last-child {
+    grid-column: 1/-1;
+  }
+}
+@media (max-width: 550px) {
+  .re-header,
+  .re-hero,
+  .re-section,
+  .re-value,
+  .re-sign-in,
+  .re-footer {
+    width: calc(100% - 32px);
+  }
+  .re-brand {
+    font-size: 18px;
+  }
+  .re-header nav {
+    gap: 12px;
+    font-size: 12px;
+  }
+  .re-features,
+  .re-plans {
+    grid-template-columns: 1fr;
+  }
+  .re-workspace-preview,
+  .re-value {
+    padding: 22px;
+  }
+  .re-preview-grid {
+    gap: 9px;
+  }
+  .re-preview-grid div {
+    padding: 15px;
+  }
+  .re-section {
+    padding: 42px 0;
+  }
+  .re-footer span {
+    width: 100%;
+  }
+}
+
+/* The sign-in card now sits inside the product layout. */
+.re-login > div > .absolute { display: none; }
+.re-hero > *, .re-sign-in > * { min-width: 0; }
