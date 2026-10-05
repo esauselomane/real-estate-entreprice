@@ -88,7 +88,7 @@ def select(args):
     elif event_name == "pull_request":
         base = run(["git", "merge-base", event["pull_request"]["base"]["sha"], "HEAD"], capture=True).strip()
     else:
-        base = github_baseline() or event.get("before")
+        base = github_baseline()
     if base and set(base) != {"0"}:
         files = run(["git", "diff", "--no-renames", "--name-only", "-z", base, "HEAD"], capture=True).split("\0")
         services = affected_services(files, config)
@@ -124,15 +124,24 @@ def check(name):
         run(command)
 
 
+def latest_main():
+    repository = os.environ["GITHUB_REPOSITORY"]
+    request = urllib.request.Request(
+        f"https://api.github.com/repos/{repository}/git/ref/heads/main",
+        headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                 "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.load(response)["object"]["sha"]
+
+
 def deploy(services):
     if os.environ.get("GITHUB_REF") != "refs/heads/main":
         raise ValueError("Production deployments must use main")
     # A queued old run must not replace a newer main commit.
-    latest = run(["git", "ls-remote", "origin", "refs/heads/main"], capture=True).split()[0]
+    latest = latest_main()
     sha = os.environ["GITHUB_SHA"]
     if latest != sha:
-        print("A newer main commit exists; leaving deployment to its workflow.")
-        return
+        raise RuntimeError("Main has advanced; this stale run must not count as a successful release.")
     config = configuration()
     tag = f"{sha[:12]}-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
     images = {}

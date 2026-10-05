@@ -78,16 +78,17 @@ class DeploymentTests(unittest.TestCase):
                 deploy(["frontend"])
 
     def test_stale_run_does_not_overwrite_newer_main(self):
-        with patch.dict(os.environ, self.environment), patch("pipeline.run", return_value="b" * 40) as execute:
-            deploy(["frontend"])
-            self.assertEqual(execute.call_count, 1)
+        with patch.dict(os.environ, self.environment), patch("pipeline.latest_main", return_value="b" * 40), patch("pipeline.run") as execute:
+            with self.assertRaises(RuntimeError):
+                deploy(["frontend"])
+            execute.assert_not_called()
 
     def test_build_failure_never_mutates_runtime(self):
         def execute(args, **kwargs):
             if args[0] == "git":
                 return self.sha
             raise subprocess.CalledProcessError(1, args)
-        with patch.dict(os.environ, self.environment), patch("pipeline.configuration", return_value=self.config), patch("pipeline.run", side_effect=execute) as commands:
+        with patch.dict(os.environ, self.environment), patch("pipeline.latest_main", return_value=self.sha), patch("pipeline.configuration", return_value=self.config), patch("pipeline.run", side_effect=execute) as commands:
             with self.assertRaises(subprocess.CalledProcessError):
                 deploy(["frontend"])
             self.assertFalse(any(call.args[0][0] == "kubectl" for call in commands.call_args_list))
@@ -105,7 +106,7 @@ class DeploymentTests(unittest.TestCase):
                 if rollouts == 1:
                     raise subprocess.CalledProcessError(1, args)
             return ""
-        with patch.dict(os.environ, self.environment), patch("pipeline.configuration", return_value=self.config), patch("pipeline.run", side_effect=execute) as commands:
+        with patch.dict(os.environ, self.environment), patch("pipeline.latest_main", return_value=self.sha), patch("pipeline.configuration", return_value=self.config), patch("pipeline.run", side_effect=execute) as commands:
             with self.assertRaises(subprocess.CalledProcessError):
                 deploy(["frontend"])
             changes = [call.args[0] for call in commands.call_args_list if call.args[0][:3] == ["kubectl", "set", "image"]]
