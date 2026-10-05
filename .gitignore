@@ -44,3 +44,6 @@ appsettings.local.json
 !docs/maps/google-maps.md
 # Temporary GitHub Actions OIDC credentials
 gha-creds-*.json
+
+# Python tooling cache
+**/__pycache__/
