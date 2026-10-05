@@ -1,14 +1,14 @@
 # Deploy from main with GitHub Actions
 
-Open the repository's **Actions → CI and deploy** page. Pull requests targeting `main` run checks. A push or merge to `main` checks the affected components and then builds and deploys their containers to Johannesburg. Documentation-only commits skip deployment. A shared project change also selects the services referencing it, including transitive references.
+Open the repository's **Actions → CI and deploy** page. Pull requests targeting `main` run checks. A push or merge to `main` checks the affected components without deploying. Production deployment happens only through **Run workflow**. Documentation-only commits skip deployment. A shared project change also selects the services referencing it, including transitive references.
 
 The production workflow is `.github/workflows/ci-cd.yml`. Component paths, build settings and deployment targets are in `scripts/ci/services.json`. The Land Administration components are `frontend`, `gateway`, `identity`, `land`, `payments` and `reporting`. Existing database, email, payment and signing secrets remain in Google Cloud/Kubernetes; this workflow updates images, not secret values or infrastructure. Gateway releases also update the existing routes ConfigMap.
 
 ## Deploy one component manually
 
-Choose **Run workflow**, select **main**, and pick the component. Use `changed` to include changes since the last successful automatic main release, or `all` for a complete release. Other branches can run checks but cannot deploy production.
+Choose **Run workflow**, select **main**, and pick the component. Use `changed` to include changes since the last successful complete manual main release, or `all` for a complete release. Other branches can run checks but cannot deploy production.
 
-The workflow compares against the last successful main push, so a failed release remains eligible on the next push. Releases are serialised, not cancelled halfway through; a stale queued commit fails before deployment if main has advanced, so it cannot become a successful release baseline. Images are tagged with the commit SHA, run ID and attempt. All selected images build before runtime changes begin. A failed rollout or health check restores that component's previous image/traffic. Database schema changes are not reversed by an image rollback. Earlier successfully deployed components in the same run remain deployed.
+The workflow compares against the last successful complete manual release, so a failed release remains eligible on the next push. Releases are serialised, not cancelled halfway through; a stale queued commit fails before deployment if main has advanced, so it cannot become a successful release baseline. Images are tagged with the commit SHA, run ID and attempt. All selected images build before runtime changes begin. A failed rollout or health check restores that component's previous image/traffic. Database schema changes are not reversed by an image rollback. Earlier successfully deployed components in the same run remain deployed.
 
 ## Authentication and permissions
 

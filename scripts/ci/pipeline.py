@@ -55,13 +55,13 @@ def affected_services(files, config):
 
 
 def github_baseline():
-    """Use the last successful main push so failed deployments are not forgotten."""
+    """Use a successful full manual release; check-only pushes are not releases."""
     token = os.environ.get("GH_TOKEN")
     repository = os.environ.get("GITHUB_REPOSITORY")
     if not token or not repository:
         return None
     url = (f"https://api.github.com/repos/{repository}/actions/workflows/ci-cd.yml/runs"
-           "?branch=main&event=push&status=success&per_page=1")
+           "?branch=main&event=workflow_dispatch&status=success&per_page=100")
     request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}",
                                                   "Accept": "application/vnd.github+json"})
     try:
@@ -71,7 +71,11 @@ def github_baseline():
         if error.code == 404:  # New workflow: no runs yet.
             return None
         raise
-    return runs[0]["head_sha"] if runs else None
+    for release in runs:
+        # A single-component release must not hide outstanding changes elsewhere.
+        if release.get("display_title") in ("Release all", "Release changed"):
+            return release["head_sha"]
+    return None
 
 
 def select(args):
