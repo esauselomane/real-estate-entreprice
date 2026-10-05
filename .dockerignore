@@ -15,3 +15,5 @@
 **/*.pem
 **/*.key
 **/*.db
+# Temporary GitHub Actions OIDC credentials
+gha-creds-*.json

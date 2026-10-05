@@ -1,0 +1,125 @@
+{
+  "project": "project-ff46407b-1a09-4376-95a",
+  "region": "africa-south1",
+  "platform": "cloud-run",
+  "registry": "realestate-images",
+  "services": {
+    "identity-service": {
+      "project": "backend-services/Identity.Microservice/Identity.Microservice.csproj",
+      "dockerfile": "backend-services/Identity.Microservice/Dockerfile",
+      "files": [
+        "backend-services/Directory.*",
+        "global.json",
+        ".dockerignore",
+        "frontend-client/public/logo.jpg"
+      ],
+      "folders": [
+        "tests/Identity.Payments.Tests/"
+      ],
+      "tests": [
+        [
+          "dotnet",
+          "test",
+          "tests/Identity.Payments.Tests/Identity.Payments.Tests.csproj",
+          "-c",
+          "Release",
+          "-m:1"
+        ]
+      ]
+    },
+    "property-service": {
+      "project": "backend-services/Property.Microservice/Property.Microservice.csproj",
+      "dockerfile": "backend-services/Property.Microservice/Dockerfile",
+      "files": [
+        "backend-services/Directory.*",
+        "global.json",
+        ".dockerignore"
+      ],
+      "folders": [
+        "tests/Identity.Payments.Tests/",
+        "tests/Property.Syndication.Tests/"
+      ],
+      "tests": [
+        [
+          "dotnet",
+          "test",
+          "tests/Identity.Payments.Tests/Identity.Payments.Tests.csproj",
+          "-c",
+          "Release",
+          "-m:1"
+        ],
+        [
+          "dotnet",
+          "test",
+          "tests/Property.Syndication.Tests/Property.Syndication.Tests.csproj",
+          "-c",
+          "Release",
+          "-m:1"
+        ]
+      ]
+    },
+    "crm-service": {
+      "project": "backend-services/CRM.Microservice/CRM.Microservice.csproj",
+      "dockerfile": "backend-services/CRM.Microservice/Dockerfile",
+      "files": [
+        "backend-services/Directory.*",
+        "global.json",
+        ".dockerignore"
+      ],
+      "folders": [
+        "tests/Identity.Payments.Tests/"
+      ],
+      "tests": [
+        [
+          "dotnet",
+          "test",
+          "tests/Identity.Payments.Tests/Identity.Payments.Tests.csproj",
+          "-c",
+          "Release",
+          "-m:1"
+        ]
+      ]
+    },
+    "gateway": {
+      "project": "api-gateway/api-gateway.csproj",
+      "dockerfile": "api-gateway/Dockerfile",
+      "files": [
+        "global.json",
+        ".dockerignore"
+      ]
+    },
+    "frontend-client": {
+      "frontend": "frontend-client",
+      "folders": [
+        "frontend-client/"
+      ],
+      "dockerfile": "frontend-client/Dockerfile",
+      "files": [
+        ".dockerignore"
+      ],
+      "health_path": "/",
+      "build_args": {
+        "VITE_API_BASE_URL": "https://api.biscovetech.com/gateway",
+        "VITE_COMPANY_SITE_URL": "https://www.biscovetech.com",
+        "VITE_GOOGLE_MAPS_API_KEY": "env:GOOGLE_MAPS_API_KEY"
+      }
+    },
+    "client-facing": {
+      "frontend": "client-facing-app",
+      "folders": [
+        "client-facing-app/"
+      ],
+      "dockerfile": "client-facing-app/Dockerfile",
+      "files": [
+        ".dockerignore"
+      ],
+      "health_path": "/api/health",
+      "build_args": {
+        "NEXT_PUBLIC_GATEWAY_URL": "https://api.biscovetech.com",
+        "NEXT_PUBLIC_APP_URL": "https://app.biscovetech.com",
+        "NEXT_PUBLIC_SITE_URL": "https://www.biscovetech.com",
+        "NEXT_PUBLIC_LAND_APP_URL": "https://landadmin.biscovetech.com"
+      }
+    }
+  }
+}
