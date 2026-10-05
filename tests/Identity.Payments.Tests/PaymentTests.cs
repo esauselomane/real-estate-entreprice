@@ -86,6 +86,65 @@ public sealed class PaymentTests
         Assert.Equal("2990.00", checkout.FormFields["recurring_amount"]);
     }
 
+    [Theory]
+    [InlineData(false, "299.00")]
+    [InlineData(true, "2.00")]
+    public async Task OnceOffPaymentGrantsOneMonthWithoutRecurringAgreement(bool mothodiTest, string expectedAmount)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var settings = new PaymentSettings();
+        if (mothodiTest)
+        {
+            (await fixture.Database.TenantAgencies.SingleAsync()).AgencyName = "Mothodi";
+            settings.MothodiTestTenantId = "tenant-a";
+            await fixture.Database.SaveChangesAsync();
+        }
+        var service = new PaymentOrchestrationService(fixture.Database, fixture.Factory, Options.Create(settings), NullLogger<PaymentOrchestrationService>.Instance);
+        var request = fixture.Checkout with { BillingCycle = BillingCycle.OnceOff };
+        var checkout = await service.CreateCheckoutSessionAsync(request, Guid.NewGuid().ToString());
+        Assert.Equal(expectedAmount, checkout.FormFields!["amount"]);
+        foreach (var field in new[] { "subscription_type", "recurring_amount", "frequency", "cycles", "billing_date", "subscription_notify_buyer" })
+            Assert.False(checkout.FormFields.ContainsKey(field));
+        Assert.Contains("No automatic renewal", checkout.FormFields["item_description"]);
+        var badAmount = $"m_payment_id={checkout.SessionId}&pf_payment_id=once-off-wrong&payment_status=COMPLETE&amount_gross=0.01";
+        await Assert.ThrowsAsync<ArgumentException>(() => service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(badAmount), badAmount));
+        var payload = $"m_payment_id={checkout.SessionId}&pf_payment_id=once-off-paid&payment_status=COMPLETE&amount_gross={expectedAmount}";
+        await service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(payload), payload);
+        var subscription = await fixture.Database.Subscriptions.SingleAsync();
+        var expiry = subscription.CurrentPeriodEnd;
+        Assert.True(subscription.IsOnceOff);
+        Assert.Equal(subscription.CurrentPeriodStart.AddMonths(1), expiry);
+        await service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(payload), payload);
+        Assert.Equal(expiry, (await fixture.Database.Subscriptions.SingleAsync()).CurrentPeriodEnd);
+        var additionalPayment = payload.Replace("once-off-paid", "unexpected-second-payment");
+        await Assert.ThrowsAsync<ArgumentException>(() => service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(additionalPayment), additionalPayment));
+        var state = await service.GetSubscriptionStatusAsync("tenant-a");
+        Assert.True(state.IsOnceOff);
+        Assert.False(state.CanManageBilling);
+        Assert.False(state.RequiresUpgrade);
+        Assert.Equal("once-off-approved", (await fixture.Database.BillingNotifications.SingleAsync()).Template);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.CreatePortalSessionAsync(new CreatePortalRequest { TenantId = "tenant-a", ReturnUrl = request.CancelUrl }));
+        fixture.Database.ChangeTracker.Clear();
+        subscription = await fixture.Database.Subscriptions.SingleAsync();
+        subscription.CurrentPeriodEnd = DateTime.UtcNow.AddSeconds(-1);
+        await fixture.Database.SaveChangesAsync();
+        state = await service.GetSubscriptionStatusAsync("tenant-a");
+        Assert.True(state.RequiresUpgrade);
+        Assert.True(state.CanUpgrade);
+        var newCheckout = await service.CreateCheckoutSessionAsync(request, Guid.NewGuid().ToString());
+        Assert.Equal("299.00", newCheckout.FormFields!["amount"]);
+    }
+
+    [Fact]
+    public async Task RecurringPaymentStillRequiresSubscriptionToken()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var checkout = await fixture.Service.CreateCheckoutSessionAsync(fixture.Checkout, Guid.NewGuid().ToString());
+        var payload = $"m_payment_id={checkout.SessionId}&pf_payment_id=no-token&payment_status=COMPLETE&amount_gross=2990.00";
+        await Assert.ThrowsAsync<ArgumentException>(() => fixture.Service.ProcessWebhookEventAsync(fixture.Gateway.ParseWebhookEvent(payload), payload));
+        Assert.Empty(await fixture.Database.Subscriptions.ToListAsync());
+    }
+
     [Fact]
     public async Task AnnualCheckoutUsesDatabaseAmountAndReusesIdempotencyKey()
     {

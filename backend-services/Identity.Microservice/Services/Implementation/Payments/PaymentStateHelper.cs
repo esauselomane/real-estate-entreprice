@@ -18,6 +18,7 @@ public static class PaymentStateHelper
         var hasAccess = end > now && status is SubscriptionStatus.Trialing or SubscriptionStatus.Active or SubscriptionStatus.Cancelled;
         return new SubscriptionStatusResponse
         {
+            IsOnceOff = subscription?.IsOnceOff == true,
             Status = status.ToString().ToLowerInvariant(),
             PricingPackageCode = subscription?.PricingPackageCode ?? "NONE",
             PricingPackageName = package?.Name ?? subscription?.PricingPackageCode ?? "Free trial",
@@ -30,7 +31,7 @@ public static class PaymentStateHelper
             IsTrial = status == SubscriptionStatus.Trialing,
             CanUpgrade = status != SubscriptionStatus.Active,
             RequiresUpgrade = !hasAccess,
-            CanManageBilling = subscription?.Gateway != null && subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.PastDue or SubscriptionStatus.Paused,
+            CanManageBilling = subscription?.Gateway != null && !subscription.IsOnceOff && subscription.Status is SubscriptionStatus.Active or SubscriptionStatus.PastDue or SubscriptionStatus.Paused,
             Gateway = subscription?.Gateway
         };
     }

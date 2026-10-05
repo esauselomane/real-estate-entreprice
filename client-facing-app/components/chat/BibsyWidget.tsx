@@ -37,7 +37,7 @@ export default function BibsyWidget() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "bot",
-      text: "Hi! I'm Bibsy 🤖 — your real-estate assistant. I can help you onboard a new agency, answer questions about the platform, or request a demo. What brings you here today?",
+      text: "Hi! I'm Bibsy 🤖 — the Biscove Technologies assistant. Explore our real estate and land administration solutions, ask about a product, or request a conversation with our team. What brings you here today?",
     },
   ]);
   const [input, setInput] = useState("");
@@ -141,6 +141,10 @@ export default function BibsyWidget() {
 
   const handleIdle = async (text: string) => {
     const lower = text.toLowerCase();
+    if (/\b(land|gis|jurisdictions?)\b/i.test(text)) {
+      addBot(findAnswer(text, taught) || "Explore Land Administration under Our Solutions.");
+      return;
+    }
     if (lower.includes("agency") || lower.includes("onboard")) {
       setDraft((d) => ({ ...d, userType: "Agency", message: text }));
       setState({ step: "name" });
@@ -164,7 +168,7 @@ export default function BibsyWidget() {
       }
       const answer = findAnswer(text, taught);
       if (answer) addBot(answer);
-      else addBot("I can help you onboard an agency, request a demo, or manage your property portfolio. Which of these sounds like you?");
+      else addBot("Explore Our Solutions to choose between Biscove Real Estate and Biscove Land Administration, or use Contact to discuss your organisation. I can also help with real estate agency onboarding.");
     }
   };
 
@@ -265,7 +269,7 @@ export default function BibsyWidget() {
         );
       } else {
         addBot(
-          `Your details have been saved (ref: ${data.leadId}). A broker will contact you at ${draft.email} shortly. Is there anything else I can help with?`
+          `Your details have been saved (ref: ${data.leadId}). The Biscove team will contact you at ${draft.email} shortly. Is there anything else I can help with?`
         );
       }
     } catch {

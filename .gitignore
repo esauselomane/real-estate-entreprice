@@ -42,3 +42,5 @@ appsettings.local.json
 # Maps implementation and setup documentation are source, not credentials.
 !frontend-client/src/components/maps/GoogleAddressPicker.jsx
 !docs/maps/google-maps.md
+# Temporary GitHub Actions OIDC credentials
+gha-creds-*.json

@@ -21,7 +21,7 @@ public sealed class PaymentsController(PaymentOrchestrationService payments, IPa
         var tenantId = ResolveTenant(request.TenantId);
         if (tenantId == null) return Forbid();
         if (!Enum.TryParse<BillingCycle>(request.BillingCycle, true, out var cycle) || !Enum.IsDefined(cycle))
-            return BadRequest(new { message = "Choose monthly or annual billing." });
+            return BadRequest(new { message = "Choose monthly, annual or once-off billing." });
         try
         {
             var result = await payments.CreateCheckoutSessionAsync(new CreateCheckoutRequest

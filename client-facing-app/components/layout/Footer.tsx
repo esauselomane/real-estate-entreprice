@@ -11,19 +11,19 @@ const socialLinks = [
 
 const footerLinks = [
   { label: "Home", href: "/" },
-  { label: "Pricing", href: "/pricing" },
+  { label: "Our Solutions", href: "/solutions" },
   { label: "About", href: "/about" },
   { label: "Mission", href: "/mission" },
   { label: "Contact", href: "/contact" },
-  { label: "Login", href: "/login" },
+  { label: "Product access", href: "/solutions" },
 ];
 
 export default function Footer() {
   const year = new Date().getFullYear();
   return (
     <footer className="bg-slate-900/50">
-      <div className="container py-10 sm:py-14">
-        <div className="flex flex-col gap-6 border-b border-slate-700 pb-10 lg:flex-row lg:items-center lg:justify-between">
+      <div className="container py-5">
+        <div className="flex flex-col gap-6 border-b border-slate-700 pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[.2em] text-blue-300">A little more connected</p>
             <h2 className="mt-3 text-3xl font-display sm:text-4xl">Good things grow together.</h2>
@@ -38,11 +38,11 @@ export default function Footer() {
           </nav>
         </div>
       </div>
-      <div className="container grid gap-8 py-8 md:grid-cols-3">
+      <div className="container grid gap-5 py-5 md:grid-cols-3">
         <div>
           <div className="flex items-center gap-3 text-xl font-display font-extrabold text-blue-400">
-            <img src="/favicon.jpg" alt="Biscove Real Estate Tech logo" className="h-7 w-auto" />
-            Biscove Real Estate Tech
+            <img src="/favicon.jpg" alt="Biscove Technologies logo" className="h-7 w-auto" />
+            Biscove Technologies
           </div>
           <p className="mt-3 max-w-xs text-sm text-slate-400">{site.description}</p>
         </div>

@@ -116,3 +116,10 @@ Identity configuration `Payments:MothodiTestTenantId` is scoped to `TEN-c9fc68f6
 Only the first successful PayFast payment is R2. The signed recurring amount remains the selected plan's normal price, with its first recurring billing date one monthly/annual period after checkout. Normal pricing applies to all other agencies and subsequent checkouts after a successful payment. Webhooks validate the initial amount before completion and the stored recurring amount afterward; duplicate notifications remain idempotent. Existing checkouts retain their originally signed prices: allow any pending 30-minute checkout to expire before starting the R2 test. Existing active subscriptions are not modified.
 
 Deploy Identity before testing. Confirm `2.00` on the new PayFast checkout before submitting your card. No card charge is made by deployment or by the automated tests. This is still a recurring subscription; future payments use the normal plan price.
+
+
+### Once-off billing
+
+The app's Billing cycle selector supports `Once-off (one month)`, submitted as `onceoff`. It charges the monthly package price for one calendar month of access from the verified payment, and sends no PayFast subscription/recurring fields. The existing Mothodi first-payment override can reduce its first charge to R2; it does not create a renewal agreement in once-off mode.
+
+Deploy Identity and frontend-client together. Identity's startup schema upgrade adds `Subscriptions.IsOnceOff`, defaulting existing subscriptions to recurring. The approval email and billing screen explicitly state there is no automatic renewal. Access expires at CurrentPeriodEnd; the customer can then manually purchase another month. Existing active recurring subscriptions must be handled through billing support before switching. Existing pending checkouts remain valid for their original 30-minute window and keep their original price and billing cycle.

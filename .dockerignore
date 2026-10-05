@@ -1,0 +1,19 @@
+**/node_modules
+**/.next
+**/dist
+**/bin
+**/obj
+.git
+**/.env*
+**/appsettings.Development.json
+**/appsettings.Production.json
+**/appsettings.local.json
+**/*.tsbuildinfo
+**/*.log
+**/nohup.out
+**/*.pfx
+**/*.pem
+**/*.key
+**/*.db
+# Temporary GitHub Actions OIDC credentials
+gha-creds-*.json

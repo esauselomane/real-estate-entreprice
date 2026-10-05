@@ -37,24 +37,37 @@ public sealed class PayFastGateway(HttpClient httpClient, IOptions<PayFastSettin
             ["m_payment_id"] = request.MerchantReference,
             ["amount"] = request.Amount.ToString("F2", CultureInfo.InvariantCulture),
             ["item_name"] = $"{request.PricingPackageCode} subscription",
-            ["payment_method"] = "cc",
-            ["subscription_type"] = "1",
-            ["billing_date"] = FirstRecurringBillingDate(request).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            ["recurring_amount"] = (request.RecurringAmount ?? request.Amount).ToString("F2", CultureInfo.InvariantCulture),
-            ["frequency"] = request.BillingCycle == BillingCycle.Monthly ? "3" : "6",
-            ["cycles"] = "0",
-            ["subscription_notify_email"] = "true",
-            ["subscription_notify_webhook"] = "true",
-            ["subscription_notify_buyer"] = "true"
+            ["payment_method"] = "cc"
         };
-        if (request.RecurringAmount.HasValue && request.RecurringAmount != request.Amount)
-            fields["item_description"] = $"Initial payment R{request.Amount.ToString("F2", CultureInfo.InvariantCulture)}; renews at R{request.RecurringAmount.Value.ToString("F2", CultureInfo.InvariantCulture)} {request.BillingCycle.ToString().ToLowerInvariant()}.";
+        if (request.BillingCycle == BillingCycle.OnceOff)
+        {
+            fields["item_name"] = $"{request.PricingPackageCode} — one month access";
+            fields["item_description"] = "Once-off payment for one month of access. No automatic renewal.";
+        }
+        else
+        {
+            AddRecurringFields(fields, request);
+        }
         fields["signature"] = PayFastSignatureHelper.Sign(fields, settings.PassPhrase);
         return Task.FromResult(new CreateCheckoutResult
         {
             CheckoutUrl = settings.ProcessUrl, Method = "POST", FormFields = fields,
             SessionId = request.MerchantReference, ExpiresAt = DateTime.UtcNow.AddMinutes(30), Gateway = GatewayType
         });
+    }
+
+    private static void AddRecurringFields(Dictionary<string, string> fields, CreateCheckoutRequest request)
+    {
+        fields["subscription_type"] = "1";
+        fields["billing_date"] = FirstRecurringBillingDate(request).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        fields["recurring_amount"] = (request.RecurringAmount ?? request.Amount).ToString("F2", CultureInfo.InvariantCulture);
+        fields["frequency"] = request.BillingCycle == BillingCycle.Monthly ? "3" : "6";
+        fields["cycles"] = "0";
+        fields["subscription_notify_email"] = "true";
+        fields["subscription_notify_webhook"] = "true";
+        fields["subscription_notify_buyer"] = "true";
+        if (request.RecurringAmount.HasValue && request.RecurringAmount != request.Amount)
+            fields["item_description"] = $"Initial payment R{request.Amount.ToString("F2", CultureInfo.InvariantCulture)}; renews at R{request.RecurringAmount.Value.ToString("F2", CultureInfo.InvariantCulture)} {request.BillingCycle.ToString().ToLowerInvariant()}.";
     }
 
     private static DateTime FirstRecurringBillingDate(CreateCheckoutRequest request)

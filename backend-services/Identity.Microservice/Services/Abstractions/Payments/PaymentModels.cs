@@ -17,7 +17,8 @@ namespace Identity.Microservice.Services.Abstractions.Payments
     public enum BillingCycle
     {
         Monthly = 1,
-        Annual = 2
+        Annual = 2,
+        OnceOff = 3
     }
 
     /// <summary>

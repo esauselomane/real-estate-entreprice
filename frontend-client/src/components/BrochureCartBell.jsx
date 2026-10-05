@@ -110,7 +110,7 @@ export default function BrochureCartBell() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden">
+        <div className="workspace-header-popover absolute right-0 mt-2 w-80 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden">
           <header className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
             <div>
               <h4 className="text-xs font-bold text-white uppercase tracking-wider">Brochure Carts</h4>

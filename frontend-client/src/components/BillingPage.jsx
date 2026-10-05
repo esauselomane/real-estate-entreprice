@@ -90,23 +90,25 @@ export default function BillingPage({ tenantId, status, loadError, onRefresh, on
       {paymentReturn === 'cancelled' && <p role="status">Checkout was cancelled. Your subscription status is shown above.</p>}
       {loadError && <p role="alert" className="text-red-300">{loadError}</p>}
       {error && <p role="alert" className="text-red-300">{error}</p>}
-      {status?.gateway && !status?.canManageBilling && <p>Card management is unavailable in this environment. Contact billing support for subscription changes.</p>}
+      {status?.gateway && !status?.isOnceOff && !status?.canManageBilling && <p>Card management is unavailable in this environment. Contact billing support for subscription changes.</p>}
+      {status?.isOnceOff && <p>Once-off payment · Access {status.requiresUpgrade ? 'ended' : 'ends'} on {new Date(status.currentPeriodEnd).toLocaleDateString()}. No automatic renewal.</p>}
       {!canBill && <p>Ask your agency administrator to manage this subscription.</p>}
       <div className="flex flex-wrap gap-4 items-center rounded-2xl border border-slate-800 bg-slate-900 p-4">
         <label>Billing cycle <select value={cycle} onChange={event => setCycle(event.target.value)} disabled={busy} className="bg-slate-800 p-2 rounded">
-          <option value="monthly">Monthly</option><option value="annual">Annual</option></select></label>
+          <option value="monthly">Monthly</option><option value="annual">Annual</option><option value="onceoff">Once-off (one month)</option></select></label>
         <button disabled={busy} onClick={onRefresh}>Refresh status</button>
         {canBill && status?.canManageBilling && <button disabled={busy} onClick={manageBilling}>Manage Billing</button>}
         {!status?.requiresUpgrade && onBack && <button onClick={onBack}>Back to app</button>}
       </div>
+      <p className="text-sm text-slate-300">{cycle === 'onceoff' ? 'Pay once for one month of access at the monthly price. Your card will not be charged automatically again.' : 'This plan renews automatically at the selected billing interval.'}</p>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
         {plans.map(plan => {
-          const current = status?.status === 'active' && status?.pricingPackageCode === plan.code;
+          const current = status?.status === 'active' && !status?.requiresUpgrade && status?.pricingPackageCode === plan.code;
           const price = cycle === 'annual' ? plan.annualPrice : plan.monthlyPrice;
           const assisted = plan.code === 'ENTERPRISE' || price == null;
           return <article key={plan.code} className="min-w-0 flex flex-col gap-5 rounded-2xl border border-slate-700 bg-slate-900 p-6">
             <h2 className="text-xl font-bold">{plan.name}{selectedPackage === plan.code ? ' — selected' : ''}</h2>
-            <p>{assisted ? 'Contact sales' : `${new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(price)} / ${cycle === 'annual' ? 'year' : 'month'}`}</p>
+            <p>{assisted ? 'Contact sales' : `${new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(price)} ${cycle === 'onceoff' ? 'once-off · one month' : `/ ${cycle === 'annual' ? 'year' : 'month'}`}`}</p>
             <ul className="flex-1 space-y-3 text-sm leading-6 text-slate-300">{(Array.isArray(plan.features) ? plan.features : []).map(feature => <li key={feature}>{feature}</li>)}</ul>
             {assisted ? <a className="block rounded-xl border border-blue-500 px-4 py-3 text-center font-semibold text-blue-300" href={`${salesUrl}?package=${encodeURIComponent(plan.code)}`}>Contact sales</a> :
               <button disabled={busy || !canBill || current || !status?.canUpgrade || status?.canManageBilling} onClick={() => checkout(plan)}

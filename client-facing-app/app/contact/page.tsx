@@ -10,23 +10,23 @@ const contactDetails = {
 export const metadata = {
   title: "Contact",
   description:
-    "Contact Biscove Real Estate Technology about a trial, onboarding, or enterprise access.",
+    "Contact Biscove Technologies about our real estate and land administration solutions.",
 };
 
 export default function ContactPage() {
   return (
-    <section className="py-10 sm:py-12">
+    <section className="py-6 sm:py-5">
       <div className="container">
         <div className="mx-auto max-w-3xl text-center">
           <h1 className="text-4xl font-display font-extrabold tracking-tight text-white sm:text-5xl">
             Contact us
           </h1>
           <p className="mt-3 text-lg text-slate-300">
-            For trials, onboarding, or enterprise discussions, use the form or the details below.
+            Tell us about your organisation and the solution you are interested in: real estate operations, land administration, or both.
           </p>
         </div>
 
-        <div className="mt-8 grid gap-8 lg:grid-cols-2">
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
           <div className="space-y-4">
             <div className="flex items-start gap-3">
               <Mail className="mt-0.5 h-5 w-5 text-blue-400" />

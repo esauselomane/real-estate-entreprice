@@ -78,7 +78,7 @@ export default function TenantSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 z-50 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
+        <div className="workspace-header-popover absolute right-0 top-full mt-2 w-80 z-50 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
           <div className="p-3 border-b border-slate-800 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Tenant</span>

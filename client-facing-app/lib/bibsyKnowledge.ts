@@ -6,6 +6,8 @@ export type BibsyEntry = {
 };
 
 export const bibsyKnowledge: BibsyEntry[] = [
+  { question: "What does Biscove Technologies do?", answer: "Biscove Technologies builds hosted business software. Our solutions are Biscove Real Estate for brokerage operations and Biscove Land Administration for managing parcels, jurisdictions and land workflows. Visit /solutions to explore both.", keywords: ["biscove", "technologies", "company", "solutions"], apiHint: "none" },
+  { question: "What is Land Administration?", answer: "Biscove Land Administration supports rural and communal land under chiefs and kings, with boundaries established in accordance with applicable government requirements. It manages land registers, GIS imports, jurisdiction workspaces, applications and consulted allocation workflows. Applicants verify their email through a link valid for 30 minutes, then create a password of at least eight characters with uppercase, lowercase and a special character. Proof of Allocation and Land Use Right Certificates can be digitally signed by the Traditional Council and stamped by the Municipality once institutional signing credentials are configured. These documents do not confer title ownership. Container deployment configuration is available for Google Cloud, with separate organisation services and protected database and signing-key storage; hosting must be configured for each deployment. Visit /solutions/land-administration to explore this product, or contact our team to discuss your organisation.", keywords: ["land", "administration", "gis", "jurisdiction"], apiHint: "none" },
   {
     question: "What is Biscove Real Estate Tech?",
     answer:
@@ -72,7 +74,7 @@ export const bibsyKnowledge: BibsyEntry[] = [
   {
     question: "How do I log in?",
     answer:
-      "Click Login in the header, or visit /login. That opens the application at app.biscovetech.com where you enter your email and password.",
+      "Visit Our Solutions and open your product. The real estate product has its own Sign in section; /login remains a shortcut to it.",
     keywords: ["login", "log", "in", "auth", "sign", "broker"],
     apiHint: "none",
   },
@@ -99,6 +101,8 @@ export function findAnswer(
   input: string,
   taught: Record<string, string> | null
 ): string | null {
+  if (/\b(land|gis|jurisdictions?)\b/i.test(input)) return bibsyKnowledge[1].answer;
+  if (/\b(company|technologies|solutions)\b/i.test(input)) return bibsyKnowledge[0].answer;
   const tokens = tokenize(input);
   if (!tokens.length) return null;
 
@@ -122,6 +126,7 @@ export function findAnswer(
 
 export function getApiHint(input: string): "pricing" | "none" {
   const q = input.toLowerCase();
+  if (/\b(land|gis|jurisdictions?)\b/i.test(q)) return "none";
   if (["price", "pricing", "plan", "package", "cost", "rate", "subscription"].some((k) => q.includes(k))) return "pricing";
   return "none";
 }

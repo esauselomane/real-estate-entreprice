@@ -1,0 +1,185 @@
+/* The desktop navigation stays visible; phones get an accessible drawer. */
+.real-estate-workspace {
+  width: 100%;
+  align-items: flex-start;
+}
+.workspace-content {
+  min-width: 0;
+  max-width: 100%;
+}
+.workspace-sidebar {
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  min-height: 0;
+  overflow-y: auto;
+}
+.workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.workspace-header > div:first-of-type {
+  min-width: 0;
+}
+.workspace-header-actions {
+  flex-shrink: 0;
+}
+.mobile-navigation-open,
+.mobile-navigation-close,
+.mobile-navigation-backdrop {
+  display: none;
+}
+.workspace-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.workspace-table-scroll table {
+  min-width: 540px;
+}
+@media (max-width: 767px) {
+  .workspace-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 70;
+    width: min(288px, calc(100vw - 48px));
+    height: 100dvh;
+    transform: translateX(-110%);
+    transition: transform 0.2s ease;
+    visibility: hidden;
+  }
+  .workspace-sidebar.is-open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  .desktop-navigation-toggle {
+    display: none;
+  }
+  .mobile-navigation-open,
+  .mobile-navigation-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    background: #0f172a;
+    border-radius: 10px;
+  }
+  .mobile-navigation-close {
+    align-self: flex-end;
+    margin: 8px 12px 0;
+  }
+  .mobile-navigation-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: #020617aa;
+  }
+  .workspace-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .workspace-header > div:first-of-type {
+    flex: 1;
+  }
+  .workspace-header h2 {
+    font-size: 20px;
+    overflow-wrap: anywhere;
+  }
+  .workspace-header > div:first-of-type p {
+    font-size: 12px;
+  }
+  .workspace-header-actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+  .workspace-header-popover {
+    position: fixed;
+    inset: 150px 12px auto !important;
+    width: auto !important;
+    max-height: calc(100dvh - 170px);
+    overflow-y: auto;
+    z-index: 50;
+  }
+  .workspace-content .flex.justify-between:not(.flex-col) {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .workspace-content .flex > .flex-1 {
+    min-width: 0;
+  }
+  .workspace-content .grid > * {
+    min-width: 0;
+  }
+  .workspace-content .grid.grid-cols-2,
+  .workspace-content .grid.grid-cols-3 {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .workspace-content .overflow-x-auto {
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+  }
+  .workspace-content .overflow-x-auto table {
+    min-width: 540px;
+  }
+  .workspace-content .fixed.inset-0 {
+    padding: 12px;
+    align-items: flex-start;
+    overflow-y: auto;
+  }
+  .workspace-content .fixed.inset-0 > div {
+    max-height: calc(100dvh - 24px);
+    max-width: 100%;
+    overflow-y: auto;
+  }
+  .workspace-content input:not([type="checkbox"]):not([type="radio"]),
+  .workspace-content select,
+  .workspace-content textarea {
+    font-size: 16px;
+    max-width: 100%;
+  }
+  .workspace-content button,
+  .workspace-content input:not([type="checkbox"]):not([type="radio"]),
+  .workspace-content select {
+    min-height: 44px;
+  }
+  .workspace-content p,
+  .workspace-content h3 {
+    overflow-wrap: anywhere;
+  }
+  .workspace-sidebar nav button,
+  .workspace-sidebar > div > button {
+    min-height: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace-sidebar {
+    transition: none;
+  }
+}
+
+.workspace-sidebar > div:first-of-type {
+  flex: 1;
+}
+@media (max-width: 767px) {
+  .workspace-content .grid.grid-cols-2 > .col-span-2,
+  .workspace-content .grid.grid-cols-3 > .col-span-2,
+  .workspace-content .grid.grid-cols-3 > .col-span-3 {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Keep the desktop toggle inside the scrolling sidebar. */
+.desktop-navigation-toggle { right: 8px; top: 20px; }
+@media (max-width: 767px) {
+  .workspace-header-actions > .relative > button { min-width: 44px; }
+}
