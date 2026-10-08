@@ -34,6 +34,7 @@ export const solutions = [
       "Jurisdiction workspaces, roles and reporting",
       "Jurisdiction-set application fees and unpaid-fee reports",
       "Encrypted organisation bank accounts and external payment records",
+      "Area-based and negotiated owner compensation, configurable VAT",
       "Google Cloud deployment options for organisations",
       "Verified applicant accounts with email activation",
       "Allocation certificates with configurable Council and Municipality signing",
