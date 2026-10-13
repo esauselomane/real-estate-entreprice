@@ -30,7 +30,7 @@ export const solutions = [
       "Parcel registers and GIS dataset imports",
       "Country-specific coordinate system configuration",
       "Applications, consulted land offers and allocations",
-      "Clear jurisdiction outlines, parcel maps and grouped review actions",
+      "Clear jurisdiction outlines, selected parcel maps with automatic zoom and grouped review actions",
       "Jurisdiction workspaces, roles and reporting",
       "Jurisdiction-set application fees and unpaid-fee reports",
       "Encrypted organisation bank accounts and external payment records",
