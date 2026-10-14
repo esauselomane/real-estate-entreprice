@@ -8,18 +8,18 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        slate: { 50: '#fffaf5', 100: '#fff2e7', 200: '#f6e1d0', 300: '#e6cbb8', 400: '#c4a99a', 500: '#a5897c', 600: '#795f56', 700: '#574239', 800: '#352925', 900: '#221b19', 950: '#171210' },
-        blue: { 50: '#fff5ee', 100: '#ffe6d5', 200: '#ffcdb0', 300: '#ffb48b', 400: '#ffac82', 500: '#c65838', 600: '#b8482c', 700: '#96391f', 800: '#793420', 900: '#512c22', 950: '#321d16' },
-        primary: "#b8482c",
-        primaryHover: "#96391f",
+        slate: { 50: '#f8fafb', 100: '#172e3b', 200: '#314854', 300: '#52636e', 400: '#657884', 500: '#84959e', 600: '#b8c5ca', 700: '#d9e2e5', 800: '#f0f4f5', 900: '#ffffff', 950: '#f8fafb' },
+        blue: { 50: '#edf7f5', 100: '#d7eeea', 200: '#afd9d1', 300: '#237d72', 400: '#176b61', 500: '#197c70', 600: '#12685e', 700: '#0c5149', 800: '#103e3a', 900: '#14302e', 950: '#0d211f' },
+        primary: "#12685e",
+        primaryHover: "#0c5149",
         accent: "#f4bc91",
         accentHover: "#059669",
         surface: "#f8fafc",
         surfaceDark: "#0f172a",
       },
       fontFamily: {
-        sans: ["Trebuchet MS", "Avenir Next", "ui-sans", "system-ui", "sans-serif"],
-        display: ["Georgia", "Cambria", "serif"],
+        sans: ["Avenir Next", "Segoe UI", "ui-sans", "system-ui", "sans-serif"],
+        display: ["Avenir Next", "Segoe UI", "Arial", "sans-serif"],
       },
       boxShadow: {
         card: "0 10px 32px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.04)",

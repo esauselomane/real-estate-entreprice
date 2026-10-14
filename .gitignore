@@ -47,3 +47,14 @@ gha-creds-*.json
 
 # Python tooling cache
 **/__pycache__/
+
+# Isolated local marketing preview assets
+client-facing-app/.next-review-preview/
+
+client-facing-app/.next-social-review/
+
+client-facing-app/.next-evidence-review/
+
+# Generated local runtime and TypeScript cache files
+nohup.out
+*.tsbuildinfo

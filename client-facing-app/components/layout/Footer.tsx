@@ -4,8 +4,8 @@ import { site } from "@/lib/content";
 
 const socialLinks = [
   { label: "Twitter / X", href: "https://x.com/biscovetech", icon: Twitter },
-  { label: "LinkedIn", href: "https://www.linkedin.com/company/biscovetech/", icon: Linkedin },
-  { label: "Facebook", href: "https://www.facebook.com/biscovetech", icon: Facebook },
+  { label: "LinkedIn", href: "https://www.linkedin.com/company/biscove-technologies", icon: Linkedin },
+  { label: "Facebook", href: "https://web.facebook.com/profile.php?id=61595008847374", icon: Facebook },
   { label: "Instagram", href: "https://www.instagram.com/biscovetech/", icon: Instagram },
 ];
 
@@ -25,8 +25,8 @@ export default function Footer() {
       <div className="container py-5">
         <div className="flex flex-col gap-6 border-b border-slate-700 pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[.2em] text-blue-300">A little more connected</p>
-            <h2 className="mt-3 text-3xl font-display sm:text-4xl">Good things grow together.</h2>
+            <p className="text-xs uppercase tracking-[.2em] text-blue-300">Biscove Technologies</p>
+            <h2 className="mt-3 text-3xl font-display sm:text-4xl">Let’s talk about your organisation.</h2>
             <p className="mt-3 text-sm text-slate-300">Follow Biscove Technologies <span className="text-blue-300">@biscovetech</span></p>
           </div>
           <nav aria-label="Biscove Technologies social media" className="flex flex-wrap gap-3 lg:max-w-md">

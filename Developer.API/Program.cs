@@ -1,11 +1,15 @@
 using Developer.API.Data;
 using Developer.API.Middleware;
+using Developer.API.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddJsonFile("appsettings.local.json", optional: true)
+    .AddEnvironmentVariables()
+    .AddCommandLine(args);
 
 builder.Services.AddCors(options =>
 {
@@ -18,6 +22,8 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddOpenApi();
 
 var developerConnection = builder.Configuration.GetConnectionString("DeveloperConnection");
 var propertyConnection = builder.Configuration.GetConnectionString("PropertyConnection");
@@ -30,6 +36,14 @@ builder.Services.AddDbContext<DeveloperDbContext>(options =>
 builder.Services.AddDbContext<PropertyReadDbContext>(options =>
 {
     options.UseSqlServer(propertyConnection);
+});
+
+// Register Gateway HTTP client
+builder.Services.AddHttpClient<IGatewayClient, GatewayClient>(client =>
+{
+    var baseUrl = builder.Configuration["Gateway:BaseUrl"] ?? "http://localhost:5000/gateway";
+    client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromSeconds(30);
 });
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -48,6 +62,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
 
 app.UseCors("AllowAll");
 

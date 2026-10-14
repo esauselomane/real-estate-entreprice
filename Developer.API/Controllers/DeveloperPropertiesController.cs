@@ -1,6 +1,6 @@
-using Developer.API.Data;
+using Developer.API.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+using System.Net;
 
 namespace Developer.API.Controllers
 {
@@ -8,102 +8,61 @@ namespace Developer.API.Controllers
     [Route("api/developer/properties")]
     public class DeveloperPropertiesController : ControllerBase
     {
-        private readonly PropertyReadDbContext _propertyDb;
+        private readonly IGatewayClient _gateway;
         private readonly ILogger<DeveloperPropertiesController> _logger;
 
-        public DeveloperPropertiesController(PropertyReadDbContext propertyDb, ILogger<DeveloperPropertiesController> logger)
+        public DeveloperPropertiesController(IGatewayClient gateway, ILogger<DeveloperPropertiesController> logger)
         {
-            _propertyDb = propertyDb;
+            _gateway = gateway;
             _logger = logger;
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetProperties()
+        private string? GetAgencyId()
         {
-            if (!HttpContext.Items.TryGetValue("AgencyId", out var agencyIdObj) || agencyIdObj is not string agencyId)
+            return HttpContext.Items.TryGetValue("AgencyId", out var v) ? v as string : null;
+        }
+
+        private string? GetServiceToken()
+        {
+            return HttpContext.Request.Headers.TryGetValue("X-Service-Token", out var v) ? v.ToString() : null;
+        }
+
+        private async Task<IActionResult> ProxyAsync(Task<HttpResponseMessage> responseTask)
+        {
+            var response = await responseTask;
+            var content = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("GetProperties: unauthorized — no API key / AgencyId in context");
-                return Unauthorized(new { message = "A valid API key is required." });
+                _logger.LogWarning("Gateway request failed: {StatusCode} - {Content}", response.StatusCode, content);
+
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
+                    return Unauthorized(new { message = "Authentication required" });
+                if (response.StatusCode == HttpStatusCode.Forbidden)
+                    return Forbid();
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                    return NotFound(new { message = "Resource not found" });
+
+                return StatusCode((int)response.StatusCode, content);
             }
 
-            _logger.LogInformation("GetProperties: AgencyId={AgencyId}", agencyId);
-            var properties = await _propertyDb.PropertyAssets
-                .AsNoTracking()
-                .Include(p => p.SubUnits)
-                .Where(p => p.TenantId == agencyId)
-                .OrderByDescending(p => p.CreatedAt)
-                .Select(p => new DeveloperPropertyDto
-                {
-                    PropertyId = p.PropertyId,
-                    TenantId = p.TenantId,
-                    CompleteAddress = p.CompleteAddress,
-                    ErfSpatialSize = p.ErfSpatialSize,
-                    TitleDeedType = p.TitleDeedType,
-                    PortfolioZoning = p.PortfolioZoning,
-                    MarketClass = p.MarketClass,
-                    IsForSale = p.IsForSale,
-                    IsForRent = p.IsForRent,
-                    PropertyTypeId = p.PropertyTypeId,
-                    ValuationPrice = p.ValuationPrice,
-                    SalePrice = p.SalePrice,
-                    TenantInstallationAllowance = p.TenantInstallationAllowance,
-                    Latitude = p.Latitude,
-                    Longitude = p.Longitude,
-                    LinkedOwnerId = p.LinkedOwnerId,
-                    CreatedAt = p.CreatedAt
-                })
-                .ToListAsync();
+            return Content(content, "application/json");
+        }
 
-            _logger.LogInformation("GetProperties: returned {Count} properties for AgencyId={AgencyId}", properties.Count, agencyId);
-            return Ok(new
-            {
-                agencyId,
-                count = properties.Count,
-                properties
-            });
+        [HttpGet]
+        public Task<IActionResult> GetProperties([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        {
+            var agencyId = GetAgencyId();
+            var token = GetServiceToken();
+            return ProxyAsync(_gateway.GetAsync($"api/properties?page={page}&pageSize={pageSize}", agencyId, token));
         }
 
         [HttpGet("{id:int}")]
-        public async Task<IActionResult> GetProperty(int id)
+        public Task<IActionResult> GetProperty(int id)
         {
-            if (!HttpContext.Items.TryGetValue("AgencyId", out var agencyIdObj) || agencyIdObj is not string agencyId)
-            {
-                _logger.LogWarning("GetProperty: unauthorized — no API key / AgencyId in context");
-                return Unauthorized(new { message = "A valid API key is required." });
-            }
-
-            _logger.LogInformation("GetProperty: PropertyId={PropertyId} AgencyId={AgencyId}", id, agencyId);
-            var property = await _propertyDb.PropertyAssets
-                .AsNoTracking()
-                .Include(p => p.SubUnits)
-                .FirstOrDefaultAsync(p => p.PropertyId == id && p.TenantId == agencyId);
-
-            if (property == null)
-                return NotFound(new { message = "Property not found or access denied." });
-
-            var dto = new DeveloperPropertyDto
-            {
-                PropertyId = property.PropertyId,
-                TenantId = property.TenantId,
-                CompleteAddress = property.CompleteAddress,
-                ErfSpatialSize = property.ErfSpatialSize,
-                TitleDeedType = property.TitleDeedType,
-                PortfolioZoning = property.PortfolioZoning,
-                MarketClass = property.MarketClass,
-                IsForSale = property.IsForSale,
-                IsForRent = property.IsForRent,
-                PropertyTypeId = property.PropertyTypeId,
-                ValuationPrice = property.ValuationPrice,
-                SalePrice = property.SalePrice,
-                TenantInstallationAllowance = property.TenantInstallationAllowance,
-                Latitude = property.Latitude,
-                Longitude = property.Longitude,
-                LinkedOwnerId = property.LinkedOwnerId,
-                CreatedAt = property.CreatedAt
-            };
-
-            _logger.LogInformation("GetProperty: found PropertyId={PropertyId}", id);
-            return Ok(dto);
+            var agencyId = GetAgencyId();
+            var token = GetServiceToken();
+            return ProxyAsync(_gateway.GetAsync($"api/properties/{id}", agencyId, token));
         }
     }
 }

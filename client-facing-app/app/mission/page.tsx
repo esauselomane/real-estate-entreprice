@@ -12,13 +12,13 @@ export default function MissionPage() {
     <section className="py-6 sm:py-5">
       <div className="container">
         <div className="mx-auto max-w-3xl text-center">
-          <h1 className="text-4xl font-display font-extrabold tracking-tight text-white sm:text-5xl">
+          <h1 className="text-4xl font-display font-extrabold tracking-tight text-slate-100 sm:text-5xl">
             Mission &amp; values
           </h1>
         </div>
 
         <div className="mt-5 rounded-3xl bg-slate-800/60 p-6 text-center ring-1 ring-slate-700 sm:p-8">
-          <h2 className="text-xl font-display font-bold text-white">Mission</h2>
+          <h2 className="text-xl font-display font-bold text-slate-100">Mission</h2>
           <blockquote className="mt-3 text-xl font-medium text-slate-200 sm:text-2xl">
             Give organisations clear, connected systems for managing their
             records, people and operational decisions.
@@ -26,7 +26,7 @@ export default function MissionPage() {
         </div>
 
         <div className="mt-6 rounded-3xl bg-gradient-to-br from-blue-600/10 to-emerald-500/10 p-6 text-center ring-1 ring-slate-700 sm:p-8">
-          <h2 className="text-xl font-display font-bold text-white">Vision</h2>
+          <h2 className="text-xl font-display font-bold text-slate-100">Vision</h2>
           <p className="mt-3 text-slate-300">
             Organisations that can manage property and land with reliable
             information, visible responsibilities and workflows their teams can
@@ -35,7 +35,7 @@ export default function MissionPage() {
         </div>
 
         <div className="mt-6">
-          <h2 className="text-2xl font-display font-bold text-white">Values</h2>
+          <h2 className="text-2xl font-display font-bold text-slate-100">Values</h2>
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
             {values.map((value) => (
               <div
@@ -45,7 +45,7 @@ export default function MissionPage() {
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-900/40 text-emerald-400">
                   <IconByName name={value.icon} className="h-5 w-5" />
                 </div>
-                <h3 className="mt-4 text-lg font-semibold text-white">
+                <h3 className="mt-4 text-lg font-semibold text-slate-100">
                   {value.title}
                 </h3>
                 <p className="mt-2 text-sm text-slate-300">

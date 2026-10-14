@@ -1,3 +1,4 @@
+import Solutions from "@/components/sections/Solutions";
 import Link from "next/link";
 import { ArrowRight, Layers, ShieldCheck, Workflow } from "lucide-react";
 export const metadata = {
@@ -32,11 +33,11 @@ export default function HomePage() {
               Biscove Technologies
             </p>
             <h1 className="mt-5 text-4xl font-display font-bold tracking-tight sm:text-4xl">
-              Technology that brings your operations together.
+              Real estate. Land administration. A clearer way to work.
             </h1>
             <p className="mt-4 max-w-xl text-lg text-slate-300">
-              We build business software that helps organisations manage
-              property, land, people and the decisions that connect them.
+              Purpose-built software for property teams and land authorities.
+              Keep your records, people and decisions connected — from the first enquiry to the final allocation.
             </p>
             <div className="mt-5 flex flex-wrap gap-4">
               <Link
@@ -54,9 +55,9 @@ export default function HomePage() {
               </Link>
             </div>
           </div>
-          <div className="space-y-4 rounded-3xl border border-slate-700 bg-slate-800/50 p-5">
+          <div className="space-y-4 border-l border-slate-700 pl-6 lg:pl-10">
             <p className="text-sm uppercase tracking-widest text-blue-300">
-              One company. Purpose-built solutions.
+              Built for your organisation
             </p>
             {capabilities.map(({ title, text, icon: Icon }) => (
               <div
@@ -75,6 +76,7 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+      <Solutions />
     </>
   );
 }
