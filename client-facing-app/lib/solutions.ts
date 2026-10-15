@@ -40,6 +40,8 @@ export const solutions = [
       "Tabbed application and allocated-holding records with private right-holder contacts",
       "Mapped overlap letters, documented responses and approved relinquishment records",
       "Phone GPS and coordinate-based historical capture with independent approval",
+      "English, Sepedi, isiZulu, French and Portuguese navigation, sign-in and common labels, with English fallback",
+      "Optional dated currency estimates alongside ZAR amounts; payments and official records retain their original currency",
       "Tenant land-use categories and documented holding transfers with both parties’ IDs",
       "Separate municipal workspaces, linked jurisdictions and enforced planning restrictions",
       "Draggable application boundary corners with applicant-approved revisions",
