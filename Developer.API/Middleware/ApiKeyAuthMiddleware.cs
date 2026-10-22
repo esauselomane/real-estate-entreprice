@@ -16,7 +16,7 @@ namespace Developer.API.Middleware
         {
             var path = context.Request.Path;
             var requiresApiKey = path.StartsWithSegments("/api/developer/properties") ||
-                path.StartsWithSegments("/api/developer/owners") || path.StartsWithSegments("/api/developer/submissions");
+                path.StartsWithSegments("/api/developer/enquiries") || path.StartsWithSegments("/api/developer/owners") || path.StartsWithSegments("/api/developer/submissions");
             if (!requiresApiKey) { await _next(context); return; }
             var apiKey = context.Request.Headers["X-Api-Key"].ToString();
             context.Response.Headers.CacheControl = "no-store";

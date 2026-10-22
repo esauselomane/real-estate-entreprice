@@ -15,6 +15,7 @@ export const solutions = [
       "CRM, leads, broker assignments and deals",
       "Reports, branded brochures and listing distribution",
       "Agency workspaces, permissions and billing",
+      "Optional public property assistant and confirmed CRM enquiries (API configuration required)",
     ],
     href: realEstateUrl,
     action: "Explore real estate",

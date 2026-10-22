@@ -1,3 +1,4 @@
+import { createChatHandler } from './chat.mjs';
 import { renderSeo, crawlDocument, escapeMarkup } from './seo.mjs';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -6,7 +7,7 @@ import path from 'node:path';
 
 const publicDirectory = fileURLToPath(new URL('./public/', import.meta.url));
 const allowedFiles = new Map([
-  ['/amenities.js', 'text/javascript; charset=utf-8'], ['/locations.js', 'text/javascript; charset=utf-8'], ['/app.js', 'text/javascript; charset=utf-8'], ['/owner.js', 'text/javascript; charset=utf-8'],
+  ['/chat.js', 'text/javascript; charset=utf-8'], ['/amenities.js', 'text/javascript; charset=utf-8'], ['/locations.js', 'text/javascript; charset=utf-8'], ['/app.js', 'text/javascript; charset=utf-8'], ['/owner.js', 'text/javascript; charset=utf-8'],
   ['/styles.css', 'text/css; charset=utf-8'], ['/property-scene.svg', 'image/svg+xml'],
   ['/logo.jpg', 'image/jpeg'], ['/favicon.svg', 'image/svg+xml'],
 ]);
@@ -100,6 +101,9 @@ function brandingAsset(value, fallback) {
 
 export function createServer(options = {}) {
   const configuration = {
+    openaiApiKey: options.openaiApiKey ?? process.env.OPENAI_API_KEY ?? '',
+    chatModel: options.chatModel ?? process.env.OPENAI_CHAT_MODEL ?? 'gpt-4.1-mini',
+    chatFetch: options.chatFetch,
     apiUrl: options.apiUrl ?? process.env.DEVELOPER_API_URL,
     apiKey: options.apiKey ?? process.env.AGENCY_API_KEY,
     agencyId: options.agencyId ?? process.env.AGENCY_ID,
@@ -114,6 +118,7 @@ export function createServer(options = {}) {
     googleMapsBrowserKey: options.googleMapsBrowserKey ?? process.env.GOOGLE_MAPS_BROWSER_KEY ?? '',
     agencyName: options.agencyName ?? process.env.AGENCY_DISPLAY_NAME ?? 'Biscove Properties',
   };
+  const handleChat = createChatHandler(configuration);
   return http.createServer(async function handleRequest(request, response) {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -121,9 +126,10 @@ export function createServer(options = {}) {
     response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://maps.googleapis.com https://places.googleapis.com https://maps.gstatic.com; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
     try {
       const url = new URL(request.url, 'http://localhost');
+      if (url.pathname === '/api/chat' || url.pathname.startsWith('/api/chat/')) return await handleChat(request, response, url.pathname);
       if (url.pathname.startsWith('/api/')) return await proxy(request, response, url, configuration);
       if (url.pathname === '/health') return replyJson(response, 200, { status: 'healthy', configured: Boolean(configuration.apiUrl && configuration.apiKey && configuration.agencyId) });
-      if (url.pathname === '/site-config') return replyJson(response, 200, { agencyName: configuration.agencyName, logoUrl: configuration.logoUrl, faviconUrl: configuration.faviconUrl, googleMapsBrowserKey: configuration.googleMapsBrowserKey });
+      if (url.pathname === '/site-config') return replyJson(response, 200, { agencyName: configuration.agencyName, logoUrl: configuration.logoUrl, faviconUrl: configuration.faviconUrl, googleMapsBrowserKey: configuration.googleMapsBrowserKey, currency: configuration.currency, chatEnabled: Boolean(configuration.openaiApiKey && configuration.apiUrl && configuration.apiKey && configuration.agencyId) });
       if (request.method !== 'GET' && request.method !== 'HEAD') return replyJson(response, 405, { message: 'Method not allowed.' });
       if (url.pathname === '/robots.txt' || /^\/sitemap(?:-pages|-properties-[1-9]\d*)?\.xml$/.test(url.pathname)) {
         const document = await crawlDocument(url.pathname, configuration);
@@ -144,6 +150,9 @@ export function createServer(options = {}) {
       const file = contentType ? url.pathname.slice(1) : 'index.html';
       const content = await readFile(path.join(publicDirectory, file));
       if (isPage) {
+        const referral = url.searchParams.get('ref');
+        if (referral && /^[a-zA-Z0-9_-]{1,80}$/.test(referral))
+          response.setHeader('Set-Cookie', `biscove_referral=${referral}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${configuration.production ? '; Secure' : ''}`);
         const brandedTemplate = content.toString()
           .replaceAll('{{AGENCY_NAME}}', escapeMarkup(configuration.agencyName))
           .replace('src="/logo.jpg" alt="Biscove"', `src="${escapeMarkup(configuration.logoUrl)}" alt="${escapeMarkup(configuration.agencyName)}"`)
