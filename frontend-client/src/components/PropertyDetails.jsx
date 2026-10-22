@@ -1,4 +1,6 @@
+import PropertyLocationFields from './maps/PropertyLocationFields.jsx';
 import { leaseTerminationAmount } from '../utils/leaseInterest.js';
+import PublicListingSettings from './PublicListingSettings.jsx';
 import ListingPortalsPanel from './ListingPortalsPanel.jsx';
 import GooglePropertyMapPicker from './maps/GooglePropertyMapPicker.jsx';
 import PropertyStaticMap from './maps/PropertyStaticMap.jsx';
@@ -439,6 +441,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
       specificUnitRentalPrice: unit.specificUnitRentalPrice ?? '',
       specificUnitSalePrice: unit.specificUnitSalePrice ?? '',
       rentalRate: unit.rentalRate ?? '',
+      advertisedDepositAmount: unit.advertisedDepositAmount ?? '',
       rentEscalationPercentage: unit.rentEscalationPercentage ?? '',
       isCurrentlyVacant: !!unit.isCurrentlyVacant
     });
@@ -689,6 +692,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
         specificUnitRentalPrice: unitEditForm.specificUnitRentalPrice === '' ? null : Number(unitEditForm.specificUnitRentalPrice),
         specificUnitSalePrice: unitEditForm.specificUnitSalePrice === '' ? null : Number(unitEditForm.specificUnitSalePrice),
         rentalRate: unitEditForm.rentalRate === '' ? null : Number(unitEditForm.rentalRate),
+        advertisedDepositAmount: unitEditForm.advertisedDepositAmount === '' || unitEditForm.advertisedDepositAmount == null ? null : Number(unitEditForm.advertisedDepositAmount),
         rentEscalationPercentage: unitEditForm.rentEscalationPercentage === '' ? null : Number(unitEditForm.rentEscalationPercentage),
         isCurrentlyVacant: unitEditForm.isCurrentlyVacant
       });
@@ -1436,6 +1440,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                       <label className="label sm:col-span-2">Unit description<textarea rows={2} value={unitEditForm.unitDescription} onChange={e => setUnitEditForm({ ...unitEditForm, unitDescription: e.target.value })} className="field" placeholder="e.g. Ground floor retail shell" /></label>
                       <label className="label">Rental price<input type="number" min="0" value={unitEditForm.specificUnitRentalPrice ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, specificUnitRentalPrice: e.target.value || '' })} className="field" /></label>
                       <label className="label">Sale price<input type="number" min="0" value={unitEditForm.specificUnitSalePrice ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, specificUnitSalePrice: e.target.value || '' })} className="field" /></label>
+                      <label className="label">Advertised deposit (R)<input type="number" min="0" step="0.01" placeholder="On request" value={unitEditForm.advertisedDepositAmount ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, advertisedDepositAmount: e.target.value })} className="field" /></label>
                       <label className="label">Rental rate (R/mo)<input type="number" min="0" value={unitEditForm.rentalRate ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, rentalRate: e.target.value || '' })} className="field" /></label>
                       <label className="label">Escalation %<input type="number" min="0" step="0.01" value={unitEditForm.rentEscalationPercentage ?? ''} onChange={e => setUnitEditForm({ ...unitEditForm, rentEscalationPercentage: e.target.value || '' })} className="field" /></label>
                       <label className="flex items-center gap-2 text-xs mt-1"><input type="checkbox" checked={unitEditForm.isCurrentlyVacant} onChange={e => setUnitEditForm({ ...unitEditForm, isCurrentlyVacant: e.target.checked })} /><span className="text-slate-300">Currently vacant</span></label>
@@ -1869,6 +1874,12 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               
               <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
                 <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider block">Registered Landowner</span>
+                {property.publicOwnerAccountId ? <div className="text-sm text-white mt-1 space-y-1">
+                  <span className="block font-semibold">{property.publicOwnerName}</span>
+                  <a className="block text-blue-300" href={`mailto:${property.publicOwnerEmail}`}>{property.publicOwnerEmail}</a>
+                  <a className="block text-blue-300" href={`tel:${property.publicOwnerPhone}`}>{property.publicOwnerPhone}</a>
+                  <span className="block text-xs text-slate-400">Public website owner submission</span>
+                </div> : (
                 <button 
                   type="button"
                   onClick={() => onNavigateToClient(property.linkedOwnerId || 'OT-0001', 'Owner', `Owner ${property.linkedOwnerId || '0001'}`)}
@@ -1876,6 +1887,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
                 >
                   {property.linkedOwnerId || 'Registered Landowner'}
                 </button>
+                )}
               </div>
 
               <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
@@ -2121,6 +2133,7 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
             </div>
           </div>
 
+          <Can permission="properties:edit"><PublicListingSettings key={`${propertyId}-${property.publicReviewStatus}`} property={property} /></Can>
           <ListingPortalsPanel key={propertyId} propertyId={propertyId} />
 
         </div>
@@ -2147,6 +2160,8 @@ export default function PropertyDetails({ propertyId, onBack, onNavigateToClient
               required
               height={280}
             />
+              <label className="col-span-full text-xs text-slate-400">Room type (when applicable)<select value={propertyForm.roomLettingType || 'None'} onChange={event => setPropertyForm(previous => ({ ...previous, roomLettingType: event.target.value }))} className="block w-full mt-1 p-2 rounded bg-slate-950 border border-slate-700 text-white"><option value="None">Not a room offering</option><option value="PrivateRoom">Private room</option><option value="SharedRoom">Shared room</option></select></label>
+              <PropertyLocationFields value={propertyForm.location} onChange={(location) => setPropertyForm(previous => ({ ...previous, location }))} />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {[
                 ['erfSpatialSize', 'Erf size'], ['titleDeedType', 'Title deed type'], ['portfolioZoning', 'Zoning'], ['linkedOwnerId', 'Owner record ID'], ['valuationPrice', 'Valuation'], ['salePrice', 'Sale price'], ['tenantInstallationAllowance', 'TI allowance'], ['latitude', 'Latitude'], ['longitude', 'Longitude']

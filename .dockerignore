@@ -17,3 +17,9 @@
 **/*.db
 # Temporary GitHub Actions OIDC credentials
 gha-creds-*.json
+
+aider-env
+.kilo
+.aider*
+artifacts
+**/PropertyMediaVault

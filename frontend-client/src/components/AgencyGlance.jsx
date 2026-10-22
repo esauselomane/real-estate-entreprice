@@ -1,3 +1,4 @@
+import DeveloperApiKeys from './DeveloperApiKeys.jsx';
 import AgencySampleDataProvisioning from './AgencySampleDataProvisioning.jsx';
 import AgencySyndicationSettings from './AgencySyndicationSettings.jsx';
 import { useEffect, useState, useCallback } from 'react';
@@ -176,6 +177,9 @@ export default function AgencyGlance() {
       {['AgencyAdmin', 'PlatformAdmin'].includes(userRole) && <AgencySyndicationSettings
         key={isAllTenants ? '__all__' : activeTenantId || activeProfile?.tenantId || 'none'}
         tenantId={isAllTenants ? '__all__' : activeTenantId || activeProfile?.tenantId} />}
+      {['AgencyAdmin', 'PlatformAdmin'].includes(userRole) && <DeveloperApiKeys
+        key={isAllTenants ? '__all__' : activeTenantId || activeProfile?.tenantId || 'none'}
+        agencyId={isAllTenants ? '__all__' : activeTenantId || activeProfile?.tenantId} />}
       {/* Tab Navigation */}
       <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-2xl p-1.5">
         <button

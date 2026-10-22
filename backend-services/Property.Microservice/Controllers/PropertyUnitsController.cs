@@ -128,6 +128,7 @@ public class PropertyUnitsController : PropertyControllerBase
                 SpecificUnitRentalPrice = payload.SpecificUnitRentalPrice,
                 SpecificUnitSalePrice = payload.SpecificUnitSalePrice,
                 RentalRate = payload.RentalRate,
+                AdvertisedDepositAmount = payload.AdvertisedDepositAmount,
                 RentEscalationPercentage = payload.RentEscalationPercentage,
                 LeaseTermMonths = payload.LeaseTermMonths,
                 IsCurrentlyVacant = payload.IsCurrentlyVacant,
@@ -189,6 +190,7 @@ public class PropertyUnitsController : PropertyControllerBase
             unit.SpecificUnitRentalPrice = payload.SpecificUnitRentalPrice;
             unit.SpecificUnitSalePrice = payload.SpecificUnitSalePrice;
             unit.RentalRate = payload.RentalRate;
+            unit.AdvertisedDepositAmount = payload.AdvertisedDepositAmount;
             unit.RentEscalationPercentage = payload.RentEscalationPercentage;
             unit.LeaseTermMonths = payload.LeaseTermMonths;
             unit.IsCurrentlyVacant = payload.IsCurrentlyVacant;

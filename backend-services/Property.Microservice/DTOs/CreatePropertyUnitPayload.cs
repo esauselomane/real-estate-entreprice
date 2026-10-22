@@ -11,6 +11,7 @@ namespace Property.Microservice.DTOs
             public decimal NetRentableAreaSqM { get; set; }
             public decimal? SpecificUnitRentalPrice { get; set; }
             public decimal? SpecificUnitSalePrice { get; set; }
+            [Range(0, 999999999999d)] public decimal? AdvertisedDepositAmount { get; set; }
             public decimal? RentalRate { get; set; }
             public decimal? RentEscalationPercentage { get; set; }
             public int? LeaseTermMonths { get; set; }

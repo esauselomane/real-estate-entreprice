@@ -248,3 +248,13 @@ All requests include:
 - **Page-level:** `LoadingOverlay` component (spinner + label)
 - **Inline:** Skeleton loaders on cards/tables
 - **Polling:** Silent background refresh (notifications, activity log)
+
+## Public property website controls
+
+Agency Overview includes agency-scoped Developer API key generation/revocation. Property Details includes reviewed public owner contacts, **Visible on public website** and **Hot property** controls. Property Search can filter **Owner submissions awaiting review** and includes the Land category. The separate `property-public-site/` website uses a server-held agency key; owner submissions and edits require review before publication. See its README for setup.
+
+Listing modes now distinguish **For sale**, **To let**, **Sale & to let**, **Room share / let**, and **All**. Agencies review private/shared room offerings in Public website settings; owners choose the offering when submitting or editing their listing.
+
+## Location selection
+
+Property capture uses worldwide Google suggestions, exposes extracted administrative components for confirmation, and clears stale resolved metadata when editing the address. Exact area selections send internal locationIds; free text remains a compatibility option for unresolved legacy properties. Public ambiguous suburb/city queries require a qualified location selection.

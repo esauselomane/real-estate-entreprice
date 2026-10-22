@@ -1,3 +1,4 @@
+using Developer.API.DTOs;
 using Developer.API.Data;
 using Developer.API.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -21,12 +22,17 @@ namespace Developer.API.Controllers
             _logger = logger;
         }
 
+        private bool IsPlatformAdministrator() => User.IsInRole("PlatformAdmin") || User.IsInRole("SuperAdmin");
+
+        private bool CanManageAgency(string agencyId) => IsPlatformAdministrator() ||
+            (!string.IsNullOrWhiteSpace(User.FindFirst("TenantId")?.Value) && User.FindFirst("TenantId")?.Value == agencyId);
+
         [HttpPost("generate")]
-        [Authorize(Roles = "SuperAdmin")]
+        [Authorize(Roles = "SuperAdmin,PlatformAdmin,AgencyAdmin,Manager,Admin")]
         public async Task<IActionResult> GenerateKey([FromBody] GenerateApiKeyRequest request)
         {
-            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
-            _logger.LogInformation("GenerateKey: requested for AgencyId={AgencyId} By={Caller}", request?.AgencyId, caller);
+            var caller = User.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            _logger.LogInformation("GenerateKey: requested for AgencyId={AgencyId} By={Caller}", request.AgencyId, caller);
 
             if (string.IsNullOrWhiteSpace(request.AgencyId) || string.IsNullOrWhiteSpace(request.Name))
             {
@@ -34,6 +40,9 @@ namespace Developer.API.Controllers
                 return BadRequest(new { message = "AgencyId and Name are required." });
             }
 
+            if (!CanManageAgency(request.AgencyId)) return Forbid();
+            if (request.ExpiresAt.HasValue && request.ExpiresAt <= DateTime.UtcNow)
+                return BadRequest(new { message = "Expiry must be in the future." });
             var rawKey = ApiKeyGenerator.GenerateKey();
             var keyHash = ApiKeyGenerator.HashKey(rawKey);
             var keyPrefix = ApiKeyGenerator.GetPrefix(rawKey);
@@ -73,12 +82,15 @@ namespace Developer.API.Controllers
         }
 
         [HttpGet]
-        [Authorize(Roles = "SuperAdmin")]
+        [Authorize(Roles = "SuperAdmin,PlatformAdmin,AgencyAdmin,Manager,Admin")]
         public async Task<IActionResult> ListKeys([FromQuery] string? agencyId = null)
         {
-            var caller = User?.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
+            var caller = User.FindFirst(ClaimTypes.Name)?.Value ?? "Unknown";
             _logger.LogInformation("ListKeys: AgencyId filter={AgencyId} Caller={Caller}", agencyId, caller);
 
+            if (!IsPlatformAdministrator()) agencyId = User.FindFirst("TenantId")?.Value;
+            if (string.IsNullOrWhiteSpace(agencyId)) return BadRequest(new { message = "Select an agency." });
+            if (!CanManageAgency(agencyId)) return Forbid();
             var query = _db.AgencyApiKeys.AsNoTracking();
 
             if (!string.IsNullOrWhiteSpace(agencyId))
@@ -107,7 +119,7 @@ namespace Developer.API.Controllers
         }
 
         [HttpPost("{id:int}/revoke")]
-        [Authorize(Roles = "SuperAdmin")]
+        [Authorize(Roles = "SuperAdmin,PlatformAdmin,AgencyAdmin,Manager,Admin")]
         public async Task<IActionResult> RevokeKey(int id)
         {
             _logger.LogInformation("RevokeKey: KeyId={KeyId}", id);
@@ -118,6 +130,7 @@ namespace Developer.API.Controllers
                 return NotFound(new { message = "API key not found." });
             }
 
+            if (!CanManageAgency(key.AgencyId)) return Forbid();
             key.IsRevoked = true;
             await _db.SaveChangesAsync();
 

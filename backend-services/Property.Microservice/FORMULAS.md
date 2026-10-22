@@ -204,3 +204,27 @@ WHERE pa.PropertyId = @propertyId
 | AgencyDashboard (Growth) | `GET /properties/stats/growth` | Property Growth |
 | Syndication Tab | `POST /api/properties/brochure/generate` | Brochure Request |
 | Amenities | `GET /api/properties/amenities` | Amenity Types |
+
+## Public website publication
+
+`IsPublicListing && PublicReviewStatus == "Approved"` determines Developer API visibility. `IsHotProperty` is effective only while a listing is public. Owner submissions and owner edits set visibility/hot flags to false and review status to `Pending review`; an authorised agency editor approves through `PUT /api/properties/{id}/public-listing`. Public owner name/email/phone are a reviewed publication snapshot. Existing properties start unpublished.
+
+Nearby results use great-circle distance with Earth mean radius 6,371.0088 km; the configurable radius is 1–100 km. Text searches use a known approved listing in the searched area as an anchor and display exact area matches before nearby listings. See `property-public-site/README.md` for endpoints, configuration and the shared property-database boundary.
+
+Room offerings use `RoomLettingType = None | PrivateRoom | SharedRoom`, independently of property type. Private/shared room submissions require a monthly unit price and set `IsForRent = true`. Search mode `Both` requires `IsForSale && IsForRent`; `Room` requires a room offering and uses unit rental prices. Publication approval and owner-edit withdrawal rules apply to rooms as well.
+
+## Confirmed location identity
+
+LocationId = SHA-256(JSON([countryCode, region, district, city, suburb])), with whitespace collapsed, Unicode NFC normalization and case-insensitive identity. Country names and street addresses are not keys. Country code is required when supplying structured location details; other levels are optional. PropertyLocations reuses the resulting identity, with a SQL Server range lock preventing duplicate concurrent creation. Existing unstructured property addresses remain unresolved until confirmed; coordinates at zero are valid and never replaced with Cape Town defaults.
+
+## Public amenities and advertised deposits
+
+Public details include only active amenities belonging to the listing agency and active catalogue types. Property-level and unit-level amenities retain separate scopes; internal notes are omitted. Unit AdvertisedDepositAmount is an optional public asking deposit (nonnegative), never derived from a real tenant's lease DepositAmount. Null = on request; zero = no deposit required. Fictional sample deposits may use 1.5 × sample monthly rent when explicitly seeding public features.
+
+## Room classification and hot authorization
+
+Room share/let is a property type, not a sale/rental purpose. A PrivateRoom/SharedRoom subtype classifies the property as Room share/let without enabling rental automatically. Catalogue upgrades reclassify existing room offerings without changing purpose or visibility flags. Hot status is mutable only when the authenticated canonical role is AgencyAdmin or PlatformAdmin AND the caller's TenantId equals the property's TenantId. Tenant query overrides do not participate in this authorization. Omitted hot settings preserve the previous designation; owner edits withdraw visibility without changing hot status.
+
+## Public letting term
+
+PublicLettingExpiresAt = agency publication time.AddMonths(2); explicit agency renewal uses renewal time.AddMonths(2). Normal edits never extend a term. A public letting is available only while its expiry is in the future. Rental-only properties are withdrawn on expiry; mixed properties retain public sale availability while public rental price/deposit fields are omitted. The expiry report uses UTC bounds and authenticated property visibility.

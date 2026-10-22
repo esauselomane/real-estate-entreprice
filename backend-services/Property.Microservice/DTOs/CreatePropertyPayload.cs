@@ -1,9 +1,14 @@
 using Property.Microservice.Models;
+using System.ComponentModel.DataAnnotations;
 
 namespace Property.Microservice.DTOs
 {
         public record class CreatePropertyPayload
         {
+            public PropertyLocation? Location { get; set; }
+            [MaxLength(300)] public string? GooglePlaceId { get; set; }
+            [MaxLength(40)] public string? PostalCode { get; set; }
+            [RegularExpression("^(None|PrivateRoom|SharedRoom)$")] public string RoomLettingType { get; set; } = "None";
             public string CompleteAddress { get; set; } = string.Empty;
             public string ErfSpatialSize { get; set; } = string.Empty;
             public string TitleDeedType { get; set; } = "Freehold";

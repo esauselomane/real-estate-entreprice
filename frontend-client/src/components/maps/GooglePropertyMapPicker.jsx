@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, MapPin, Search } from 'lucide-react';
+import { extractGoogleAddress } from './googleAddressComponents.js';
 import { loadGoogleMaps } from './GoogleMapsLoader.js';
 
 const DEFAULT_CENTER = { lat: -33.9249, lng: 18.4207 };
@@ -43,7 +44,7 @@ export default function GooglePropertyMapPicker({
   const [statusMessage, setStatusMessage] = useState('Loading Google Maps…');
   const [isLocating, setIsLocating] = useState(false);
 
-  const publishLocation = useCallback((nextAddress, nextLatitude, nextLongitude, message) => {
+  const publishLocation = useCallback((nextAddress, nextLatitude, nextLongitude, message, place = null) => {
     if (disposedRef.current) return;
 
     const normalizedAddress = nextAddress || '';
@@ -52,6 +53,7 @@ export default function GooglePropertyMapPicker({
 
     addressRef.current = normalizedAddress;
     onChangeRef.current?.({
+      ...extractGoogleAddress(place || {}),
       completeAddress: normalizedAddress,
       latitude: normalizedLatitude,
       longitude: normalizedLongitude,
@@ -81,7 +83,8 @@ export default function GooglePropertyMapPicker({
         resolvedAddress,
         nextLatitude,
         nextLongitude,
-        selectedResult ? 'Address and coordinates updated from the dropped pin.' : 'Pin coordinates updated. Address resolution returned no result.'
+        selectedResult ? 'Address and coordinates updated from the dropped pin.' : 'Pin coordinates updated. Address resolution returned no result.',
+        selectedResult
       );
     });
   }, [publishLocation]);
@@ -138,7 +141,7 @@ export default function GooglePropertyMapPicker({
     }
 
     const nextAddress = place.formatted_address || place.name || addressRef.current;
-    publishLocation(nextAddress, position.lat(), position.lng(), 'Address and coordinates updated from Google.');
+    publishLocation(nextAddress, position.lat(), position.lng(), 'Address and coordinates updated from Google.', place);
     moveMarker(position.lat(), position.lng(), true);
   }, [moveMarker, publishLocation]);
 
@@ -162,6 +165,7 @@ export default function GooglePropertyMapPicker({
     geocoder.geocode({ address: query }, (results, geocodeStatus) => {
       if (disposedRef.current) return;
       setIsLocating(false);
+      if (results?.length > 1) { setStatusMessage('Several addresses match. Select a specific suggestion including its city and country.'); return; }
       const selectedResult = results?.find((result) => result.geometry?.location);
       const position = selectedResult?.geometry?.location;
 
@@ -171,7 +175,7 @@ export default function GooglePropertyMapPicker({
       }
 
       const resolvedAddress = selectedResult.formatted_address || query;
-      publishLocation(resolvedAddress, position.lat(), position.lng(), 'Address and coordinates updated from Google.');
+      publishLocation(resolvedAddress, position.lat(), position.lng(), 'Address and coordinates updated from Google.', selectedResult);
       moveMarker(position.lat(), position.lng(), true);
     });
   }, [moveMarker, publishLocation]);
@@ -225,8 +229,7 @@ export default function GooglePropertyMapPicker({
         });
         const geocoder = new geocodingLibrary.Geocoder();
         const autocomplete = new placesLibrary.Autocomplete(inputRef.current, {
-          componentRestrictions: { country: 'za' },
-          fields: ['formatted_address', 'geometry', 'name'],
+          fields: ['formatted_address', 'geometry', 'name', 'place_id', 'address_components'],
         });
 
         mapRef.current = map;

@@ -14,22 +14,22 @@ namespace Developer.API.Middleware
 
         public async Task InvokeAsync(HttpContext context, DeveloperDbContext db)
         {
-            if (!context.Request.Headers.TryGetValue("X-Api-Key", out var apiKeyValues))
-            {
-                await _next(context);
-                return;
-            }
-
-            var apiKey = apiKeyValues.FirstOrDefault();
+            var path = context.Request.Path;
+            var requiresApiKey = path.StartsWithSegments("/api/developer/properties") ||
+                path.StartsWithSegments("/api/developer/owners") || path.StartsWithSegments("/api/developer/submissions");
+            if (!requiresApiKey) { await _next(context); return; }
+            var apiKey = context.Request.Headers["X-Api-Key"].ToString();
+            context.Response.Headers.CacheControl = "no-store";
             if (string.IsNullOrWhiteSpace(apiKey))
             {
-                await _next(context);
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new { message = "A valid agency API key is required." });
                 return;
             }
 
             var keyHash = ApiKeyGenerator.HashKey(apiKey);
             var apiKeyRecord = await db.AgencyApiKeys
-                .FirstOrDefaultAsync(k => k.KeyHash == keyHash && !k.IsRevoked);
+                .FirstOrDefaultAsync(k => k.KeyHash == keyHash && !k.IsRevoked, context.RequestAborted);
 
             if (apiKeyRecord == null)
             {
@@ -38,7 +38,15 @@ namespace Developer.API.Middleware
                 return;
             }
 
-            if (apiKeyRecord.ExpiresAt.HasValue && apiKeyRecord.ExpiresAt.Value < DateTime.UtcNow)
+            var expectedAgencyId = context.Request.Headers["X-Expected-Agency-Id"].ToString();
+            if (!string.IsNullOrWhiteSpace(expectedAgencyId) && expectedAgencyId != apiKeyRecord.AgencyId)
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsJsonAsync(new { message = "The configured agency does not match the API key." });
+                return;
+            }
+
+            if (apiKeyRecord.ExpiresAt.HasValue && apiKeyRecord.ExpiresAt.Value <= DateTime.UtcNow)
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await context.Response.WriteAsJsonAsync(new { message = "API key has expired." });
@@ -58,7 +66,7 @@ namespace Developer.API.Middleware
             }
 
             apiKeyRecord.LastUsedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(context.RequestAborted);
 
             context.Items["AgencyId"] = apiKeyRecord.AgencyId;
             context.Items["ApiKeyName"] = apiKeyRecord.Name;

@@ -30,8 +30,8 @@ class ChangeDetectionTests(unittest.TestCase):
             self.assertEqual(self.select("backend/shared/Cadastre.Reporting.Core/Report.cs"), ["land", "reporting"])
             self.assertEqual(self.select("backend/shared/Cadastre.Land.Domain/ParcelTopology.cs"), ["land"])
         else:
-            self.assertEqual(self.select("backend-services/Shared.Access/Permissions.cs"), ["crm-service", "identity-service", "property-service"])
-            self.assertEqual(self.select("backend-services/Shared.Presentation/Pdf.cs"), ["crm-service", "identity-service"])
+            self.assertEqual(self.select("backend-services/Shared.Access/Permissions.cs"), ["crm-service", "developer-api", "identity-service", "property-service"])
+            self.assertEqual(self.select("backend-services/Shared.Presentation/Pdf.cs"), ["crm-service", "developer-api", "identity-service"])
 
     def test_backend_dockerfile_selects_its_consumers(self):
         if self.land:
@@ -53,10 +53,11 @@ class ChangeDetectionTests(unittest.TestCase):
             self.assertEqual(self.select("deploy/docker/frontend.conf.template"), ["frontend"])
         else:
             self.assertEqual(self.select("client-facing-app/app/solutions/page.tsx"), ["client-facing"])
-            self.assertEqual(self.select("frontend-client/public/logo.jpg"), ["frontend-client", "identity-service"])
+            self.assertEqual(self.select("frontend-client/public/logo.jpg"), ["developer-api", "frontend-client", "identity-service"])
 
-    def test_unfinished_developer_api_is_outside_release(self):
-        self.assertEqual(self.select("Developer.API/Program.cs"), [])
+    def test_public_website_and_developer_api_are_release_components(self):
+        self.assertEqual(self.select("Developer.API/Program.cs"), ["developer-api"])
+        self.assertEqual(self.select("property-public-site/server.mjs"), ["property-public-site"])
 
     def test_project_references_are_resolved(self):
         for service in self.config["services"].values():

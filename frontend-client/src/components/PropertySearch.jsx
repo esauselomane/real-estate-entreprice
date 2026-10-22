@@ -1,9 +1,15 @@
+import PublicListingExpiryReport from './PublicListingExpiryReport.jsx';
+import PropertyLocationFields from './maps/PropertyLocationFields.jsx';
 import GooglePropertyMapPicker from './maps/GooglePropertyMapPicker.jsx';
 import { useState, useEffect, useCallback } from 'react';
 import { MapPin, X, SlidersHorizontal, Building2, Loader2, Pencil } from 'lucide-react';
 import { propertyService } from '../services/propertyService.js';
 import Can from '../components/Can.jsx';
 import Pagination from '../components/Pagination.jsx';
+
+function locationLabel(location) {
+  return [...new Set([location.suburb, location.city, location.district, location.region, location.country || location.countryCode].filter(Boolean))].join(', ');
+}
 
 const LOAD_ALL_PAGE_SIZE = 100000;
 
@@ -27,9 +33,24 @@ function getListingFlags(marketClass) {
 }
 
 export default function PropertySearch({ onSelectProperty }) {
+  function isPendingReview(property) { return property.publicReviewStatus === 'Pending review'; }
+  function matchesReviewFilter(property) { return !pendingReviewOnly || isPendingReview(property); }
   // Search parameters states
   const [selectedLocations, setSelectedLocations] = useState([]);
   const [locationInput, setLocationInput] = useState('');
+  const [locationOptions, setLocationOptions] = useState([]);
+  useEffect(() => {
+    let active = true;
+    const timer = setTimeout(loadLocationOptions, 200);
+    async function loadLocationOptions() {
+      try {
+        const values = await propertyService.getLocations(locationInput);
+        if (active) setLocationOptions(previous => previous.some(item => locationLabel(item) === locationInput) ? previous : values);
+      } catch { if (active) setLocationOptions([]); }
+    }
+    return () => { active = false; clearTimeout(timer); };
+  }, [locationInput]);
+  const [pendingReviewOnly, setPendingReviewOnly] = useState(false);
   const [propertyType, setPropertyType] = useState('All');
   const [listingType, setListingType] = useState('All');
   const [minSize, setMinSize] = useState('');
@@ -87,7 +108,8 @@ export default function PropertySearch({ onSelectProperty }) {
   const handleAddLocation = (e) => {
     e.preventDefault();
     if (locationInput.trim() && !selectedLocations.includes(locationInput.trim())) {
-      setSelectedLocations([...selectedLocations, locationInput.trim()]);
+      const match = locationOptions.find(item => locationLabel(item) === locationInput.trim());
+      setSelectedLocations([...selectedLocations, match || locationInput.trim()]);
       setLocationInput('');
     }
   };
@@ -102,7 +124,7 @@ export default function PropertySearch({ onSelectProperty }) {
   };
 
   const handleEditCoordinateChange = (field, value) => {
-    setPropertyForm((previous) => ({ ...previous, [field]: value }));
+    setPropertyForm((previous) => ({ ...previous, [field]: value, location: null, googlePlaceId: null }));
     setHasSelectedGoogleLocation(false);
   };
 
@@ -112,6 +134,8 @@ export default function PropertySearch({ onSelectProperty }) {
       setEditingProperty(prop);
       const mandate = prop.activeSoleMandate;
       setPropertyForm({
+        roomLettingType: prop.roomLettingType || 'None',
+        location: prop.location, googlePlaceId: prop.googlePlaceId, postalCode: prop.postalCode,
         completeAddress: prop.completeAddress || '',
         erfSpatialSize: prop.erfSpatialSize || '',
         titleDeedType: prop.titleDeedType || 'Freehold',
@@ -193,6 +217,7 @@ export default function PropertySearch({ onSelectProperty }) {
 
       {/* 🔍 Interactive Search Control Panel */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+        <PublicListingExpiryReport />
         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
           <SlidersHorizontal size={18} className="text-blue-500" />
           Multi-Criteria Filter Engine
@@ -208,19 +233,22 @@ export default function PropertySearch({ onSelectProperty }) {
                 <MapPin size={16} className="absolute left-3 top-3.5 text-slate-500" />
                 <input
                   type="text"
+                  list="agency-location-options"
                   value={locationInput}
                   onChange={(e) => setLocationInput(e.target.value)}
-                  placeholder="Type area & press Enter..."
+                  placeholder="Select suburb, city, region and country"
                   className="w-full pl-9 pr-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
                 />
               </div>
             </form>
 
+            <datalist id="agency-location-options">{locationOptions.map(item => <option key={item.locationId} value={locationLabel(item)} />)}</datalist>
+            <p className="text-xs text-slate-400">Select a suggestion for an exact area. Free text also searches older addresses awaiting location confirmation.</p>
             {/* Location Chips Display Canvas */}
             <div className="flex flex-wrap gap-1.5 pt-1">
               {selectedLocations.map((loc, idx) => (
                 <span key={idx} className="inline-flex items-center gap-1.5 bg-blue-950/60 border border-blue-800 text-blue-300 text-xs px-2.5 py-1 rounded-lg">
-                  {loc}
+                  {typeof loc === 'string' ? loc : locationLabel(loc)}
                   <button type="button" onClick={() => handleRemoveLocation(loc)} className="hover:text-red-400 cursor-pointer">
                     <X size={12} />
                   </button>
@@ -241,8 +269,11 @@ export default function PropertySearch({ onSelectProperty }) {
                 className="w-full pl-9 pr-4 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 appearance-none cursor-pointer"
               >
                 <option value="All">All Property Types</option>
+                <option value="Land">Land &amp; Plots</option>
+                <option value="Room share/let">Room share / let</option>
                 <option value="Residential">Residential Sector</option>
                 <option value="Commercial">Commercial Offices</option>
+                <option value="Industrial">Industrial</option>
                 <option value="Retail">Retail Storefronts</option>
               </select>
             </div>
@@ -251,12 +282,12 @@ export default function PropertySearch({ onSelectProperty }) {
           {/* 📈 Listing Eligibility Toggle — a property may be marketed for SALE and/or RENT. */}
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Listing Mode</label>
-            <div className="grid grid-cols-3 gap-1 h-10">
-              {[{ v: 'All', label: 'Both' }, { v: 'Sale', label: 'For Sale' }, { v: 'Rent', label: 'For Rent' }].map((o) => (
+            <div className="flex flex-wrap gap-1 min-h-10">
+              {[{ v: 'All', label: 'All' }, { v: 'Sale', label: 'For sale' }, { v: 'Rent', label: 'To let' }, { v: 'Both', label: 'Sale & to let' }].map((o) => (
                 <button
                   key={o.v} type="button"
                   onClick={() => setListingType(o.v)}
-                  className={`text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                  className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
                     listingType === o.v
                       ? 'bg-blue-600 border-blue-600 text-white'
                       : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white hover:border-blue-800'
@@ -305,6 +336,12 @@ export default function PropertySearch({ onSelectProperty }) {
           </div>
         )}
 
+        <Can permission="properties:edit">
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" checked={pendingReviewOnly} onChange={event => setPendingReviewOnly(event.target.checked)} />
+            Owner submissions awaiting review ({properties.filter(isPendingReview).length})
+          </label>
+        </Can>
         {/* ⏳ Async Loading Spinner Engine Mask */}
         {isLoading ? (
           <div className="py-20 flex flex-col items-center justify-center text-slate-500 gap-3">
@@ -313,7 +350,7 @@ export default function PropertySearch({ onSelectProperty }) {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {properties.map((prop) => (
+            {properties.filter(matchesReviewFilter).map((prop) => (
               <div
                 key={prop.propertyId}
                 onClick={() => onSelectProperty(prop.propertyId)}
@@ -333,6 +370,7 @@ export default function PropertySearch({ onSelectProperty }) {
                    </div>
 
 
+                   {prop.publicReviewStatus && <p className="text-xs text-blue-300 mb-2">Website: {prop.publicReviewStatus}{prop.isHotProperty ? ' · Hot property' : ''}{prop.roomLettingType === 'PrivateRoom' ? ' · Private room to let' : prop.roomLettingType === 'SharedRoom' ? ' · Room share' : ''}</p>}
                    <h4 className="text-white font-bold text-base mb-1 tracking-tight group-hover:text-blue-400 transition-colors">
                      {prop.completeAddress}
                    </h4>
@@ -415,6 +453,8 @@ export default function PropertySearch({ onSelectProperty }) {
                 required
                 height={260}
               />
+              <label className="col-span-full text-xs text-slate-400">Room type (when applicable)<select value={propertyForm.roomLettingType || 'None'} onChange={event => setPropertyForm(previous => ({ ...previous, roomLettingType: event.target.value }))} className="block w-full mt-1 p-2 rounded bg-slate-950 border border-slate-700 text-white"><option value="None">Not a room offering</option><option value="PrivateRoom">Private room</option><option value="SharedRoom">Shared room</option></select></label>
+              <PropertyLocationFields value={propertyForm.location} onChange={(location) => setPropertyForm(previous => ({ ...previous, location }))} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">ERF Size</label><input type="text" value={propertyForm.erfSpatialSize} onChange={(e) => setPropertyForm({ ...propertyForm, erfSpatialSize: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500" /></div>
                 <div className="space-y-1"><label className="text-[10px] text-slate-400 uppercase">Title Deed Type</label><select value={propertyForm.titleDeedType} onChange={(e) => setPropertyForm({ ...propertyForm, titleDeedType: e.target.value })} className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"><option>Freehold</option><option>Sectional Title</option><option>Leasehold</option></select></div>

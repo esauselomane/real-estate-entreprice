@@ -96,6 +96,7 @@ namespace Property.Microservice.Data
             // Backfill sample image references for any property rows whose gallery is still
             // empty, so the brochure builder always has photos to select from.
             var emptyProps = propertyRepository.Query()
+                .Where(p => p.PropertyId <= 1000 && p.PublicOwnerAccountId == null)
                 .Where(p => p.VerificationDocumentsJson == null || p.VerificationDocumentsJson == "[]")
                 .ToList();
             if (emptyProps.Any())
@@ -259,6 +260,7 @@ namespace Property.Microservice.Data
             // actually narrows the property list. Idempotent: once no rows
             // carry TEN-001 the loop is a no-op.
             var legacyStale = propertyRepository.Query()
+                .Where(p => p.PropertyId <= 1000 && p.PublicOwnerAccountId == null && p.PropertyDescription == "")
                 .Where(p => p.TenantId == "TEN-001" || p.TenantId == "")
                 .ToList();
             foreach (var p in legacyStale)

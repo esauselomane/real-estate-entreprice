@@ -45,6 +45,11 @@ namespace Property.Microservice.Models
         [Required]
         public string UnitDocumentsJson { get; set; } = "[]";
 
+        /// <summary>Public asking deposit for a new letting; independent of existing tenants' lease deposits.</summary>
+        [Column(TypeName = "decimal(18,2)")]
+        [Range(0, 999999999999d)]
+        public decimal? AdvertisedDepositAmount { get; set; }
+
         public bool IsCurrentlyVacant { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

@@ -1,3 +1,7 @@
+using Microsoft.AspNetCore.RateLimiting;
+using Developer.API.Services.PublicListings;
+using Property.Microservice.Data;
+using System.Threading.RateLimiting;
 using Developer.API.Data;
 using Developer.API.Middleware;
 using Developer.API.Services;
@@ -22,6 +26,9 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddControllers();
+builder.Services.AddAuthorization();
+builder.Services.AddScoped<OwnerSessionService>();
+builder.Services.AddRateLimiter(ConfigureOwnerRateLimiter);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
@@ -33,7 +40,7 @@ builder.Services.AddDbContext<DeveloperDbContext>(options =>
     options.UseSqlServer(developerConnection);
 });
 
-builder.Services.AddDbContext<PropertyReadDbContext>(options =>
+builder.Services.AddDbContext<PropertyDbContext>(options =>
 {
     options.UseSqlServer(propertyConnection);
 });
@@ -74,6 +81,10 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<DeveloperDbContext>();
     db.Database.EnsureCreated();
+    PublicOwnerSchema.EnsureCreated(db);
+    var propertyDatabase = scope.ServiceProvider.GetRequiredService<PropertyDbContext>();
+    Property.Microservice.Services.PublicListings.PublicListingSchema.EnsureCreated(propertyDatabase);
+    Property.Microservice.Services.PublicListings.PublicListingSchema.EnsurePropertyTypes(propertyDatabase);
 
     var keysTableExists = db.Database.SqlQueryRaw<int>(
         "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'AgencyApiKeys'")
@@ -105,6 +116,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseMiddleware<ApiKeyAuthMiddleware>();
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -113,3 +125,20 @@ app.MapControllers();
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "developer-api" }));
 
 app.Run();
+
+static RateLimitPartition<string> CreateOwnerRateLimit(HttpContext context)
+{
+    var partitionKey = $"{context.Items["AgencyId"]}:{context.Connection.RemoteIpAddress}";
+    return RateLimitPartition.GetFixedWindowLimiter(partitionKey, CreateOwnerWindow);
+}
+
+static FixedWindowRateLimiterOptions CreateOwnerWindow(string partitionKey) => new()
+{
+    PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0
+};
+
+static void ConfigureOwnerRateLimiter(RateLimiterOptions options)
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("owner-auth", CreateOwnerRateLimit);
+}

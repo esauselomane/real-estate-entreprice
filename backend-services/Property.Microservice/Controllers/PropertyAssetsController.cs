@@ -21,7 +21,7 @@ namespace Property.Microservice.Controllers;
     [ApiController]
     [Authorize]
     [Route("api/properties")]
-public class PropertyAssetsController : PropertyControllerBase
+public partial class PropertyAssetsController : PropertyControllerBase
 {
     private readonly IRepository<ExternalPlatform> _externalPlatformRepository;
     private readonly IRepository<SoleMandate> _soleMandateRepository;
@@ -185,11 +185,12 @@ public class PropertyAssetsController : PropertyControllerBase
                 PortfolioZoning = payload.PortfolioZoning ?? "Commercial Zone",
                 MarketClass = marketClass,
                 PropertyTypeId = payload.PropertyTypeId > 0 ? payload.PropertyTypeId : 1,
+                RoomLettingType = payload.RoomLettingType,
                 ValuationPrice = payload.ValuationPrice,
                 SalePrice = payload.SalePrice,
                 TenantInstallationAllowance = payload.TenantInstallationAllowance,
-                Latitude = payload.Latitude != 0 ? payload.Latitude : -33.9249m,
-                Longitude = payload.Longitude != 0 ? payload.Longitude : 18.4241m,
+                Latitude = payload.Latitude,
+                Longitude = payload.Longitude,
                 LinkedOwnerId = payload.LinkedOwnerId ?? "OT-0001",
                 VerificationDocumentsJson = "[]",
                 CreatedAt = DateTime.UtcNow,
@@ -199,6 +200,10 @@ public class PropertyAssetsController : PropertyControllerBase
                 IsForRent = isForRent
             };
 
+            if (newProp.RoomLettingType != "None") newProp.PropertyTypeId = await DbContext.PropertyTypes.Where(item => item.Name == "Room share/let").Select(item => item.PropertyTypeId).SingleAsync();
+            newProp.Location = await Property.Microservice.Services.Locations.PropertyLocationResolver.ResolveAsync(DbContext, payload.Location);
+            newProp.GooglePlaceId = payload.GooglePlaceId;
+            newProp.PostalCode = payload.PostalCode;
             if (payload.SubUnits != null && payload.SubUnits.Any())
             {
                 foreach (var unitPayload in payload.SubUnits)
@@ -211,6 +216,7 @@ public class PropertyAssetsController : PropertyControllerBase
                         SpecificUnitRentalPrice = unitPayload.SpecificUnitRentalPrice,
                         SpecificUnitSalePrice = unitPayload.SpecificUnitSalePrice,
                         RentalRate = unitPayload.RentalRate,
+                        AdvertisedDepositAmount = unitPayload.AdvertisedDepositAmount,
                         RentEscalationPercentage = unitPayload.RentEscalationPercentage,
                         LeaseTermMonths = unitPayload.LeaseTermMonths,
                         IsCurrentlyVacant = unitPayload.IsCurrentlyVacant,
@@ -266,12 +272,22 @@ public class PropertyAssetsController : PropertyControllerBase
             if (property == null)
                 return NotFound(new { message = "Target property record not found." });
 
+            var addressChanged = property.CompleteAddress != payload.CompleteAddress || property.Latitude != payload.Latitude || property.Longitude != payload.Longitude;
+            if (payload.Location is not null || addressChanged)
+            {
+                property.Location = await Property.Microservice.Services.Locations.PropertyLocationResolver.ResolveAsync(DbContext, payload.Location);
+                property.LocationId = property.Location?.LocationId;
+                property.GooglePlaceId = payload.GooglePlaceId;
+                property.PostalCode = payload.PostalCode;
+            }
             property.CompleteAddress = payload.CompleteAddress;
             property.ErfSpatialSize = payload.ErfSpatialSize ?? string.Empty;
             property.TitleDeedType = payload.TitleDeedType ?? "Freehold";
             property.PortfolioZoning = payload.PortfolioZoning ?? string.Empty;
             property.MarketClass = payload.MarketClass ?? "Sale";
             property.PropertyTypeId = payload.PropertyTypeId > 0 ? payload.PropertyTypeId : property.PropertyTypeId;
+            property.RoomLettingType = payload.RoomLettingType;
+            if (property.RoomLettingType != "None") property.PropertyTypeId = await DbContext.PropertyTypes.Where(item => item.Name == "Room share/let").Select(item => item.PropertyTypeId).SingleAsync();
             property.ValuationPrice = payload.ValuationPrice;
             property.SalePrice = payload.SalePrice;
             property.TenantInstallationAllowance = payload.TenantInstallationAllowance;
@@ -297,6 +313,17 @@ public class PropertyAssetsController : PropertyControllerBase
                 .Include(p => p.SubUnits)
                 .FirstAsync(p => p.PropertyId == propertyId));
         }
+        [HttpGet("locations")]
+        public async Task<IActionResult> GetLocations([FromQuery] string? q, CancellationToken cancellationToken)
+        {
+            if (!await PermissionCheck.HasPermissionAsync("properties:view")) return Forbid();
+            var query = ApplyPropertyVisibility(DbContext.PropertyAssets.AsNoTracking());
+            var locations = query.Where(item => item.LocationId != null).Select(item => item.Location!);
+            if (!string.IsNullOrWhiteSpace(q))
+                locations = locations.Where(item => item.Suburb.Contains(q) || item.City.Contains(q) || item.Region.Contains(q) || item.Country.Contains(q));
+            return Ok(await locations.Distinct().OrderBy(item => item.Suburb).ThenBy(item => item.City).Take(30).ToListAsync(cancellationToken));
+        }
+
         [HttpPost("search")]
         public async Task<IActionResult> SearchProperties([FromBody] PropertySearchCriteria criteria, [FromQuery] int page = 1, [FromQuery] int? pageSize = null)
         {
@@ -331,11 +358,16 @@ public class PropertyAssetsController : PropertyControllerBase
             // and AgencyAdmin/Broker only their own tenant's properties.
             query = ApplyPropertyVisibility(query);
 
-            // 1. Filter by target locations array matching text boundaries
-            if (criteria.Locations != null && criteria.Locations.Any())
+            foreach (var locationText in criteria.Locations)
             {
-                query = query.Where(p => criteria.Locations.Any(loc => p.CompleteAddress.Contains(loc)));
+                var normalizedLocation = locationText.Trim().ToLowerInvariant();
+                var knownLocations = await query.Where(item => item.Location != null && (item.Location.Suburb.ToLower() == normalizedLocation || item.Location.City.ToLower() == normalizedLocation))
+                    .Select(item => item.LocationId).Distinct().Take(2).CountAsync();
+                if (knownLocations > 1) return Conflict(new { message = "Several places have this name. Select the suggestion including its city, region and country." });
             }
+
+            // 1. Filter by target locations array matching text boundaries
+            query = Property.Microservice.Services.Locations.PropertyLocationSearchFilters.Apply(query, criteria);
 
             // 2. Filter by normalized Property Type lookups
             if (!string.Equals(criteria.PropertyType, "All", StringComparison.OrdinalIgnoreCase))
@@ -353,11 +385,14 @@ public class PropertyAssetsController : PropertyControllerBase
                     query = query.Where(p => p.IsForRent);
             }
 
+            if (criteria.ListingType == "Both") query = query.Where(property => property.IsForSale && property.IsForRent);
+            if (criteria.ListingType == "Room") query = query.Where(property => property.IsForRent && property.RoomLettingType != "None");
+
             // Price range filter (uses the active listing price; sale→SalePrice, rent→unit RentalRate)
             if (criteria.MinPrice.HasValue)
-                query = query.Where(p => (criteria.ListingType == "Rent" ? p.SubUnits.Any(u => u.RentalRate >= criteria.MinPrice.Value) : p.SalePrice >= criteria.MinPrice.Value));
+                query = query.Where(p => ((criteria.ListingType == "Rent" || criteria.ListingType == "Room") ? p.SubUnits.Any(u => u.RentalRate >= criteria.MinPrice.Value) : p.SalePrice >= criteria.MinPrice.Value));
             if (criteria.MaxPrice.HasValue)
-                query = query.Where(p => (criteria.ListingType == "Rent" ? p.SubUnits.Any(u => u.RentalRate <= criteria.MaxPrice.Value) : p.SalePrice <= criteria.MaxPrice.Value));
+                query = query.Where(p => ((criteria.ListingType == "Rent" || criteria.ListingType == "Room") ? p.SubUnits.Any(u => u.RentalRate <= criteria.MaxPrice.Value) : p.SalePrice <= criteria.MaxPrice.Value));
 
             // The UI submits area bounds in square metres.  Use linked unit area
             // where available, falling back to the text field only for display.
@@ -372,8 +407,19 @@ public class PropertyAssetsController : PropertyControllerBase
                 .Select(p => new
                 {
                     p.PropertyId,
+                    p.RoomLettingType,
+                    p.IsPublicListing,
+                    p.IsHotProperty,
+                    p.PublicReviewStatus,
+                    p.PublicSubmittedAt,
+                    p.PublicPublishedAt,
+                    p.PublicLettingExpiresAt,
                     p.TenantId,
                     p.CompleteAddress,
+                    p.LocationId,
+                    p.Location,
+                    p.GooglePlaceId,
+                    p.PostalCode,
                     p.ErfSpatialSize,
                     p.TitleDeedType,
                     p.PortfolioZoning,
@@ -459,55 +505,29 @@ public class PropertyAssetsController : PropertyControllerBase
                 return BadRequest(new { message = "Invalid picture data payload." });
             }
 
-            // 🖼️ Persist to the property IMAGE GALLERY. Append (don't replace) so the
-            // gallery grows over time. A hard cap of 50 keeps the row sane.
-            var current = string.IsNullOrWhiteSpace(property.GalleryImageJson)
-                ? new List<string>()
-                : (System.Text.Json.JsonSerializer.Deserialize<List<string>>(property.GalleryImageJson) ?? new List<string>());
-
-            var mime = payload.FileName?.ToLowerInvariant() switch
-            {
-                var n when n != null && n.EndsWith(".png") => "image/png",
-                var n when n != null && n.EndsWith(".webp") => "image/webp",
-                var n when n != null && (n.EndsWith(".jpg") || n.EndsWith(".jpeg")) => "image/jpeg",
-                _ => "image/jpeg"
-            };
-            var dataUrl = $"data:{mime};base64,{payload.Base64DataString}";
+            var visibleProperty = await ApplyPropertyVisibility(PropertyRepository.Query()).AnyAsync(item => item.PropertyId == propertyId);
+            if (!visibleProperty) return NotFound();
+            var current = Property.Microservice.Services.Images.PropertyImageProcessor.ReadGallery(property.GalleryImageJson);
+            var unitGalleries = await DbContext.PropertyUnits.Where(unit => unit.PropertyId == propertyId).Select(unit => unit.UnitImagesJson).ToListAsync();
+            var unitImageCount = unitGalleries.Sum(CountUnitImages);
+            if (current.Count + unitImageCount >= 10) return BadRequest(new { message = "A property can have at most 10 photographs, including unit photographs." });
+            string dataUrl;
+            try { dataUrl = Property.Microservice.Services.Images.PropertyImageProcessor.Process("data:image/jpeg;base64," + payload.Base64DataString); }
+            catch (ArgumentException exception) { return BadRequest(new { message = exception.Message }); }
             current.Add(dataUrl);
-            if (current.Count > 50) current = current.GetRange(current.Count - 50, 50);
-            property.GalleryImageJson = System.Text.Json.JsonSerializer.Serialize(current);
-
+            property.GalleryImageJson = JsonSerializer.Serialize(current);
             await DbContext.SaveChangesAsync();
-
-            // 🛰️ Notify downstream optimisers (OCR, image resizing, ML
-            // tagging) via in-memory queue. The event payload is intentionally tiny —
-            // just the id + filename — so it stays well under the broker's
-            // 1 MB default message size limit.
-            try
-            {
-                await ImageProcessingQueue.EnqueueAsync(new ImageProcessingJob(
-                    PropertyId: propertyId,
-                    FileName: payload.FileName,
-                    Base64Data: payload.Base64DataString,
-                    TenantId: property.TenantId,
-                    RequestedBy: caller
-                ));
-            }
-            catch (Exception ex)
-            {
-                // The image is already persisted — a queue publish failure
-                // shouldn't fail the user-visible upload. Just log it so the
-                // optimisation pipeline can be re-triggered later.
-                Logger.LogWarning(ex, "UploadPropertyImage: Queue notify failed for PropertyId={PropertyId} (image still saved)", propertyId);
-            }
 
             return Ok(new
             {
-                message = "Image persisted to property gallery and optimisers notified.",
+                message = "Image validated, normalised and saved to the property gallery.",
                 imageCount = current.Count
             });
         }
         // --- 🔗 ENDPOINT C: PORTAL SYNDICATION CHECKBOX TRACKER TOGGLE ---
+        private static int CountUnitImages(string gallery) => Property.Microservice.Services.Images.PropertyImageProcessor.ReadGallery(gallery).Count;
+
+
         [HttpPost("syndicate")]
         public IActionResult ToggleSyndication([FromBody] SyndicationTogglePayload payload) =>
             Conflict(new { message = "Use the Listing portals panel to configure an agency connection and request publication. Legacy simulated syndication is no longer supported." });
@@ -704,7 +724,7 @@ public class PropertyAssetsController : PropertyControllerBase
             .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
         if (property == null) return NotFound(new { message = "Property not found." });
 
-        var isResidential = string.Equals(property.PropertyTypeDetails?.Name, "Residential", StringComparison.OrdinalIgnoreCase);
+        var isResidential = property.PropertyTypeDetails?.Name is "Residential" or "Room share/let";
 
         var rows = await _propertyUnitAmenityRepository.Query()
             .Where(a => a.PropertyId == propertyId && a.IsActive)
@@ -747,7 +767,7 @@ public class PropertyAssetsController : PropertyControllerBase
             .FirstOrDefaultAsync(p => p.PropertyId == propertyId);
         if (property == null) return NotFound(new { message = "Property not found." });
 
-        var isResidential = string.Equals(property.PropertyTypeDetails?.Name, "Residential", StringComparison.OrdinalIgnoreCase);
+        var isResidential = property.PropertyTypeDetails?.Name is "Residential" or "Room share/let";
         if (isResidential && unitId.HasValue)
         {
             return Conflict(new { message = "Residential properties cannot have unit-level amenities." });

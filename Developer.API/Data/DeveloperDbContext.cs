@@ -9,11 +9,15 @@ namespace Developer.API.Data
     {
         public DeveloperDbContext(DbContextOptions<DeveloperDbContext> options) : base(options) { }
 
+        public DbSet<PublicOwnerAccount> PublicOwnerAccounts { get; set; }
+        public DbSet<PublicOwnerSession> PublicOwnerSessions { get; set; }
+
         public DbSet<AgencyApiKey> AgencyApiKeys { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<PublicOwnerAccount>().HasIndex(owner => new { owner.AgencyId, owner.Email }).IsUnique();
 
             modelBuilder.Entity<AgencyApiKey>()
                 .HasIndex(k => k.KeyHash)
@@ -28,12 +32,7 @@ namespace Developer.API.Data
     {
         public static string GenerateKey()
         {
-            var random = RandomNumberGenerator.GetBytes(32);
-            return Convert.ToBase64String(random)
-                .Replace("+", "")
-                .Replace("/", "")
-                .Replace("=", "")
-                .Substring(0, 40);
+            return "bsc_" + Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         }
 
         public static string HashKey(string key)

@@ -1,3 +1,4 @@
+import PropertyLocationFields from './maps/PropertyLocationFields.jsx';
 import GooglePropertyMapPicker from './maps/GooglePropertyMapPicker.jsx';
 import GooglePropertyMap from './maps/GooglePropertyMap.jsx';
 import { getPropertyTypeColor } from './maps/googlePropertyMapUtils.js';
@@ -397,6 +398,8 @@ export default function PropertyMapWorkspace({ onSelectProperty }) {
                 required
                 height={300}
               />
+              <label className="col-span-full text-xs text-slate-400">Room type (when applicable)<select value={propertyForm.roomLettingType || 'None'} onChange={event => setPropertyForm(previous => ({ ...previous, roomLettingType: event.target.value }))} className="block w-full mt-1 p-2 rounded bg-slate-950 border border-slate-700 text-white"><option value="None">Not a room offering</option><option value="PrivateRoom">Private room</option><option value="SharedRoom">Shared room</option></select></label>
+              <PropertyLocationFields value={propertyForm.location} onChange={(location) => setPropertyForm(previous => ({ ...previous, location }))} />
 
               <div>
                 <label className="block text-[10px] text-slate-400 uppercase mb-1">Erf / Spatial Size</label>

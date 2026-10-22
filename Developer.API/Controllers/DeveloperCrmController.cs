@@ -4,6 +4,7 @@ using System.Net;
 
 namespace Developer.API.Controllers
 {
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "PlatformAdmin,SuperAdmin")]
     [ApiController]
     [Route("api/developer/crm")]
     public class DeveloperCrmController : ControllerBase

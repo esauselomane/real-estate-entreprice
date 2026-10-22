@@ -30,9 +30,13 @@ namespace Property.Microservice.Data
         public DbSet<ImportJob> ImportJobs { get; set; } = null!;
         public DbSet<Notification> Notifications { get; set; } = null!;
 
+        public DbSet<PropertyLocation> PropertyLocations { get; set; } = null!;
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<PropertyAsset>().HasOne(item => item.Location).WithMany().HasForeignKey(item => item.LocationId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<PropertyAsset>().Navigation(item => item.Location).AutoInclude();
             modelBuilder.Entity<SyndicationConnection>().Property(item => item.TenantId).HasMaxLength(100);
             modelBuilder.Entity<SyndicationConnection>().Property(item => item.ProviderKey).HasMaxLength(100);
             modelBuilder.Entity<SyndicationConnection>().HasIndex(item => new { item.TenantId, item.ProviderKey, item.Environment }).IsUnique();

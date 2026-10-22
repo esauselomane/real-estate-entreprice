@@ -1,4 +1,4 @@
-namespace Developer.API.Controllers
+namespace Developer.API.DTOs
 {
     public class DeveloperPropertyDto
     {

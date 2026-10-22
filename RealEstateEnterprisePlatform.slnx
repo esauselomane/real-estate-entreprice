@@ -7,6 +7,7 @@
     <Project Path="backend-services/Shared.Presentation/Shared.Presentation.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Developer.PublicListings.Tests/Developer.PublicListings.Tests.csproj" />
     <Project Path="tests/Property.Syndication.Tests/Property.Syndication.Tests.csproj" />
     <Project Path="tests/Identity.Payments.Tests/Identity.Payments.Tests.csproj" />
   </Folder>

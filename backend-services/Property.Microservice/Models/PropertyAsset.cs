@@ -14,6 +14,11 @@ namespace Property.Microservice.Models
         [Required]
         public string CompleteAddress { get; set; } = string.Empty;
 
+        [MaxLength(64)] public string? LocationId { get; set; }
+        [MaxLength(300)] public string? GooglePlaceId { get; set; }
+        [MaxLength(40)] public string? PostalCode { get; set; }
+        public PropertyLocation? Location { get; set; }
+
         [Required]
         public string ErfSpatialSize { get; set; } = string.Empty;
 
@@ -66,6 +71,19 @@ namespace Property.Microservice.Models
 
         [Required]
         public string PropertyDescription { get; set; } = string.Empty;
+
+        // Public contact details are an explicit, agency-reviewed publication snapshot.
+        [MaxLength(20)] public string RoomLettingType { get; set; } = "None";
+        public bool IsPublicListing { get; set; }
+        public bool IsHotProperty { get; set; }
+        [MaxLength(30)] public string PublicReviewStatus { get; set; } = "Draft";
+        [MaxLength(100)] public string? PublicOwnerAccountId { get; set; }
+        [MaxLength(200)] public string PublicOwnerName { get; set; } = string.Empty;
+        [MaxLength(254)] public string PublicOwnerEmail { get; set; } = string.Empty;
+        [MaxLength(40)] public string PublicOwnerPhone { get; set; } = string.Empty;
+        public DateTime? PublicPublishedAt { get; set; }
+        public DateTime? PublicLettingExpiresAt { get; set; }
+        public DateTime? PublicSubmittedAt { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

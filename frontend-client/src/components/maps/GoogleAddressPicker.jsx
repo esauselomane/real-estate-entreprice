@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { extractGoogleAddress } from './googleAddressComponents.js';
 import { loadGoogleMaps } from './GoogleMapsLoader.js';
 
 async function loadPlaces() {
@@ -19,16 +20,16 @@ export default function GoogleAddressPicker({ onSelect }) {
       setMessage('Retrieving coordinates…');
       try {
         const place = event.placePrediction.toPlace();
-        await place.fetchFields({ fields: ['formattedAddress', 'location'] });
+        await place.fetchFields({ fields: ['id', 'formattedAddress', 'location', 'addressComponents'] });
         if (disposed) return;
         if (!place.location) throw new Error('This address has no coordinates. Select another result.');
-        selectionHandler.current({ completeAddress: place.formattedAddress, latitude: place.location.lat(), longitude: place.location.lng() });
+        selectionHandler.current({ ...extractGoogleAddress(place), completeAddress: place.formattedAddress, latitude: place.location.lat(), longitude: place.location.lng() });
         setMessage('Address and coordinates updated.');
       } catch { if (!disposed) setMessage('Could not retrieve coordinates. Select another result or enter them manually.'); }
     }
     loadPlaces().then(({ PlaceAutocompleteElement }) => {
       if (disposed) return;
-      widget = new PlaceAutocompleteElement({ includedRegionCodes: ['za'] });
+      widget = new PlaceAutocompleteElement({});
       widget.setAttribute('aria-label', 'Search property address with Google');
       widget.addEventListener('gmp-select', selectPlace);
       widget.addEventListener('gmp-error', () => setMessage('Google address search is unavailable. Check API access or enter coordinates manually.'));

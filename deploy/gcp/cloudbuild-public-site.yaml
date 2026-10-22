@@ -1,0 +1,34 @@
+# Run only after committing the release; all images use the same commit-derived tag.
+substitutions:
+  _TAG: manual
+  _GOOGLE_MAPS_API_KEY: ''
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+steps:
+- id: property
+  name: gcr.io/cloud-builders/docker
+  args: ['build', '-f', 'backend-services/Property.Microservice/Dockerfile', '-t', 'africa-south1-docker.pkg.dev/$PROJECT_ID/realestate-images/property-service:${_TAG}', '.']
+- id: developer
+  name: gcr.io/cloud-builders/docker
+  waitFor: ['-']
+  args: ['build', '-f', 'Developer.API/Dockerfile', '-t', 'africa-south1-docker.pkg.dev/$PROJECT_ID/realestate-images/developer-api:${_TAG}', '.']
+- id: public-site
+  name: gcr.io/cloud-builders/docker
+  waitFor: ['-']
+  args: ['build', '-f', 'property-public-site/Dockerfile', '-t', 'africa-south1-docker.pkg.dev/$PROJECT_ID/realestate-images/property-public-site:${_TAG}', '.']
+- id: agency-portal
+  name: gcr.io/cloud-builders/docker
+  waitFor: ['-']
+  args: ['build', '-f', 'frontend-client/Dockerfile', '--build-arg=VITE_API_BASE_URL=https://api.biscovetech.com/gateway', '--build-arg=VITE_COMPANY_SITE_URL=https://www.biscovetech.com', '--build-arg=VITE_GOOGLE_MAPS_API_KEY=${_GOOGLE_MAPS_API_KEY}', '-t', 'africa-south1-docker.pkg.dev/$PROJECT_ID/realestate-images/frontend-client:${_TAG}', '.']
+- id: marketing
+  name: gcr.io/cloud-builders/docker
+  waitFor: ['-']
+  args: ['build', '-f', 'client-facing-app/Dockerfile', '--build-arg=NEXT_PUBLIC_GATEWAY_URL=https://api.biscovetech.com', '--build-arg=NEXT_PUBLIC_APP_URL=https://app.biscovetech.com', '--build-arg=NEXT_PUBLIC_SITE_URL=https://www.biscovetech.com', '--build-arg=NEXT_PUBLIC_LAND_APP_URL=https://landadmin.biscovetech.com', '-t', 'africa-south1-docker.pkg.dev/$PROJECT_ID/realestate-images/client-facing:${_TAG}', '.']
+images:
+- africa-south1-docker.pkg.dev/$PROJECT_ID/realestate-images/property-service:${_TAG}
+- africa-south1-docker.pkg.dev/$PROJECT_ID/realestate-images/developer-api:${_TAG}
+- africa-south1-docker.pkg.dev/$PROJECT_ID/realestate-images/property-public-site:${_TAG}
+- africa-south1-docker.pkg.dev/$PROJECT_ID/realestate-images/frontend-client:${_TAG}
+- africa-south1-docker.pkg.dev/$PROJECT_ID/realestate-images/client-facing:${_TAG}
+timeout: 2400s

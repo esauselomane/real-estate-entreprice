@@ -58,3 +58,6 @@ client-facing-app/.next-evidence-review/
 # Generated local runtime and TypeScript cache files
 nohup.out
 *.tsbuildinfo
+
+# Non-secret public property website configuration template
+!property-public-site/.env.example

@@ -1,10 +1,12 @@
-namespace Developer.API.Controllers
+using System.ComponentModel.DataAnnotations;
+
+namespace Developer.API.DTOs
 {
     public class GenerateApiKeyRequest
     {
-        public string AgencyId { get; set; } = string.Empty;
-        public string AgencyName { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
+        [Required, MaxLength(100)] public string AgencyId { get; set; } = string.Empty;
+        [MaxLength(200)] public string AgencyName { get; set; } = string.Empty;
+        [Required, MaxLength(100)] public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
         public string? AllowedIps { get; set; }
         public DateTime? ExpiresAt { get; set; }
@@ -13,9 +15,9 @@ namespace Developer.API.Controllers
     public class GenerateApiKeyResponse
     {
         public int Id { get; set; }
-        public string AgencyId { get; set; } = string.Empty;
-        public string AgencyName { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
+        [Required, MaxLength(100)] public string AgencyId { get; set; } = string.Empty;
+        [MaxLength(200)] public string AgencyName { get; set; } = string.Empty;
+        [Required, MaxLength(100)] public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
         public string? AllowedIps { get; set; }
         public DateTime? ExpiresAt { get; set; }
@@ -28,9 +30,9 @@ namespace Developer.API.Controllers
     public class ApiKeyInfoResponse
     {
         public int Id { get; set; }
-        public string AgencyId { get; set; } = string.Empty;
-        public string AgencyName { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
+        [Required, MaxLength(100)] public string AgencyId { get; set; } = string.Empty;
+        [MaxLength(200)] public string AgencyName { get; set; } = string.Empty;
+        [Required, MaxLength(100)] public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
         public string KeyPrefix { get; set; } = string.Empty;
         public string? AllowedIps { get; set; }

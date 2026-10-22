@@ -97,6 +97,7 @@ builder.Services.AddSingleton<IJobQueue<DataImportJob>, JobQueue<DataImportJob>>
 
 // Register background services
 builder.Services.AddHostedService<ImageProcessingBackgroundService>();
+builder.Services.AddHostedService<Property.Microservice.Services.PublicListings.PublicListingExpiryService>();
 builder.Services.AddHostedService<SyndicationBackgroundService>();
 builder.Services.AddHostedService<DataImportBackgroundService>();
 
@@ -112,6 +113,7 @@ using (var serviceScope = app.Services.CreateScope())
     var databaseContext = serviceScope.ServiceProvider.GetRequiredService<PropertyDbContext>();
     databaseContext.Database.EnsureCreated();
     SyndicationSchema.EnsureCreated(databaseContext);
+    Property.Microservice.Services.PublicListings.PublicListingSchema.EnsureCreated(databaseContext);
     SampleDataStorage.EnsureCreated(databaseContext);
 
     // 🛠️ Idempotent migration: add the unit-level document vault column to existing
@@ -285,11 +287,13 @@ using (var serviceScope = app.Services.CreateScope())
         -- Distribute flags across the seeded assets (odd = sale, even = rent, every 5th = both)
         UPDATE [PropertyAssets] SET
             IsForSale = CASE WHEN ([PropertyId] % 2 = 1 OR [PropertyId] % 5 = 0) THEN 1 ELSE 0 END,
-            IsForRent = CASE WHEN ([PropertyId] % 2 = 0 OR [PropertyId] % 5 = 0) THEN 1 ELSE 0 END;
+            IsForRent = CASE WHEN ([PropertyId] % 2 = 0 OR [PropertyId] % 5 = 0) THEN 1 ELSE 0 END
+        WHERE [PropertyId] BETWEEN 1 AND 1000 AND [PublicOwnerAccountId] IS NULL AND [PropertyDescription] = N'';
     ");
 
+
     // 📍 Ring-fence & spread geocoordinates across real South-African city centres (synced
-    // to the address city via PropertyId % 8) with a small jitter. Runs every startup;
+    // to the address city via PropertyId % 8) with a small jitter. Legacy demo rows only;
     // idempotent (recomputes the same value). Existing clustered coords are corrected here.
     databaseContext.Database.ExecuteSqlRaw(@"
         UPDATE [pa] SET
@@ -300,7 +304,8 @@ using (var serviceScope = app.Services.CreateScope())
             (0, -33.9249, 18.4207), (1, -26.2041, 28.0479), (2, -29.8599, 31.0579),
             (3, -25.7617, 28.1881), (4, -26.1081, 28.0567), (5, -32.5833, 22.2833),
             (6, -33.9625, 25.6250), (7, -28.7465, 26.1316)
-        ) AS c(n, La, Lo) ON c.n = [pa].[PropertyId] % 8;
+        ) AS c(n, La, Lo) ON c.n = [pa].[PropertyId] % 8
+        WHERE [pa].[PropertyId] BETWEEN 1 AND 1000 AND [pa].[PublicOwnerAccountId] IS NULL AND [pa].[PropertyDescription] = N'';
     ");
 
     var propertyTypeRepository = serviceScope.ServiceProvider.GetRequiredService<IRepository<PropertyType>>();
@@ -329,6 +334,7 @@ using (var serviceScope = app.Services.CreateScope())
     ");
 
     PropertySeedData.EnsureSeeded(databaseContext, propertyTypeRepository, amenityTypeRepository, externalPlatformRepository, propertyRepository, propertyUnitRepository, propertyPlatformSyndicationRepository, unitLeaseRepository, maintenanceCallRepository);
+    Property.Microservice.Services.PublicListings.PublicListingSchema.EnsurePropertyTypes(databaseContext);
 
     // 🚫 Remove duplicate ExternalPlatform entries (seed data without guard
     // could accumulate on repeated restarts — keep lowest PlatformId per name).

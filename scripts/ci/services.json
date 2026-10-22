@@ -120,6 +120,49 @@
         "NEXT_PUBLIC_SITE_URL": "https://www.biscovetech.com",
         "NEXT_PUBLIC_LAND_APP_URL": "https://landadmin.biscovetech.com"
       }
+    },
+    "developer-api": {
+      "project": "Developer.API/Developer.API.csproj",
+      "dockerfile": "Developer.API/Dockerfile",
+      "files": [
+        "backend-services/Directory.*",
+        "global.json",
+        ".dockerignore",
+        "frontend-client/public/logo.jpg"
+      ],
+      "folders": [
+        "tests/Developer.PublicListings.Tests/",
+        "tools/PublicSite.ProductionSetup/"
+      ],
+      "tests": [
+        [
+          "dotnet",
+          "test",
+          "tests/Developer.PublicListings.Tests",
+          "-c",
+          "Release",
+          "-m:1"
+        ]
+      ]
+    },
+    "property-public-site": {
+      "frontend": "property-public-site",
+      "folders": [
+        "property-public-site/"
+      ],
+      "dockerfile": "property-public-site/Dockerfile",
+      "files": [
+        ".dockerignore"
+      ],
+      "health_path": "/health",
+      "tests": [
+        [
+          "npm",
+          "test",
+          "--prefix",
+          "property-public-site"
+        ]
+      ]
     }
   }
 }

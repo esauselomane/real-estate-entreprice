@@ -80,10 +80,15 @@ export const propertyService = {
   },
 
   // --- 🔍 MULTI-CRITERIA REAL ESTATE SEARCH PIPELINE ---
+  getLocations: async (query) => {
+    const response = await apiClient.get('/properties/locations', { params: { q: query, ...propertyService._tenantQueryParams() } });
+    return response.data;
+  },
   searchProperties: async (locationsArray, propertyType, minSize, maxSize, listingType = 'All', page = 1, pageSize = null) => {
     try {
       const criteriaPayload = {
-        locations: locationsArray,
+        locations: locationsArray.filter(item => typeof item === 'string'),
+        locationIds: locationsArray.filter(item => typeof item === 'object').map(item => item.locationId),
         propertyType: propertyType,
         minSize: minSize ? parseInt(minSize, 10) : null,
         maxSize: maxSize ? parseInt(maxSize, 10) : null,
