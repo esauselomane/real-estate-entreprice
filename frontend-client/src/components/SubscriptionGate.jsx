@@ -1,30 +1,38 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useAuth } from '../contexts/AuthContext.jsx';
+import { normalizeRole, useAuth } from '../contexts/AuthContext.jsx';
 import { paymentService } from '../services/paymentService.js';
 import BillingPage from './BillingPage.jsx';
 import { SubscriptionContext } from '../contexts/SubscriptionContext.jsx';
 
+const unrestrictedSubscription = Object.freeze({ status: 'exempt', requiresUpgrade: false, isTrial: false });
+
 export default function SubscriptionGate({ children }) {
-  const { activeProfile, logout } = useAuth();
+  const { activeProfile, userRole, logout } = useAuth();
+  const isSuperAdmin = normalizeRole(userRole || activeProfile?.role) === 'PlatformAdmin';
   const tenantId = activeProfile?.tenantId;
   const [billingTenantId, setBillingTenantId] = useState(null);
   const [billingSnapshot, setBillingSnapshot] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
   const [error, setError] = useState('');
   const [showBilling, setShowBilling] = useState(() => new URLSearchParams(window.location.search).has('billing'));
-  const status = snapshot?.tenantId === tenantId ? snapshot.status : null;
+  const status = isSuperAdmin ? unrestrictedSubscription : snapshot?.tenantId === tenantId ? snapshot.status : null;
   const refresh = useCallback(async () => {
-    if (!tenantId) return;
+    if (isSuperAdmin || !tenantId) return;
     try {
       const status = await paymentService.getSubscriptionStatus(tenantId);
       setSnapshot({ tenantId, status }); setError('');
     } catch (error) { setError(error.message); setSnapshot(null); }
-  }, [tenantId]);
+  }, [tenantId, isSuperAdmin]);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- State changes occur after the API request settles.
     refresh();
-    const timer = setInterval(refresh, 30000);
-    const openBilling = event => { setBillingTenantId(event.detail?.tenantId || tenantId); setShowBilling(true); };
+    const timer = isSuperAdmin ? null : setInterval(refresh, 30000);
+    function openBilling(event) {
+      // Administrators may open an agency’s billing explicitly, but are never redirected by subscription errors.
+      if (isSuperAdmin && !event.detail?.tenantId) return;
+      setBillingTenantId(event.detail?.tenantId || tenantId);
+      setShowBilling(true);
+    }
     window.addEventListener('open-billing', openBilling);
     window.addEventListener('focus', refresh);
     return () => {
@@ -32,7 +40,7 @@ export default function SubscriptionGate({ children }) {
       window.removeEventListener('open-billing', openBilling);
       window.removeEventListener('focus', refresh);
     };
-  }, [refresh, tenantId]);
+  }, [refresh, tenantId, isSuperAdmin]);
   const refreshBilling = useCallback(async () => {
     if (!billingTenantId || billingTenantId === tenantId) return refresh();
     try {
