@@ -145,6 +145,7 @@ export function createServer(options = {}) {
       const content = await readFile(path.join(publicDirectory, file));
       if (isPage) {
         const brandedTemplate = content.toString()
+          .replaceAll('{{AGENCY_NAME}}', escapeMarkup(configuration.agencyName))
           .replace('src="/logo.jpg" alt="Biscove"', `src="${escapeMarkup(configuration.logoUrl)}" alt="${escapeMarkup(configuration.agencyName)}"`)
           .replace('href="/favicon.svg" type="image/svg+xml"', `href="${escapeMarkup(configuration.faviconUrl)}"`);
         const page = await renderSeo(brandedTemplate, url, configuration);
