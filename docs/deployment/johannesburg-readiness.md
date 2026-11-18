@@ -8,7 +8,7 @@ Replace the existing cloud application databases with fresh databases in africa-
 
 ## Read-only inventory
 
-Project: project-ff46407b-1a09-4376-95a.
+Project: project-#######################.
 
 Existing SQL instance: realestate-sql, us-central1, SQLSERVER_2022_EXPRESS, db-custom-1-3840, ZONAL.
 Application databases: IdentityDB, PropertyDB, CRMDB, DeveloperDB. Do not treat master, tempdb, model or msdb as application reset targets.
